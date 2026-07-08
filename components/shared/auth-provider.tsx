@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       session,
       user: session?.user ?? null,
-      isLocalMode: !configured
+      isLocalMode: !configured || !session
     }),
     [configured, loading, session]
   );

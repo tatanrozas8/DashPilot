@@ -129,7 +129,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       </header>
 
       <main className={cn("lg:ml-[268px]", right && "xl:mr-[360px]")}>
-        {isLocalMode && (
+        {!configured && (
           <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-sm font-semibold text-amber-800 lg:px-8">
             Supabase no esta configurado. DashPilot esta funcionando en modo local.
           </div>

@@ -44,6 +44,16 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
 
+  const isLocalModeCookie = request.cookies.get("dashpilot_local_mode")?.value === "true";
+
+  if (user && isLocalModeCookie) {
+    response.cookies.delete("dashpilot_local_mode");
+  }
+
+  if (!user && isLocalModeCookie) {
+    return response;
+  }
+
   if (!user && isProtectedPath(pathname) && !isPublicPath(pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";

@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Logo } from "@/components/shared/logo";
 import { Button } from "@/components/shared/button";
@@ -11,25 +10,57 @@ import { signInWithPassword, signUpWithPassword } from "@/lib/supabase/auth";
 export function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/app";
-  const { configured } = useAuth();
+  
+  // Safe next path extraction preventing redirect loops back to login/logout
+  const rawNext = searchParams.get("next") || "/app";
+  const nextPath = rawNext === "/login" || rawNext === "/logout" ? "/app" : rawNext;
+
+  const { configured, session } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
 
+  useEffect(() => {
+    if (configured && session) {
+      // Clear local mode bypass cookie since we now have an active session
+      document.cookie = "dashpilot_local_mode=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
+      router.replace(nextPath);
+      router.refresh();
+    }
+  }, [configured, session, nextPath, router]);
+
   async function submit(mode: "login" | "signup") {
     try {
       setError("");
       setStatus(mode === "login" ? "Iniciando sesion..." : "Creando cuenta...");
-      if (mode === "login") await signInWithPassword(email, password);
-      else await signUpWithPassword(email, password);
-      setStatus("Sesion lista. Redirigiendo...");
-      router.push(nextPath);
+      if (mode === "login") {
+        await signInWithPassword(email, password);
+        document.cookie = "dashpilot_local_mode=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
+        setStatus("Sesion lista. Redirigiendo...");
+        router.replace(nextPath);
+        router.refresh();
+      } else {
+        const data = await signUpWithPassword(email, password);
+        document.cookie = "dashpilot_local_mode=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
+        if (data?.session) {
+          setStatus("Cuenta creada e inicio de sesion exitoso. Redirigiendo...");
+          router.replace(nextPath);
+          router.refresh();
+        } else {
+          setStatus("Registro exitoso. Por favor revisa tu correo electronico para confirmar tu cuenta.");
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo completar el acceso.");
       setStatus("");
     }
+  }
+
+  function handleLocalMode() {
+    // Set cookie to bypass middleware redirect
+    document.cookie = "dashpilot_local_mode=true; path=/; max-age=31536000";
+    router.push("/app");
   }
 
   return (
@@ -64,7 +95,7 @@ export function LoginPage() {
         <div className="mt-6 flex flex-wrap gap-3">
           <Button disabled={!configured} onClick={() => void submit("login")}>Iniciar sesion</Button>
           <Button disabled={!configured} variant="secondary" onClick={() => void submit("signup")}>Crear cuenta</Button>
-          <Link href="/app" className="inline-flex h-11 items-center rounded-lg border border-[#dce3f4] px-5 text-sm font-semibold">Usar modo local</Link>
+          <button onClick={handleLocalMode} className="inline-flex h-11 items-center rounded-lg border border-[#dce3f4] px-5 text-sm font-semibold">Usar modo local</button>
         </div>
       </section>
     </main>

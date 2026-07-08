@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8faff;
+  --foreground: #071334;
+  --muted: #64709a;
+  --line: #e4e9f7;
+  --primary: #3d35ff;
+  --primary-2: #645bff;
+  --positive: #16a34a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.shell-shadow {
+  box-shadow: 0 20px 70px rgb(36 46 107 / 0.12);
+}
+
+.soft-card {
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 14px 40px rgb(28 42 95 / 0.06);
+}
+
+.focus-ring:focus-visible {
+  outline: 3px solid rgb(61 53 255 / 0.28);
+  outline-offset: 2px;
+}
+
+.scrollbar-soft {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd4ef transparent;
+}

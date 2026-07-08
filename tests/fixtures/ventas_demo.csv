@@ -1,0 +1,5 @@
+Fecha Venta,Cliente,Region Cliente,Ventas $,Cantidad,Margen Bruto (%),Vendedor
+2024-04-01,Acme,Centro,1200,2,0.35,Maria
+2024-04-02,Delta,Norte,800,1,0.28,Juan
+2024-05-03,Acme,Centro,1500,3,0.41,Maria
+2024-06-04,Surco,Sur,950,1,0.31,Ana

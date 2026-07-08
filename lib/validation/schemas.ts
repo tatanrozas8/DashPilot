@@ -1,0 +1,127 @@
+import { z } from "zod";
+
+const dataValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+export const datasetColumnProfileSchema = z.object({
+  originalName: z.string(),
+  normalizedName: z.string(),
+  displayName: z.string(),
+  inferredType: z.enum(["string", "number", "date", "boolean", "currency", "percentage", "geography", "unknown"]),
+  semanticType: z.enum(["metric", "dimension", "time", "geo", "identifier", "category", "measure", "unknown"]),
+  nullCount: z.number(),
+  nullPercentage: z.number(),
+  uniqueCount: z.number(),
+  sampleValues: z.array(z.unknown()),
+  min: z.union([z.string(), z.number()]).optional(),
+  max: z.union([z.string(), z.number()]).optional(),
+  statistics: z.record(z.string(), z.unknown()).optional()
+});
+
+export const datasetProfileSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  rowCount: z.number(),
+  columnCount: z.number(),
+  columns: z.array(datasetColumnProfileSchema),
+  detectedDateColumns: z.array(z.string()),
+  detectedMetricColumns: z.array(z.string()),
+  detectedDimensionColumns: z.array(z.string()),
+  detectedGeoColumns: z.array(z.string()),
+  qualityWarnings: z.array(z.string()),
+  qualityScore: z.number().min(0).max(100),
+  createdAt: z.string()
+});
+
+export const dashboardFilterSchema = z.object({
+  field: z.string(),
+  operator: z.enum(["eq", "neq", "gt", "lt", "gte", "lte", "in", "between"]),
+  value: z.unknown()
+});
+
+export const dashboardQuerySchema = z.object({
+  metric: z.object({
+    field: z.string(),
+    aggregation: z.enum(["sum", "avg", "count", "min", "max"])
+  }).optional(),
+  x: z.object({
+    field: z.string(),
+    granularity: z.enum(["day", "week", "month", "quarter", "year"]).optional()
+  }).optional(),
+  groupBy: z.array(z.string()).optional(),
+  filters: z.array(dashboardFilterSchema).optional(),
+  orderBy: z.object({
+    field: z.string(),
+    direction: z.enum(["asc", "desc"])
+  }).optional(),
+  limit: z.number().optional()
+});
+
+export const dashboardSpecSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  subtitle: z.string().optional(),
+  businessDomain: z.string().optional(),
+  datasetId: z.string(),
+  globalFilters: z.array(z.object({
+    id: z.string(),
+    field: z.string(),
+    label: z.string(),
+    type: z.enum(["date_range", "multi_select", "single_select", "number_range"])
+  })),
+  widgets: z.array(z.object({
+    id: z.string(),
+    type: z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]),
+    title: z.string(),
+    description: z.string().optional(),
+    query: dashboardQuerySchema.optional(),
+    config: z.record(z.string(), z.unknown()),
+    position: z.object({
+      x: z.number(),
+      y: z.number(),
+      w: z.number(),
+      h: z.number()
+    })
+  })),
+  executiveSummary: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const presentationSpecSchema = z.object({
+  id: z.string(),
+  dashboardId: z.string(),
+  title: z.string(),
+  subtitle: z.string().optional(),
+  theme: z.enum(["executive", "commercial", "financial", "operations"]),
+  slides: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    subtitle: z.string().optional(),
+    narrative: z.string().optional(),
+    speakerNotes: z.string().optional(),
+    layout: z.enum(["cover", "executive_summary", "kpi_grid", "chart_focus", "comparison", "ranking", "table_detail", "insights"]),
+    widgetIds: z.array(z.string()),
+    viewState: z.object({
+      filters: z.array(dashboardFilterSchema),
+      selectedDateRange: z.object({ from: z.string(), to: z.string() }).optional(),
+      highlightedWidgetId: z.string().optional(),
+      hiddenWidgetIds: z.array(z.string()).optional(),
+      sortState: z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }).optional()
+    }).optional()
+  })),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const shareLinkSchema = z.object({
+  id: z.string(),
+  dashboardId: z.string(),
+  token: z.string(),
+  access: z.enum(["public", "private", "password"]),
+  expiresAt: z.string().optional(),
+  allowFilters: z.boolean(),
+  allowDownload: z.boolean(),
+  createdAt: z.string()
+});
+
+export const parsedDatasetRowsSchema = z.array(z.record(z.string(), dataValueSchema));

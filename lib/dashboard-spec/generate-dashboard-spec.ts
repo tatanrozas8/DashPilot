@@ -1,107 +1,154 @@
 import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardFilterConfig, DashboardSpec, DashboardWidget } from "@/types/dashboard";
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
-import { formatCurrency, slugify } from "@/lib/utils";
-
-function firstMatching(columns: string[], hints: string[]) {
-  return columns.find((column) => hints.some((hint) => slugify(column).includes(hint)));
-}
-
-function fieldMatching(profile: DatasetProfile, candidates: string[], hints: string[]) {
-  const column = profile.columns.find(
-    (item) =>
-      candidates.includes(item.normalizedName) &&
-      hints.some((hint) => slugify(`${item.normalizedName} ${item.originalName}`).includes(hint))
-  );
-  return column?.normalizedName;
-}
+import { inferSemanticLayer, type SemanticField } from "@/lib/semantic-layer";
+import { formatCurrency, formatNumber } from "@/lib/utils";
 
 function widget(id: string, input: Omit<DashboardWidget, "id">): DashboardWidget {
   return { id, ...input };
 }
 
-export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]): DashboardSpec {
-  const dateField = profile.detectedDateColumns[0] ?? fieldMatching(profile, profile.columns.map((column) => column.normalizedName), ["fecha", "date"]);
-  const metricFields = profile.detectedMetricColumns;
-  const salesField = fieldMatching(profile, metricFields, ["venta", "sales", "revenue", "ingreso", "monto", "total"]) ?? metricFields[0];
-  const marginField = fieldMatching(profile, metricFields, ["margen", "margin"]);
-  const regionField = profile.detectedGeoColumns[0] ?? firstMatching(profile.detectedDimensionColumns, ["region", "zona"]);
-  const sellerField = firstMatching(profile.detectedDimensionColumns, ["vendedor", "seller", "asesor"]);
-  const categoryField = firstMatching(profile.detectedDimensionColumns, ["categoria", "category"]);
-  const clientField = firstMatching(profile.detectedDimensionColumns, ["cliente", "client", "customer"]);
-  const orderField = firstMatching(profile.detectedDimensionColumns, ["pedido", "order", "id"]);
-  const secondaryDimension = regionField ?? sellerField ?? categoryField ?? clientField ?? profile.detectedDimensionColumns[0];
+function fieldName(field?: SemanticField) {
+  return field?.field;
+}
 
-  const salesTotal = salesField ? executeDashboardQuery(rows, { metric: { field: salesField, aggregation: "sum" } })[0]?.value ?? 0 : 0;
-  const avgMargin = marginField ? executeDashboardQuery(rows, { metric: { field: marginField, aggregation: "avg" } })[0]?.value ?? 0 : 0;
+function fieldLabel(field?: SemanticField, fallback = "Datos") {
+  return field?.displayName ?? fallback;
+}
+
+function fieldFormat(field?: SemanticField) {
+  if (!field) return "number";
+  if (field.role === "margin" || field.inferredType === "percentage") return "percentage";
+  if (["revenue", "cost"].includes(field.role) || field.inferredType === "currency") return "currency";
+  return "number";
+}
+
+function toNumber(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value !== "string") return 0;
+  return Number(value.replace(/[$,%\s]/g, "").replace(/\./g, "").replace(",", ".")) || 0;
+}
+
+function unique<T>(items: (T | undefined)[]) {
+  return Array.from(new Set(items.filter(Boolean))) as T[];
+}
+
+function growthByTime(rows: DataRow[], dateField?: string, metricField?: string) {
+  if (!dateField || !metricField) return null;
+  const datedRows = rows
+    .map((row) => ({ row, time: new Date(String(row[dateField])).getTime() }))
+    .filter((item) => !Number.isNaN(item.time))
+    .sort((left, right) => left.time - right.time);
+  if (datedRows.length < 4) return null;
+  const midpoint = Math.floor(datedRows.length / 2);
+  const previous = datedRows.slice(0, midpoint).reduce((sum, item) => sum + toNumber(item.row[metricField]), 0);
+  const current = datedRows.slice(midpoint).reduce((sum, item) => sum + toNumber(item.row[metricField]), 0);
+  if (previous <= 0) return null;
+  return ((current - previous) / previous) * 100;
+}
+
+function metricSentence(label: string, value: number, format: string) {
+  if (format === "currency") return `${label} alcanza ${formatCurrency(value)}.`;
+  if (format === "percentage") return `${label} promedio se ubica en ${(value * 100).toFixed(1)}%.`;
+  return `${label} suma ${formatNumber(value)}.`;
+}
+
+export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]): DashboardSpec {
+  const semantic = inferSemanticLayer(profile, rows);
+  const dateField = fieldName(semantic.primaryDate);
+  const primaryMetric = semantic.primaryMetric;
+  const secondaryMetric = semantic.secondaryMetric;
+  const salesField = fieldName(primaryMetric);
+  const marginField = fieldName(semantic.marginMetrics[0]);
+  const regionField = fieldName(semantic.primaryGeography);
+  const sellerField = fieldName(semantic.primarySeller);
+  const categoryField = fieldName(semantic.primaryCategory);
+  const clientField = fieldName(semantic.primaryClient);
+  const productField = fieldName(semantic.primaryProduct);
+  const orderField = fieldName(semantic.primaryOrder);
+  const secondaryDimension = fieldName(semantic.primaryDimension);
+  const rankingDimension = sellerField ?? productField ?? categoryField ?? clientField ?? secondaryDimension;
+  const isSalesDomain = semantic.domain.name === "sales";
+  const metricLabel = isSalesDomain && primaryMetric?.role === "revenue" ? "Ventas" : fieldLabel(primaryMetric, "Registros");
+  const metricFormat = fieldFormat(primaryMetric);
+  const secondaryFormat = fieldFormat(semantic.marginMetrics[0] ?? secondaryMetric);
+
+  const salesTotal = salesField ? executeDashboardQuery(rows, { metric: { field: salesField, aggregation: "sum" } })[0]?.value ?? 0 : rows.length;
+  const avgSecondary = marginField
+    ? executeDashboardQuery(rows, { metric: { field: marginField, aggregation: "avg" } })[0]?.value ?? 0
+    : secondaryMetric
+      ? executeDashboardQuery(rows, { metric: { field: secondaryMetric.field, aggregation: "avg" } })[0]?.value ?? 0
+      : profile.columnCount;
   const tickets = orderField ? new Set(rows.map((row) => row[orderField])).size : rows.length;
-  const growth = salesTotal > 0 ? 18.6 : 0;
+  const growth = growthByTime(rows, dateField, salesField);
+  const growthFallback = growth ?? profile.qualityScore;
 
   const filters: DashboardFilterConfig[] = [
-    dateField && { id: "date", field: dateField, label: "Fecha", type: "date_range" },
-    regionField && { id: "region", field: regionField, label: "Region", type: "multi_select" },
-    sellerField && { id: "seller", field: sellerField, label: "Vendedor", type: "multi_select" },
-    categoryField && { id: "category", field: categoryField, label: "Categoria", type: "multi_select" },
-    clientField && { id: "client", field: clientField, label: "Cliente", type: "multi_select" }
+    dateField && { id: "date", field: dateField, label: fieldLabel(semantic.primaryDate, "Fecha"), type: "date_range" },
+    regionField && { id: "region", field: regionField, label: fieldLabel(semantic.primaryGeography, "Region"), type: "multi_select" },
+    sellerField && { id: "seller", field: sellerField, label: fieldLabel(semantic.primarySeller, "Vendedor"), type: "multi_select" },
+    categoryField && { id: "category", field: categoryField, label: fieldLabel(semantic.primaryCategory, "Categoria"), type: "multi_select" },
+    clientField && { id: "client", field: clientField, label: fieldLabel(semantic.primaryClient, "Cliente"), type: "multi_select" },
+    !regionField && !sellerField && !categoryField && secondaryDimension && { id: "dimension", field: secondaryDimension, label: fieldLabel(semantic.primaryDimension, "Dimension"), type: "multi_select" }
   ].filter(Boolean) as DashboardFilterConfig[];
 
   const widgets: DashboardWidget[] = [
     widget("kpi_sales", {
       type: "kpi_card",
-      title: "Ventas Totales",
-      description: "+18.6% vs Q1 2024",
-      query: salesField ? { metric: { field: salesField, aggregation: "sum" } } : undefined,
-      config: { icon: "trend", format: "currency", tone: "blue", comparison: "+18.6% vs Q1 2024", fallbackValue: salesTotal },
+      title: isSalesDomain ? "Ventas Totales" : salesField ? `${metricLabel} Total` : "Registros",
+      description: salesField ? `${Math.round((primaryMetric?.confidence ?? 0) * 100)}% confianza semantica` : "Conteo de filas",
+      query: salesField ? { metric: { field: salesField, aggregation: "sum" } } : {},
+      config: { icon: "trend", format: metricFormat, tone: "blue", comparison: salesField ? `${Math.round((primaryMetric?.confidence ?? 0) * 100)}% confianza` : "", fallbackValue: salesTotal },
       position: { x: 0, y: 0, w: 3, h: 1 }
     }),
     widget("kpi_margin", {
       type: "kpi_card",
-      title: "Margen Bruto",
-      description: "+2.4 pp vs Q1 2024",
-      query: marginField ? { metric: { field: marginField, aggregation: "avg" } } : undefined,
-      config: { icon: "percent", format: "percentage", tone: "violet", comparison: "+2.4 pp vs Q1 2024", fallbackValue: avgMargin },
+      title: marginField ? "Margen Bruto" : secondaryMetric ? `Promedio ${fieldLabel(secondaryMetric)}` : "Columnas",
+      description: marginField ? `${Math.round((semantic.marginMetrics[0]?.confidence ?? 0) * 100)}% confianza semantica` : "Vista exploratoria",
+      query: marginField ? { metric: { field: marginField, aggregation: "avg" } } : secondaryMetric ? { metric: { field: secondaryMetric.field, aggregation: "avg" } } : undefined,
+      config: { icon: marginField ? "percent" : "chart", format: secondaryFormat, tone: "violet", comparison: marginField ? `${Math.round((semantic.marginMetrics[0]?.confidence ?? 0) * 100)}% confianza` : "", fallbackValue: avgSecondary },
       position: { x: 3, y: 0, w: 3, h: 1 }
     }),
     widget("kpi_tickets", {
       type: "kpi_card",
-      title: "Tickets",
-      description: "+12.1% vs Q1 2024",
-      query: orderField ? { metric: { field: orderField, aggregation: "count" } } : undefined,
-      config: { icon: "cart", format: "number", tone: "green", comparison: "+12.1% vs Q1 2024", fallbackValue: tickets },
+      title: orderField ? "Tickets" : "Registros",
+      description: orderField ? `${Math.round((semantic.primaryOrder?.confidence ?? 0) * 100)}% confianza semantica` : "Filas analizadas",
+      query: orderField ? undefined : {},
+      config: { icon: "cart", format: "number", tone: "green", comparison: orderField ? `${Math.round((semantic.primaryOrder?.confidence ?? 0) * 100)}% confianza` : "", fallbackValue: tickets },
       position: { x: 6, y: 0, w: 3, h: 1 }
     }),
     widget("kpi_growth", {
       type: "kpi_card",
-      title: "Crecimiento",
-      description: "+5.7 pp vs Q1 2024",
-      config: { icon: "growth", format: "percentageWhole", tone: "sky", comparison: "+5.7 pp vs Q1 2024", fallbackValue: growth },
+      title: growth === null ? "Calidad Datos" : "Crecimiento",
+      description: growth === null ? "Score del perfil de datos" : "Periodo reciente vs anterior",
+      config: { icon: "growth", format: "percentageWhole", tone: "sky", comparison: growth === null ? `${semantic.domain.name} ${Math.round(semantic.domain.confidence * 100)}%` : "vs periodo anterior", fallbackValue: growthFallback },
       position: { x: 9, y: 0, w: 3, h: 1 }
     }),
     widget("sales_by_month", {
       type: "line_chart",
-      title: dateField ? "Ventas Totales por Mes" : "Evolucion no disponible",
+      title: dateField ? `${isSalesDomain ? "Ventas Totales" : metricLabel} por Mes` : "Evolucion no disponible",
       query: salesField && dateField ? { metric: { field: salesField, aggregation: "sum" }, x: { field: dateField, granularity: "month" } } : undefined,
-      config: { format: "currency", comparison: true, emptyMessage: "No se detecto una columna temporal confiable." },
+      config: { format: metricFormat, comparison: true, emptyMessage: "No se detecto una columna temporal confiable." },
       position: { x: 0, y: 1, w: 6, h: 3 }
     }),
     widget("sales_by_region", {
       type: "bar_chart",
-      title: regionField ? "Ventas por Region" : "Distribucion principal",
+      title: regionField && isSalesDomain ? "Ventas por Region" : secondaryDimension ? `${salesField ? metricLabel : "Registros"} por ${fieldLabel(semantic.primaryDimension)}` : "Distribucion principal",
       query: salesField && secondaryDimension ? { metric: { field: salesField, aggregation: "sum" }, groupBy: [secondaryDimension], orderBy: { field: "value", direction: "desc" }, limit: 5 } : secondaryDimension ? { groupBy: [secondaryDimension], orderBy: { field: "value", direction: "desc" }, limit: 5 } : undefined,
-      config: { format: "currency", horizontal: true },
+      config: { format: metricFormat, horizontal: true, semanticConfidence: semantic.primaryDimension?.confidence },
       position: { x: 6, y: 1, w: 6, h: 3 }
     }),
     widget("top_sellers", {
       type: "bar_chart",
-      title: "Top Vendedores",
-      query: salesField && sellerField ? { metric: { field: salesField, aggregation: "sum" }, groupBy: [sellerField], orderBy: { field: "value", direction: "desc" }, limit: 5 } : undefined,
-      config: { format: "currency", compact: true },
+      title: sellerField ? "Top Vendedores" : productField ? "Top Productos" : rankingDimension ? `Top ${fieldLabel(semantic.primaryDimension)}` : "Ranking Principal",
+      query: rankingDimension ? { ...(salesField ? { metric: { field: salesField, aggregation: "sum" as const } } : {}), groupBy: [rankingDimension], orderBy: { field: "value", direction: "desc" }, limit: 5 } : undefined,
+      config: { format: metricFormat, compact: true },
       position: { x: 0, y: 4, w: 4, h: 3 }
     }),
     widget("sales_detail", {
       type: "table",
-      title: "Detalle de Ventas",
-      config: { columns: [regionField, categoryField, salesField, marginField, orderField].filter(Boolean), limit: 5 },
+      title: isSalesDomain ? "Detalle de Ventas" : "Detalle de Datos",
+      config: { columns: unique<string>([dateField, regionField, sellerField, clientField, productField, categoryField, salesField, marginField, orderField]).slice(0, 7), limit: 5 },
       position: { x: 4, y: 4, w: 8, h: 3 }
     }),
     widget("executive_summary", {
@@ -109,11 +156,11 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
       title: "Resumen Ejecutivo",
       config: {
         bullets: [
-          salesField ? `Las ventas totales alcanzaron ${formatCurrency(salesTotal)}, con crecimiento del ${growth.toFixed(1)}% vs Q1 2024.` : `Se analizaron ${rows.length} registros y ${profile.columnCount} columnas para construir una vista exploratoria.`,
-          avgMargin ? `El margen bruto promedio se ubica en ${(avgMargin * 100).toFixed(1)}%, impulsado por mix de productos y eficiencia comercial.` : "Se detectaron metricas comerciales suficientes para construir KPIs ejecutivos.",
-          dateField ? "La serie temporal permite revisar evolucion y estacionalidad del periodo analizado." : "No se detecto una columna temporal confiable.",
-          regionField ? "Las regiones permiten comparar desempeno territorial y priorizar oportunidades." : "Las dimensiones principales permiten segmentar el desempeno comercial.",
-          sellerField ? "Los principales vendedores superaron sus metas y explican una parte relevante del crecimiento." : "El dashboard permite explorar los drivers principales por categoria."
+          salesField ? metricSentence(isSalesDomain ? "Ventas totales" : metricLabel, salesTotal, metricFormat) : `Se analizaron ${rows.length} registros y ${profile.columnCount} columnas para construir una vista exploratoria.`,
+          marginField ? `El margen bruto promedio se ubica en ${(avgSecondary * 100).toFixed(1)}%.` : secondaryMetric ? metricSentence(`Promedio de ${fieldLabel(secondaryMetric)}`, avgSecondary, secondaryFormat) : `El dominio detectado es ${semantic.domain.name} con ${Math.round(semantic.domain.confidence * 100)}% de confianza.`,
+          dateField ? `La columna ${fieldLabel(semantic.primaryDate)} permite revisar evolucion temporal.` : "No se detecto una columna temporal confiable.",
+          secondaryDimension ? `${fieldLabel(semantic.primaryDimension)} permite segmentar el desempeno sin inventar campos externos.` : "No se detectaron dimensiones confiables para segmentacion.",
+          sellerField ? "El ranking por vendedor permite identificar concentracion del resultado comercial." : productField ? "El ranking por producto muestra concentracion y mix del resultado." : "El dashboard prioriza las columnas con mayor confianza semantica."
         ]
       },
       position: { x: 0, y: 7, w: 12, h: 2 }
@@ -123,12 +170,14 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
   return {
     id: `dashboard_${profile.id}`,
     title: profile.fileName.includes("Ventas_Q2_2024") ? "Analisis Comercial Q2 2024" : `Analisis de ${profile.fileName}`,
-    subtitle: "Desempeno comercial consolidado con KPIs, filtros e insights accionables.",
-    businessDomain: "commercial",
+    subtitle: isSalesDomain ? "Desempeno comercial consolidado con KPIs, filtros e insights accionables." : `Dashboard ${semantic.domain.name} generado desde roles semanticos del dataset.`,
+    businessDomain: semantic.domain.name,
     datasetId: profile.id,
     globalFilters: filters,
     widgets,
-    executiveSummary: "Ventas, margen y crecimiento muestran un trimestre saludable con oportunidades claras por region y vendedor.",
+    executiveSummary: isSalesDomain
+      ? "Ventas, margen y segmentacion muestran oportunidades claras por las dimensiones detectadas."
+      : `Se detecto un dataset ${semantic.domain.name} y se construyo el dashboard con columnas existentes y confidence scores.`,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

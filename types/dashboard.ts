@@ -93,7 +93,10 @@ export type DashboardAction =
   | { type: "add_widget"; widget: DashboardWidget }
   | { type: "update_widget"; widgetId: string; changes: Partial<DashboardWidget> }
   | { type: "remove_widget"; widgetId: string }
-  | { type: "add_filter"; filter: DashboardFilterConfig }
+  | { type: "change_chart_type"; widgetId: string; chartType: WidgetType }
+  | { type: "add_filter"; filter: DashboardFilter }
+  | { type: "clear_filters" }
+  | { type: "explain_widget"; widgetId: string }
   | { type: "update_view_state"; viewState: Partial<DashboardViewState> }
   | { type: "generate_presentation"; options: PresentationGenerationOptions };
 

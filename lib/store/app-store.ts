@@ -4,15 +4,18 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMessage } from "@/types/ai";
 import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
-import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
+import type { DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
-import { createCopilotAction, assistantMessage } from "@/lib/ai/mock-copilot";
+import { requestCopilotResponse } from "@/lib/ai/copilot-client";
+import { assistantMessage } from "@/lib/ai/copilot-service";
 import { applyDashboardAction } from "@/lib/dashboard-spec/apply-dashboard-action";
+import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { createDemoDataset } from "@/lib/data/demo-dataset";
 import { demoDashboardSpec, demoDataset, demoDatasetProfile, demoPresentationSpec, demoProject } from "@/lib/demo/demo-data";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
+import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { createDashboardVersion } from "@/lib/supabase/dashboards";
 import { saveChatMessage } from "@/lib/supabase/chat";
 
@@ -40,6 +43,8 @@ interface DashPilotState {
   datasetProfile: DatasetProfile;
   dashboard: DashboardSpec;
   dashboardSpec: DashboardSpec;
+  isDashboardEditing: boolean;
+  dashboardEditDraft: DashboardSpec | null;
   viewState: DashboardViewState;
   presentation: PresentationSpec;
   presentationSpec: PresentationSpec;
@@ -67,9 +72,17 @@ interface DashPilotState {
   generateDashboard: () => DashboardSpec;
   hydrateDataset: (payload: { rows: DataRow[]; profile: DatasetProfile; datasetId: string }) => void;
   hydrateDashboard: (payload: { rows: DataRow[]; dashboard: DashboardSpec; viewState?: DashboardViewState; profile?: DatasetProfile }) => void;
+  startDashboardEditing: () => void;
+  cancelDashboardEditing: () => void;
+  updateDashboardDraftTitle: (title: string) => void;
+  updateDashboardDraftWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
+  duplicateDashboardDraftWidget: (widgetId: string) => void;
+  removeDashboardDraftWidget: (widgetId: string) => void;
+  setDashboardDraftWidgetHidden: (widgetId: string, hidden: boolean) => void;
+  commitDashboardEditing: () => DashboardSpec | null;
   setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus">>) => void;
   setViewState: (viewState: Partial<DashboardViewState>) => void;
-  sendPrompt: (prompt: string) => void;
+  sendPrompt: (prompt: string) => Promise<void>;
   resetFilters: () => void;
   generatePresentation: () => void;
   setPresentationOptions: (options: Partial<PresentationOptions>) => void;
@@ -94,6 +107,8 @@ function createInitialState() {
     datasetProfile: demoDatasetProfile,
     dashboard: demoDashboardSpec,
     dashboardSpec: demoDashboardSpec,
+    isDashboardEditing: false,
+    dashboardEditDraft: null,
     viewState,
     filters: viewState,
     presentation: demoPresentationSpec,
@@ -145,6 +160,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           datasetProfile: profile,
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           viewState: { filters: [], selectedDateRange: undefined },
           filters: { filters: [], selectedDateRange: undefined },
           presentation,
@@ -171,6 +188,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           datasetProfile: profile,
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           viewState,
           filters: viewState,
           presentation,
@@ -211,6 +230,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           datasetProfile: profile,
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           presentation,
           presentationSpec: presentation,
           viewState,
@@ -237,6 +258,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           datasetProfile: profile,
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           viewState,
           filters: viewState,
           presentation,
@@ -264,6 +287,8 @@ export const useDashPilotStore = create<DashPilotState>()(
         set({
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           presentation,
           presentationSpec: presentation,
           activeDashboardId: dashboard.id,
@@ -282,6 +307,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           datasetProfile: nextProfile,
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           viewState: viewState ?? { filters: [] },
           filters: viewState ?? { filters: [] },
           presentation,
@@ -304,6 +331,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           datasetProfile: profile,
           dashboard,
           dashboardSpec: dashboard,
+          isDashboardEditing: false,
+          dashboardEditDraft: null,
           presentation,
           presentationSpec: presentation,
           activeDatasetId: datasetId,
@@ -313,6 +342,45 @@ export const useDashPilotStore = create<DashPilotState>()(
           isDemoMode: false,
           versions: [dashboard]
         });
+      },
+      startDashboardEditing: () => set({ isDashboardEditing: true, dashboardEditDraft: structuredClone(get().dashboard) }),
+      cancelDashboardEditing: () => set({ isDashboardEditing: false, dashboardEditDraft: null }),
+      updateDashboardDraftTitle: (title) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardTitle(draft, title) });
+      },
+      updateDashboardDraftWidget: (widgetId, changes) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardWidget(draft, widgetId, changes) });
+      },
+      duplicateDashboardDraftWidget: (widgetId) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: duplicateDashboardWidget(draft, widgetId) });
+      },
+      removeDashboardDraftWidget: (widgetId) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: removeDashboardWidget(draft, widgetId) });
+      },
+      setDashboardDraftWidgetHidden: (widgetId, hidden) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: setDashboardWidgetHidden(draft, widgetId, hidden) });
+      },
+      commitDashboardEditing: () => {
+        const draft = get().dashboardEditDraft;
+        if (!draft) return null;
+        const presentation = generatePresentationSpec(draft, get().presentationOptions.theme);
+        set({
+          dashboard: draft,
+          dashboardSpec: draft,
+          presentation,
+          presentationSpec: presentation,
+          activeDashboardId: draft.id,
+          activePresentationId: presentation.id,
+          versions: [...get().versions, draft],
+          isDashboardEditing: false,
+          dashboardEditDraft: null
+        });
+        return draft;
       },
       setPersistenceState: (state) => set(state),
       setViewState: (viewState) =>
@@ -324,13 +392,23 @@ export const useDashPilotStore = create<DashPilotState>()(
         const viewState = { filters: [], selectedDateRange: { from: "2024-01-01", to: "2024-06-30" } };
         set({ viewState, filters: viewState });
       },
-      sendPrompt: (prompt) => {
+      sendPrompt: async (prompt) => {
         const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: prompt, createdAt: new Date().toISOString() };
         const before = get();
-        const { reply, action } = createCopilotAction(prompt, before.dashboard);
+        set({
+          messages: [...before.messages, userMessage],
+          chatMessages: [...before.messages, userMessage]
+        });
+        const { reply, action, rejectedActionReason } = await requestCopilotResponse({
+          prompt,
+          datasetProfile: before.profile,
+          semanticModel: inferSemanticLayer(before.profile, before.rows),
+          dashboardSpec: before.dashboard,
+          viewState: before.viewState
+        });
         let nextDashboard = get().dashboard;
         let nextViewState = get().viewState;
-        let finalReply = reply;
+        let finalReply = rejectedActionReason ? `${reply} No aplique cambios.` : reply;
         if (action && action.type !== "generate_presentation") {
           const applied = applyDashboardAction(nextDashboard, nextViewState, action);
           nextDashboard = applied.spec;
@@ -344,8 +422,8 @@ export const useDashPilotStore = create<DashPilotState>()(
           dashboardSpec: nextDashboard,
           viewState: nextViewState,
           filters: nextViewState,
-          messages: [...get().messages, userMessage, botMessage],
-          chatMessages: [...get().messages, userMessage, botMessage],
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage],
           versions: dashboardChanged ? [...get().versions, nextDashboard] : get().versions
         });
         void saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage);

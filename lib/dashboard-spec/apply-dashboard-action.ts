@@ -1,17 +1,8 @@
-import { z } from "zod";
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
-
-const actionSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("add_widget"), widget: z.any() }),
-  z.object({ type: z.literal("update_widget"), widgetId: z.string(), changes: z.record(z.string(), z.unknown()) }),
-  z.object({ type: z.literal("remove_widget"), widgetId: z.string() }),
-  z.object({ type: z.literal("add_filter"), filter: z.any() }),
-  z.object({ type: z.literal("update_view_state"), viewState: z.record(z.string(), z.unknown()) }),
-  z.object({ type: z.literal("generate_presentation"), options: z.record(z.string(), z.unknown()) })
-]);
+import { copilotActionSchema } from "@/lib/validation/copilot-actions";
 
 export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardViewState, action: DashboardAction) {
-  const parsed = actionSchema.safeParse(action);
+  const parsed = copilotActionSchema.safeParse(action);
   if (!parsed.success) {
     return { spec, viewState, message: "No pude aplicar la accion porque no paso la validacion estructurada." };
   }
@@ -28,11 +19,35 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
     };
   }
 
+  if (action.type === "change_chart_type") {
+    return {
+      viewState,
+      spec: {
+        ...spec,
+        widgets: spec.widgets.map((widget) => (widget.id === action.widgetId ? { ...widget, type: action.chartType } : widget)),
+        updatedAt: new Date().toISOString()
+      },
+      message: "Cambie el tipo de grafico usando una accion validada."
+    };
+  }
+
   if (action.type === "add_filter") {
-    if (spec.globalFilters.some((filter) => filter.id === action.filter.id)) {
-      return { spec, viewState, message: "Ese filtro ya existe en el dashboard." };
-    }
-    return { spec: { ...spec, globalFilters: [...spec.globalFilters, action.filter] }, viewState, message: "Agregue el filtro al dashboard." };
+    return {
+      spec,
+      viewState: {
+        ...viewState,
+        filters: [...(viewState.filters ?? []).filter((filter) => filter.field !== action.filter.field), action.filter]
+      },
+      message: "Aplique el filtro solicitado al estado de vista."
+    };
+  }
+
+  if (action.type === "clear_filters") {
+    return { spec, viewState: { ...viewState, filters: [], selectedDateRange: undefined }, message: "Limpie los filtros activos del dashboard." };
+  }
+
+  if (action.type === "explain_widget") {
+    return { spec, viewState: { ...viewState, highlightedWidgetId: action.widgetId }, message: "Resalte el widget para explicar su lectura." };
   }
 
   if (action.type === "update_view_state") {
@@ -40,11 +55,11 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
   }
 
   if (action.type === "remove_widget") {
-    return { spec: { ...spec, widgets: spec.widgets.filter((widget) => widget.id !== action.widgetId) }, viewState, message: "Quite el widget del dashboard." };
+    return { spec: { ...spec, widgets: spec.widgets.filter((widget) => widget.id !== action.widgetId), updatedAt: new Date().toISOString() }, viewState, message: "Quite el widget del dashboard." };
   }
 
   if (action.type === "add_widget") {
-    return { spec: { ...spec, widgets: [...spec.widgets, action.widget] }, viewState, message: "Agregue el widget al dashboard." };
+    return { spec: { ...spec, widgets: [...spec.widgets, action.widget], updatedAt: new Date().toISOString() }, viewState, message: "Agregue el widget al dashboard." };
   }
 
   return { spec, viewState, message: "Puedo crear la presentacion desde el constructor interactivo." };

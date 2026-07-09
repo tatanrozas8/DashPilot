@@ -95,6 +95,16 @@ export async function persistDashboard(payload: PersistedDashboardPayload, proje
 }
 
 export async function updatePersistedDashboard(dashboardId: string, spec: DashboardSpec, viewState: DashboardViewState, rows?: DataRow[], profile?: DatasetProfile) {
+  const auth = await getCurrentAuthState();
+  if (!isSupabaseConfigured() || !auth.user) {
+    saveLocalDashboard(spec, viewState, rows, profile);
+    return {
+      mode: "local" as const,
+      dashboardId: spec.id,
+      warning: !isSupabaseConfigured() ? localModeWarning() : "Inicia sesion para guardar el dashboard en Supabase."
+    };
+  }
+
   try {
     return await updateDashboardSpec(dashboardId, spec, viewState);
   } catch (error) {

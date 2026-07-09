@@ -193,8 +193,13 @@ function InsightWidget({ widget }: { widget: DashboardWidget }) {
 export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[] }) {
   const rows = useDashPilotStore((state) => state.rows);
   const dashboard = useDashPilotStore((state) => state.dashboard);
+  const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
+  const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
   const highlightedWidgetId = useDashPilotStore((state) => state.viewState.highlightedWidgetId);
-  const widgets = slideWidgetIds ? dashboard.widgets.filter((widget) => slideWidgetIds.includes(widget.id)) : dashboard.widgets;
+  const renderedDashboard = isDashboardEditing && dashboardEditDraft && !slideWidgetIds ? dashboardEditDraft : dashboard;
+  const widgets = slideWidgetIds
+    ? renderedDashboard.widgets.filter((widget) => slideWidgetIds.includes(widget.id))
+    : renderedDashboard.widgets.filter((widget) => widget.config.hidden !== true);
 
   return (
     <div className="grid grid-cols-12 gap-4">

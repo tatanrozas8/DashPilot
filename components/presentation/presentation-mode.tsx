@@ -9,6 +9,7 @@ import { useDashPilotStore } from "@/lib/store/app-store";
 
 export function PresentationMode() {
   const presentation = useDashPilotStore((state) => state.presentation);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const [index, setIndex] = useState(2);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const slide = presentation.slides[index] ?? presentation.slides[0];
@@ -31,6 +32,19 @@ export function PresentationMode() {
     }
   }
 
+  if (!slide) {
+    return (
+      <div className="grid min-h-[100dvh] place-items-center bg-white px-6 text-[#071334]">
+        <section className="max-w-md rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center shadow-xl shadow-slate-900/5">
+          <Logo className="justify-center" />
+          <h1 className="mt-6 text-2xl font-black tracking-[-0.04em]">Aún no hay presentaciones</h1>
+          <p className="mt-3 text-[#617094]">Sube un dataset para comenzar.</p>
+          <Link href="/app" className="mt-6 inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Subir dataset</Link>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[100dvh] bg-white text-[#071334]">
       <header className="flex h-[74px] items-center justify-between border-b border-[#e3e8f5] px-8">
@@ -42,7 +56,7 @@ export function PresentationMode() {
           <span className="flex items-center gap-2 rounded-full border border-[#e3e8f5] px-4 py-2"><Play className="size-4 text-[#3d35ff]" /> 00:05:24</span>
           <button onClick={() => setFiltersOpen((value) => !value)} className="hidden gap-2 lg:flex"><Filter className="size-5" /> Filtros</button>
           <button onClick={enterFullscreen} className="hidden gap-2 lg:flex"><Expand className="size-5" /> Pantalla completa</button>
-          <Link href="/app/dashboards/demo" className="flex items-center gap-2"><LogOut className="size-5" /> Salir</Link>
+          <Link href={activeDashboardId ? `/app/dashboards/${activeDashboardId}` : "/app/proyectos"} className="flex items-center gap-2"><LogOut className="size-5" /> Salir</Link>
         </div>
       </header>
 

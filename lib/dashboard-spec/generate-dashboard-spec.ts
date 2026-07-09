@@ -3,6 +3,7 @@ import type { DashboardFilterConfig, DashboardSpec, DashboardWidget } from "@/ty
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { inferSemanticLayer, type SemanticField } from "@/lib/semantic-layer";
 import { formatCurrency, formatNumber } from "@/lib/utils";
+import { nameFromFile } from "@/lib/utils/name-from-file";
 
 function widget(id: string, input: Omit<DashboardWidget, "id">): DashboardWidget {
   return { id, ...input };
@@ -169,7 +170,7 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
 
   return {
     id: `dashboard_${profile.id}`,
-    title: profile.fileName.includes("Ventas_Q2_2024") ? "Analisis Comercial Q2 2024" : `Analisis de ${profile.fileName}`,
+    title: `Dashboard de ${nameFromFile(profile.fileName, "dataset")}`,
     subtitle: isSalesDomain ? "Desempeno comercial consolidado con KPIs, filtros e insights accionables." : `Dashboard ${semantic.domain.name} generado desde roles semanticos del dataset.`,
     businessDomain: semantic.domain.name,
     datasetId: profile.id,

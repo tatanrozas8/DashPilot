@@ -15,6 +15,8 @@ import type { PresentationTheme } from "@/types/presentation";
 export function PresentationBuilder() {
   const router = useRouter();
   const presentation = useDashPilotStore((state) => state.presentation);
+  const dashboard = useDashPilotStore((state) => state.dashboard);
+  const rows = useDashPilotStore((state) => state.rows);
   const generatePresentation = useDashPilotStore((state) => state.generatePresentation);
   const options = useDashPilotStore((state) => state.presentationOptions);
   const setOptions = useDashPilotStore((state) => state.setPresentationOptions);
@@ -22,7 +24,8 @@ export function PresentationBuilder() {
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const toast = useToast();
   const [chat, setChat] = useState("");
-  const [responses, setResponses] = useState(["He analizado tu dashboard y te propongo esta narrativa para tu presentacion ejecutiva."]);
+  const [responses, setResponses] = useState(["Cuando tengas un dashboard, puedo ayudarte a convertirlo en una presentacion ejecutiva."]);
+  const hasDashboard = rows.length > 0 && dashboard.widgets.length > 0;
 
   const themes: Array<[PresentationTheme, string]> = [
     ["executive", "Ejecutiva"],
@@ -55,7 +58,7 @@ export function PresentationBuilder() {
           </div>
           <div className="flex gap-3">
             <Button onClick={() => toast("Borrador guardado.")} variant="secondary"><Save className="size-4" /> Guardar borrador</Button>
-            <Button onClick={() => void savePresentation()}><Sparkles className="size-4" /> Generar presentacion</Button>
+            <Button onClick={() => hasDashboard ? void savePresentation() : toast("Sube un dataset para comenzar.")}><Sparkles className="size-4" /> Generar presentacion</Button>
             <Link href={`/app/present/${activePresentationId}`} className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#bfc7ff] bg-white px-5 text-sm font-semibold text-[#3d35ff]"><Play className="size-4" /> Presentar ahora</Link>
           </div>
         </div>
@@ -86,7 +89,7 @@ export function PresentationBuilder() {
             </div>
             <div className="mt-6 rounded-lg border border-[#e3e8f5] p-4 text-sm">
               <p className="font-bold">Fuente de datos</p>
-              <p className="mt-2 text-[#617094]">Dashboard: Analisis Comercial Q2 2024</p>
+              <p className="mt-2 text-[#617094]">Dashboard: {hasDashboard ? dashboard.title : "Aún no hay dashboards"}</p>
             </div>
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-[#e3e8f5] p-3 text-sm">
               <Languages className="size-4 text-[#3d35ff]" /> Espanol (Latinoamerica)
@@ -101,7 +104,7 @@ export function PresentationBuilder() {
                 <Button onClick={() => toast("Esquema listo para editar en el siguiente paso.")} variant="secondary" className="h-9 px-3"><Edit3 className="size-4" /> Editar esquema</Button>
               </div>
               <div className="divide-y divide-[#edf1fa] rounded-xl border border-[#edf1fa]">
-                {presentation.slides.map((slide) => (
+                {(hasDashboard ? presentation.slides : []).map((slide) => (
                   <div key={slide.id} className="flex items-center gap-3 p-4">
                     <GripVertical className="size-4 text-[#9aa7c7]" />
                     <span className="grid size-8 place-items-center rounded-lg bg-[#f0f1ff] text-sm font-bold text-[#3d35ff]">{presentation.slides.indexOf(slide) + 1}</span>
@@ -112,11 +115,12 @@ export function PresentationBuilder() {
                   </div>
                 ))}
               </div>
+              {!hasDashboard && <p className="mt-4 rounded-lg border border-[#edf1fa] p-4 text-sm text-[#617094]">Aún no hay presentaciones. Sube un dataset para comenzar.</p>}
             </div>
             <div className="soft-card rounded-xl p-5">
               <h2 className="font-bold">3. Vista previa de diapositivas</h2>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                {presentation.slides.map((slide, index) => (
+                {(hasDashboard ? presentation.slides : []).map((slide, index) => (
                   <div key={slide.id} className="rounded-xl border border-[#e3e8f5] p-4">
                     <span className="grid size-6 place-items-center rounded-full bg-[#3d35ff] text-xs font-bold text-white">{index + 1}</span>
                     <h3 className="mt-3 text-sm font-bold">{slide.title}</h3>
@@ -135,7 +139,9 @@ export function PresentationBuilder() {
               {responses.map((response) => <div key={response} className="rounded-xl bg-[#f0efff] p-4 text-sm leading-6">{response}</div>)}
             </div>
             <h3 className="mt-6 font-bold">Narrativa propuesta</h3>
-            <p className="mt-3 text-sm leading-7 text-[#34405f]">Iniciaremos con un resumen ejecutivo de resultados del Q2 2024, destacando crecimiento en ventas y margen. Luego profundizaremos en los KPIs clave y el desempeno por region y vendedor.</p>
+            <p className="mt-3 text-sm leading-7 text-[#34405f]">
+              {hasDashboard ? `Iniciaremos con un resumen ejecutivo de ${dashboard.title}, destacando los KPIs y dimensiones detectadas en el dataset.` : "Aún no hay presentaciones. Sube un dataset para comenzar."}
+            </p>
             <h3 className="mt-6 font-bold">Notas del presentador</h3>
             <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-[#34405f]">
               <li>Enfocar en crecimiento sostenido y expansion regional.</li>

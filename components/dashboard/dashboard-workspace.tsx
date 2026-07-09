@@ -31,6 +31,7 @@ export function DashboardWorkspace() {
   const dashboardId = params.dashboardId ?? activeDashboardId;
   const shareHref = `/app/dashboards/${dashboardId}/compartir`;
   const visibleDashboard = isDashboardEditing && dashboardEditDraft ? dashboardEditDraft : dashboard;
+  const hasRows = rows.length > 0;
 
   useEffect(() => {
     if (!params.dashboardId || params.dashboardId === "demo" || params.dashboardId === activeDashboardId) return;
@@ -108,14 +109,24 @@ export function DashboardWorkspace() {
             <Link href={shareHref} className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#dce3f4] bg-white px-5 text-sm font-semibold xl:hidden"><Share2 className="size-4" /> Share</Link>
           </div>
         </div>
-        <div className="grid gap-5 xl:grid-cols-[220px_1fr]">
-          <DashboardFilters />
-          <DashboardRenderer />
-        </div>
-        <footer className="mt-5 flex gap-8 text-xs text-[#697597]">
-          <span>Fuente: Ventas_Q2_2024.xlsx</span>
-          <span>Ultima actualizacion: 10 jun 2024, 10:30 a.m.</span>
-        </footer>
+        {hasRows ? (
+          <>
+            <div className="grid gap-5 xl:grid-cols-[220px_1fr]">
+              <DashboardFilters />
+              <DashboardRenderer />
+            </div>
+            <footer className="mt-5 flex gap-8 text-xs text-[#697597]">
+              <span>Fuente: {profile.fileName}</span>
+              <span>Ultima actualizacion: {new Date(profile.createdAt).toLocaleDateString("es-CL")}</span>
+            </footer>
+          </>
+        ) : (
+          <section className="soft-card rounded-xl p-8 text-center">
+            <h2 className="text-xl font-bold">Aún no hay dashboards</h2>
+            <p className="mt-2 text-[#617094]">Sube un dataset para comenzar.</p>
+            <Link href="/app" className="mt-5 inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Subir dataset</Link>
+          </section>
+        )}
       </div>
     </AppShell>
   );

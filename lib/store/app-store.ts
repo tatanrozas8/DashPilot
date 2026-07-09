@@ -12,12 +12,12 @@ import { applyDashboardAction } from "@/lib/dashboard-spec/apply-dashboard-actio
 import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { createDemoDataset } from "@/lib/data/demo-dataset";
-import { demoDashboardSpec, demoDataset, demoDatasetProfile, demoPresentationSpec, demoProject } from "@/lib/demo/demo-data";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { createDashboardVersion } from "@/lib/supabase/dashboards";
 import { saveChatMessage } from "@/lib/supabase/chat";
+import { nameFromFile } from "@/lib/utils/name-from-file";
 
 export interface PresentationOptions {
   theme: PresentationTheme;
@@ -35,8 +35,15 @@ export interface ShareSettings {
   expiresAt: string;
 }
 
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  owner: string;
+  updatedAt: string;
+}
+
 interface DashPilotState {
-  currentProject: typeof demoProject;
+  currentProject: ProjectSummary;
   rows: DataRow[];
   currentDataset: DataRow[];
   profile: DatasetProfile;
@@ -89,6 +96,60 @@ interface DashPilotState {
   setShareSettings: (settings: Partial<ShareSettings>) => void;
 }
 
+function createProjectSummary(fileName: string, id = "local-project"): ProjectSummary {
+  return {
+    id,
+    name: nameFromFile(fileName),
+    owner: "Usuario",
+    updatedAt: "Actualizado ahora"
+  };
+}
+
+function createEmptyProfile(): DatasetProfile {
+  return {
+    id: "dataset_empty",
+    fileName: "",
+    rowCount: 0,
+    columnCount: 0,
+    columns: [],
+    detectedDateColumns: [],
+    detectedMetricColumns: [],
+    detectedDimensionColumns: [],
+    detectedGeoColumns: [],
+    qualityWarnings: [],
+    qualityScore: 0,
+    createdAt: new Date().toISOString()
+  };
+}
+
+function createEmptyDashboard(): DashboardSpec {
+  const now = new Date().toISOString();
+  return {
+    id: "dashboard_empty",
+    title: "Aún no hay dashboards",
+    subtitle: "Sube un dataset para comenzar.",
+    datasetId: "dataset_empty",
+    globalFilters: [],
+    widgets: [],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function createEmptyPresentation(): PresentationSpec {
+  const now = new Date().toISOString();
+  return {
+    id: "presentation_empty",
+    dashboardId: "dashboard_empty",
+    title: "Aún no hay presentaciones",
+    subtitle: "Genera un dashboard desde un dataset para crear una presentacion.",
+    theme: "executive",
+    slides: [],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 function baseMessages() {
   return [
     assistantMessage(
@@ -98,35 +159,38 @@ function baseMessages() {
 }
 
 function createInitialState() {
-  const viewState: DashboardViewState = { filters: [], selectedDateRange: { from: "2024-01-01", to: "2024-06-30" } };
+  const viewState: DashboardViewState = { filters: [] };
+  const profile = createEmptyProfile();
+  const dashboard = createEmptyDashboard();
+  const presentation = createEmptyPresentation();
   return {
-    currentProject: demoProject,
-    rows: demoDataset,
-    currentDataset: demoDataset,
-    profile: demoDatasetProfile,
-    datasetProfile: demoDatasetProfile,
-    dashboard: demoDashboardSpec,
-    dashboardSpec: demoDashboardSpec,
+    currentProject: { id: "", name: "Sin proyecto activo", owner: "Usuario", updatedAt: "Sube un dataset para comenzar" },
+    rows: [],
+    currentDataset: [],
+    profile,
+    datasetProfile: profile,
+    dashboard,
+    dashboardSpec: dashboard,
     isDashboardEditing: false,
     dashboardEditDraft: null,
     viewState,
     filters: viewState,
-    presentation: demoPresentationSpec,
-    presentationSpec: demoPresentationSpec,
+    presentation,
+    presentationSpec: presentation,
     parsedDataset: null,
-    selectedSheetName: "Demo",
+    selectedSheetName: "",
     importWarnings: [],
-    activeProjectId: "demo-project",
-    activeDatasetId: demoDatasetProfile.id,
-    activeDashboardId: demoDashboardSpec.id,
-    activePresentationId: demoPresentationSpec.id,
+    activeProjectId: "",
+    activeDatasetId: "",
+    activeDashboardId: "",
+    activePresentationId: "",
     persistenceMode: "local" as const,
-    persistenceStatus: "Modo local",
+    persistenceStatus: "Sube un dataset para comenzar",
     messages: baseMessages(),
     chatMessages: baseMessages(),
-    versions: [demoDashboardSpec],
-    isDemoMode: true,
-    uploadedFileName: "Ventas_Q2_2024.xlsx",
+    versions: [],
+    isDemoMode: false,
+    uploadedFileName: "",
     presentationOptions: {
       theme: "executive" as const,
       durationMinutes: 5 as const,
@@ -153,7 +217,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const dashboard = generateDashboardSpec(profile, rows);
         const presentation = generatePresentationSpec(dashboard);
         const messages = [assistantMessage("Archivo analizado. Detecte metricas, dimensiones y filtros recomendados.")];
+        const project = createProjectSummary(fileName);
         set({
+          currentProject: project,
           rows,
           currentDataset: rows,
           profile,
@@ -166,6 +232,10 @@ export const useDashPilotStore = create<DashPilotState>()(
           filters: { filters: [], selectedDateRange: undefined },
           presentation,
           presentationSpec: presentation,
+          activeProjectId: project.id,
+          activeDatasetId: profile.id,
+          activeDashboardId: dashboard.id,
+          activePresentationId: presentation.id,
           messages,
           chatMessages: messages,
           versions: [dashboard],
@@ -181,7 +251,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const presentation = generatePresentationSpec(dashboard);
         const viewState: DashboardViewState = { filters: [], selectedDateRange: undefined };
         const messages = [assistantMessage("Archivo real analizado. Detecte columnas, tipos, metricas y filtros recomendados.")];
+        const project = createProjectSummary(parsed.fileName);
         set({
+          currentProject: project,
           rows,
           currentDataset: rows,
           profile,
@@ -197,7 +269,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           parsedDataset: parsed,
           selectedSheetName: selected?.name ?? parsed.selectedSheetName,
           importWarnings: parsed.warnings,
-          activeProjectId: "local-project",
+          activeProjectId: project.id,
           activeDatasetId: profile.id,
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
@@ -223,7 +295,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const dashboard = generateDashboardSpec(profile, selected.rows);
         const presentation = generatePresentationSpec(dashboard);
         const viewState: DashboardViewState = { filters: [], selectedDateRange: undefined };
+        const project = createProjectSummary(parsed.fileName, get().activeProjectId || "local-project");
         set({
+          currentProject: project,
           rows: selected.rows,
           currentDataset: selected.rows,
           profile,
@@ -246,12 +320,15 @@ export const useDashPilotStore = create<DashPilotState>()(
       },
       loadDemo: () => {
         const rows = createDemoDataset();
-        const profile = profileDataset(rows, "Ventas_Q2_2024.xlsx");
+        const exampleFileName = "ejemplo_comercial.xlsx";
+        const profile = profileDataset(rows, exampleFileName);
         const dashboard = generateDashboardSpec(profile, rows);
         const presentation = generatePresentationSpec(dashboard);
-        const viewState: DashboardViewState = { filters: [], selectedDateRange: { from: "2024-01-01", to: "2024-06-30" } };
-        const messages = [assistantMessage("Demo cargada. Ya puedes revisar el dataset o generar el dashboard.")];
+        const viewState: DashboardViewState = { filters: [], selectedDateRange: undefined };
+        const messages = [assistantMessage("Datos de ejemplo cargados. Ya puedes revisar el dataset o generar el dashboard.")];
+        const project = { id: "sample-project", name: "Ejemplo comercial", owner: "Usuario", updatedAt: "Datos de ejemplo" };
         set({
+          currentProject: project,
           rows,
           currentDataset: rows,
           profile,
@@ -265,19 +342,19 @@ export const useDashPilotStore = create<DashPilotState>()(
           presentation,
           presentationSpec: presentation,
           parsedDataset: null,
-          selectedSheetName: "Demo",
+          selectedSheetName: "Datos de ejemplo",
           importWarnings: [],
-          activeProjectId: "demo-project",
+          activeProjectId: project.id,
           activeDatasetId: profile.id,
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           persistenceMode: "local",
-          persistenceStatus: "Demo cargada",
+          persistenceStatus: "Datos de ejemplo cargados",
           messages,
           chatMessages: messages,
           versions: [dashboard],
           isDemoMode: true,
-          uploadedFileName: "Ventas_Q2_2024.xlsx"
+          uploadedFileName: exampleFileName
         });
       },
       generateDashboard: () => {
@@ -300,7 +377,9 @@ export const useDashPilotStore = create<DashPilotState>()(
       hydrateDashboard: ({ rows, dashboard, viewState, profile }) => {
         const nextProfile = profile ?? get().profile;
         const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        const project = createProjectSummary(nextProfile.fileName, get().activeProjectId || "local-project");
         set({
+          currentProject: project,
           rows,
           currentDataset: rows,
           profile: nextProfile,
@@ -324,7 +403,9 @@ export const useDashPilotStore = create<DashPilotState>()(
       hydrateDataset: ({ rows, profile, datasetId }) => {
         const dashboard = generateDashboardSpec(profile, rows);
         const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        const project = createProjectSummary(profile.fileName, get().activeProjectId || "local-project");
         set({
+          currentProject: project,
           rows,
           currentDataset: rows,
           profile,
@@ -382,14 +463,20 @@ export const useDashPilotStore = create<DashPilotState>()(
         });
         return draft;
       },
-      setPersistenceState: (state) => set(state),
+      setPersistenceState: (state) =>
+        set((current) => ({
+          ...state,
+          currentProject: state.activeProjectId
+            ? { ...current.currentProject, id: state.activeProjectId }
+            : current.currentProject
+        })),
       setViewState: (viewState) =>
         set({
           viewState: { ...get().viewState, ...viewState },
           filters: { ...get().viewState, ...viewState }
         }),
       resetFilters: () => {
-        const viewState = { filters: [], selectedDateRange: { from: "2024-01-01", to: "2024-06-30" } };
+        const viewState = { filters: [], selectedDateRange: undefined };
         set({ viewState, filters: viewState });
       },
       sendPrompt: async (prompt) => {
@@ -444,6 +531,17 @@ export const useDashPilotStore = create<DashPilotState>()(
     }),
     {
       name: "dashpilot-mvp",
+      version: 2,
+      migrate: (persistedState) => {
+        const state = persistedState as Partial<DashPilotState>;
+        const legacyProjectName = ["Analisis Comercial", "Q2", "2024"].join(" ");
+        const legacyProjectId = ["demo", "project"].join("-");
+        const legacyFileName = `${["Ventas", "Q2", "2024"].join("_")}.xlsx`;
+        const legacyProject = state.currentProject?.name === legacyProjectName || state.activeProjectId === legacyProjectId;
+        const legacyFile = state.uploadedFileName === legacyFileName || state.profile?.fileName === legacyFileName;
+        if (legacyProject || legacyFile) return createInitialState();
+        return { ...createInitialState(), ...state };
+      },
       partialize: (state) => ({
         currentProject: state.currentProject,
         rows: state.rows,

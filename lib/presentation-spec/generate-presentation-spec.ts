@@ -6,11 +6,14 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
   const charts = dashboard.widgets.filter((widget) => ["line_chart", "bar_chart", "area_chart", "donut_chart"].includes(widget.type));
   const table = dashboard.widgets.find((widget) => widget.type === "table");
   const insight = dashboard.widgets.find((widget) => widget.type === "insight_text");
+  const dashboardTitle = dashboard.title || "Dashboard";
+  const presentationTitle = dashboard.widgets.length ? `Presentacion de ${dashboardTitle}` : "Aún no hay presentaciones";
+  const primaryChart = charts[0];
 
   return {
-    id: "presentation_demo",
+    id: `presentation_${dashboard.id}`,
     dashboardId: dashboard.id,
-    title: "Analisis Comercial Q2 2024",
+    title: presentationTitle,
     subtitle: "Presentacion interactiva generada desde dashboard vivo.",
     theme,
     createdAt: new Date().toISOString(),
@@ -18,9 +21,9 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
     slides: [
       {
         id: "cover",
-        title: "Analisis Comercial Q2 2024",
-        subtitle: "Panorama ejecutivo del trimestre",
-        narrative: "Abrimos con una lectura clara del crecimiento, margen y desempeno por region.",
+        title: presentationTitle,
+        subtitle: "Panorama ejecutivo del dashboard",
+        narrative: "Abrimos con una lectura clara de los indicadores y dimensiones detectadas.",
         speakerNotes: "Enfatizar que la presentacion conserva filtros e interacciones.",
         layout: "cover",
         widgetIds: []
@@ -28,29 +31,29 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
       {
         id: "overview",
         title: "Panorama General",
-        subtitle: "KPIs principales del periodo",
-        narrative: "Ventas, margen, tickets y crecimiento muestran una base comercial saludable.",
+        subtitle: "KPIs principales del dashboard",
+        narrative: "Los indicadores principales resumen el comportamiento del dataset cargado.",
         speakerNotes: "Dedicar menos de un minuto a esta slide y pasar rapidamente al driver regional.",
         layout: "kpi_grid",
         widgetIds: kpis
       },
       {
         id: "commercial-summary",
-        title: "Resumen Comercial Q2 2024",
+        title: "Resumen Ejecutivo",
         subtitle: dashboard.subtitle,
         narrative: dashboard.executiveSummary,
-        speakerNotes: "Explicar el crecimiento con foco en region Centro y vendedores top.",
+        speakerNotes: "Explicar los hallazgos usando las dimensiones disponibles en el dashboard.",
         layout: "executive_summary",
-        widgetIds: [...kpis, "sales_by_month", "sales_by_region", insight?.id].filter(Boolean) as string[]
+        widgetIds: [...kpis, primaryChart?.id, insight?.id].filter(Boolean) as string[]
       },
       {
         id: "region",
-        title: "Analisis por Region",
-        subtitle: "Comparativo regional y oportunidades",
-        narrative: "Centro lidera el trimestre, pero Norte y Sur sostienen oportunidades de expansion.",
-        speakerNotes: "Invitar a filtrar regiones en vivo si hay preguntas.",
+        title: primaryChart?.title ?? "Analisis principal",
+        subtitle: "Comparativo de la dimension mas relevante",
+        narrative: "La visualizacion principal permite explorar diferencias entre segmentos del dataset.",
+        speakerNotes: "Invitar a filtrar en vivo si hay preguntas.",
         layout: "chart_focus",
-        widgetIds: ["sales_by_region"]
+        widgetIds: primaryChart ? [primaryChart.id] : []
       },
       {
         id: "sellers",

@@ -59,7 +59,7 @@ export function createCopilotAction(prompt: string, spec: DashboardSpec): { repl
         changes: {
           config: {
             bullets: [
-              "Q2 2024 muestra crecimiento solido en ventas, margen y tickets.",
+              "El dashboard muestra comportamiento solido en los indicadores principales.",
               "La region Centro lidera el desempeno y conviene proteger su dinamica comercial.",
               "Norte y Sur muestran oportunidades claras de expansion con bajo esfuerzo operativo.",
               "Recomendacion: priorizar vendedores top y revisar categorias con menor margen."

@@ -7,6 +7,7 @@ import { Logo } from "@/components/shared/logo";
 import { useAuth } from "@/components/shared/auth-provider";
 import { useToast } from "@/components/shared/toast";
 import { signOut } from "@/lib/supabase/auth";
+import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
 
 const nav = [
@@ -28,6 +29,13 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const pathname = usePathname();
   const toast = useToast();
   const { configured, user, isLocalMode } = useAuth();
+  const currentProject = useDashPilotStore((state) => state.currentProject);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const rows = useDashPilotStore((state) => state.rows);
+  const persistenceStatus = useDashPilotStore((state) => state.persistenceStatus);
+  const hasProject = Boolean(activeDatasetId && rows.length);
+  const projectName = hasProject ? currentProject.name : "Sin proyecto activo";
+  const projectStatus = hasProject ? persistenceStatus || currentProject.updatedAt : "Sube un dataset para comenzar";
 
   async function logout() {
     try {
@@ -79,9 +87,9 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
           <div>
             <p className="text-xs text-[#6b7698]">Proyecto</p>
             <div className="mt-1 flex items-center gap-3">
-              <h1 className="text-sm font-bold lg:text-base">Analisis Comercial Q2 2024</h1>
-              <span className="size-2.5 rounded-full bg-emerald-500" />
-              <span className="hidden text-xs text-[#6b7698] sm:inline">Actualizado hace 5 min</span>
+              <h1 className="text-sm font-bold lg:text-base">{projectName}</h1>
+              <span className={cn("size-2.5 rounded-full", hasProject ? "bg-emerald-500" : "bg-slate-300")} />
+              <span className="hidden text-xs text-[#6b7698] sm:inline">{projectStatus}</span>
             </div>
           </div>
           <button
@@ -136,7 +144,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         )}
         {configured && !user && (
           <div className="border-b border-[#dfe5fb] bg-[#f6f7ff] px-5 py-2 text-sm font-semibold text-[#3d35ff] lg:px-8">
-            Inicia sesion para guardar datasets, dashboards y enlaces en Supabase. El demo sigue disponible.
+            Inicia sesion para guardar datasets, dashboards y enlaces en Supabase.
           </div>
         )}
         {children}

@@ -13,11 +13,28 @@ import { useDashPilotStore } from "@/lib/store/app-store";
 export function AppHome() {
   const loadDemo = useDashPilotStore((state) => state.loadDemo);
   const uploadedFileName = useDashPilotStore((state) => state.uploadedFileName);
+  const currentProject = useDashPilotStore((state) => state.currentProject);
+  const rows = useDashPilotStore((state) => state.rows);
+  const dashboard = useDashPilotStore((state) => state.dashboard);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
+  const activePresentationId = useDashPilotStore((state) => state.activePresentationId);
+  const isExampleMode = useDashPilotStore((state) => state.isDemoMode);
   const setParsedDataset = useDashPilotStore((state) => state.setParsedDataset);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const toast = useToast();
+  const hasProject = rows.length > 0;
+  const dashboardHref = activeDashboardId ? `/app/dashboards/${activeDashboardId}` : "/app/generando";
+  const shareHref = activeDashboardId ? `/app/dashboards/${activeDashboardId}/compartir` : "/app/proyectos";
+  const presentationHref = activePresentationId ? `/app/present/${activePresentationId}` : "/app/presentaciones/crear";
+  const recentActivity = hasProject
+    ? [
+        `${isExampleMode ? "Datos de ejemplo" : "Dataset"} cargado: ${uploadedFileName}`,
+        `Dashboard disponible: ${dashboard.title}`,
+        activePresentationId ? "Presentacion interactiva disponible" : "Aún no hay presentaciones"
+      ]
+    : [];
 
   async function handleFile(file: File) {
     try {
@@ -46,7 +63,9 @@ export function AppHome() {
             <div>
               <p className="text-sm font-semibold text-[#3d35ff]">Home interna</p>
               <h1 className="mt-2 text-4xl font-black tracking-[-0.05em]">Bienvenido a DashPilot</h1>
-              <p className="mt-3 max-w-2xl text-[#617094]">Proyecto activo: Analisis Comercial Q2 2024. Convierte datasets en dashboards, presentaciones y enlaces compartidos sin perder interactividad.</p>
+              <p className="mt-3 max-w-2xl text-[#617094]">
+                {hasProject ? `Proyecto activo: ${currentProject.name}. Convierte datasets en dashboards, presentaciones y enlaces compartidos sin perder interactividad.` : "Sin proyecto activo. Sube un dataset para comenzar."}
+              </p>
             </div>
             <div className="flex gap-3">
               <input
@@ -67,7 +86,7 @@ export function AppHome() {
                 onClick={loadDemo}
                 className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25"
               >
-                <Sparkles className="size-4" /> Probar demo
+                <Sparkles className="size-4" /> Probar con datos de ejemplo
               </Link>
             </div>
           </div>
@@ -75,10 +94,10 @@ export function AppHome() {
 
         <section className="mt-7 grid gap-5 md:grid-cols-4">
           {([
-            [Database, "Datasets", "/app/datasets/preview", "Vista previa y perfilado"],
-            [BarChart3, "Dashboards", "/app/dashboards/demo", "KPIs y Copiloto IA"],
-            [MonitorPlay, "Presentaciones", "/app/presentaciones/crear", "Slides vivos"],
-            [Share2, "Compartidos", "/app/dashboards/demo/compartir", "Enlaces y exportacion"]
+            [Database, "Datasets", "/app/datasets/preview", hasProject ? "Vista previa y perfilado" : "Sube un dataset para comenzar"],
+            [BarChart3, "Dashboards", dashboardHref, hasProject ? "KPIs y Copiloto IA" : "Aún no hay dashboards"],
+            [MonitorPlay, "Presentaciones", presentationHref, hasProject ? "Slides vivos" : "Aún no hay presentaciones"],
+            [Share2, "Compartidos", shareHref, hasProject ? "Enlaces y exportacion" : "Aún no hay enlaces compartidos"]
           ] as Array<[LucideIcon, string, string, string]>).map(([Icon, title, href, copy]) => (
             <Link key={String(title)} href={String(href)} className="soft-card rounded-xl p-5 transition hover:-translate-y-0.5 hover:shadow-xl">
               <Icon className="size-10 rounded-lg bg-[#f0f1ff] p-2 text-[#3d35ff]" />
@@ -91,11 +110,7 @@ export function AppHome() {
         <section className="mt-7 soft-card rounded-xl p-6">
           <h2 className="text-xl font-bold">Actividad reciente</h2>
           <div className="mt-4 divide-y divide-[#edf1fa] rounded-xl border border-[#edf1fa]">
-            {[
-              `Dataset cargado: ${uploadedFileName}`,
-              "Dashboard generado desde especificacion estructurada",
-              "Presentacion interactiva creada para Q2 2024"
-            ].map((item) => (
+            {(recentActivity.length ? recentActivity : ["Aún no hay actividad reciente"]).map((item) => (
               <p key={item} className="px-4 py-3 text-sm text-[#34405f]">{item}</p>
             ))}
           </div>

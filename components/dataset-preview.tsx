@@ -25,6 +25,10 @@ export function DatasetPreview() {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   const visibleColumns = profile.columns.length ? profile.columns.map((column) => column.normalizedName) : Object.keys(rows[0] ?? {});
+  const hasRows = rows.length > 0;
+  const updatedAt = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" }) : "Sin actualizacion";
+  const dateColumn = profile.columns.find((column) => profile.detectedDateColumns.includes(column.normalizedName));
+  const detectedPeriod = dateColumn ? `Detectado desde ${dateColumn.displayName}` : "Sin periodo detectado";
 
   useEffect(() => {
     if (!params.datasetId || params.datasetId === activeDatasetId) return;
@@ -51,10 +55,14 @@ export function DatasetPreview() {
           <div>
             <h1 className="text-3xl font-black tracking-[-0.04em]">Previsualizacion del Dataset</h1>
             {loading && <p className="mt-2 text-sm font-semibold text-[#3d35ff]">Cargando dataset...</p>}
-            <p className="mt-3 flex items-center gap-2 text-lg text-[#536088]">
-              <FileSpreadsheet className="size-6 rounded bg-emerald-100 p-1 text-emerald-600" />
-              Archivo subido: <strong className="text-[#071334]">{uploadedFileName || profile.fileName}</strong>
-            </p>
+            {hasRows ? (
+              <p className="mt-3 flex items-center gap-2 text-lg text-[#536088]">
+                <FileSpreadsheet className="size-6 rounded bg-emerald-100 p-1 text-emerald-600" />
+                Archivo subido: <strong className="text-[#071334]">{uploadedFileName || profile.fileName}</strong>
+              </p>
+            ) : (
+              <p className="mt-3 text-lg text-[#536088]">Sube un dataset para comenzar.</p>
+            )}
             {parsedDataset && (
               <p className={`mt-2 rounded-lg px-3 py-2 text-sm font-semibold ${persistenceMode === "supabase" ? "bg-emerald-50 text-emerald-700" : "bg-[#fff8e6] text-[#8a5a00]"}`}>
                 {persistenceMode === "supabase" ? "Guardado en Supabase." : "Modo local."} {persistenceStatus}
@@ -63,19 +71,26 @@ export function DatasetPreview() {
           </div>
           <div className="flex gap-3">
             <Link href="/app/proyectos" className="inline-flex h-11 items-center rounded-lg border border-[#dce3f4] bg-white px-5 text-sm font-semibold">← Volver a Proyectos</Link>
-            <Link href="/app/generando" className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25">
+            <Link href={hasRows ? "/app/generando" : "/app"} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25">
               <Sparkles className="size-4" /> Generar dashboard automaticamente
             </Link>
           </div>
         </div>
 
-        <div className="mt-7 grid gap-4 rounded-xl border border-[#e3e8f5] bg-white p-4 md:grid-cols-5">
+        {!hasRows && (
+          <section className="mt-7 soft-card rounded-xl p-8 text-center">
+            <h2 className="text-xl font-bold">Sin proyecto activo</h2>
+            <p className="mt-2 text-[#617094]">Sube un dataset para comenzar. Aún no hay dashboards, presentaciones ni enlaces compartidos.</p>
+          </section>
+        )}
+
+        {hasRows && <div className="mt-7 grid gap-4 rounded-xl border border-[#e3e8f5] bg-white p-4 md:grid-cols-5">
           {[
             [Table2, "Filas", profile.rowCount.toLocaleString("en-US")],
             [BarChart3, "Columnas", profile.columnCount],
             [Database, "Hojas", parsedDataset?.sheets.length ?? 1],
-            [Timer, "Ultima actualizacion", "10 jun 2024, 10:30 a.m."],
-            [Calendar, "Periodo detectado", "01 abr 2024 - 30 jun 2024"]
+            [Timer, "Ultima actualizacion", updatedAt],
+            [Calendar, "Periodo detectado", detectedPeriod]
           ].map(([Icon, label, value]) => (
             <div key={String(label)} className="flex items-center gap-4 border-[#edf1fa] p-3 md:border-r last:border-0">
               {/* @ts-expect-error tuple icon type is inferred broadly */}
@@ -86,9 +101,9 @@ export function DatasetPreview() {
               </div>
             </div>
           ))}
-        </div>
+        </div>}
 
-        {parsedDataset && parsedDataset.sheets.length > 1 && (
+        {hasRows && parsedDataset && parsedDataset.sheets.length > 1 && (
           <section className="mt-5 soft-card rounded-xl p-5">
             <label className="text-sm font-bold">Hoja a analizar</label>
             <select
@@ -105,7 +120,7 @@ export function DatasetPreview() {
           </section>
         )}
 
-        {(importWarnings.length > 0 || profile.qualityWarnings.length > 0) && (
+        {hasRows && (importWarnings.length > 0 || profile.qualityWarnings.length > 0) && (
           <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
             <h2 className="font-bold text-amber-900">Advertencias de calidad</h2>
             <div className="mt-2 grid gap-2 text-sm text-amber-800">
@@ -114,7 +129,7 @@ export function DatasetPreview() {
           </section>
         )}
 
-        <div className="mt-7 grid gap-7 xl:grid-cols-[1fr_340px]">
+        {hasRows && <div className="mt-7 grid gap-7 xl:grid-cols-[1fr_340px]">
           <section className="soft-card rounded-xl p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">Vista previa de datos</h2>
@@ -144,7 +159,7 @@ export function DatasetPreview() {
                   "Se detecto una columna de ventas como metrica principal.",
                   "La columna Region parece geografica y permite analisis por ubicacion.",
                   `${profile.qualityWarnings.length || importWarnings.length || 1} advertencia de calidad detectada para revisar.`,
-                  "Periodo de analisis detectado para Q2 2024."
+                  dateColumn ? `Periodo detectado desde la columna ${dateColumn.displayName}.` : "No se detecto una columna temporal confiable."
                 ].map((item) => (
                   <p key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm leading-6 text-[#34405f]"><CheckCircle2 className="mr-2 inline size-4 text-emerald-600" /> {item}</p>
                 ))}
@@ -161,9 +176,9 @@ export function DatasetPreview() {
               <button onClick={() => toast("Mostrando todos los KPIs recomendados.")} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">Ver todos los KPIs</button>
             </section>
           </aside>
-        </div>
+        </div>}
 
-        <section className="mt-7 soft-card rounded-xl p-5">
+        {hasRows && <section className="mt-7 soft-card rounded-xl p-5">
           <h2 className="text-lg font-bold">Perfilado del Dataset</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-5">
             {[
@@ -180,7 +195,7 @@ export function DatasetPreview() {
               </article>
             ))}
           </div>
-        </section>
+        </section>}
       </div>
     </AppShell>
   );

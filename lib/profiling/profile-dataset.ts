@@ -57,7 +57,7 @@ function displayName(name: string) {
   return name.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export function profileDataset(rows: DataRow[], fileName = "Ventas_Q2_2024.xlsx", normalizedColumns: NormalizedColumn[] = []): DatasetProfile {
+export function profileDataset(rows: DataRow[], fileName = "Datos de ejemplo.xlsx", normalizedColumns: NormalizedColumn[] = []): DatasetProfile {
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const rowCount = rows.length;
   const columnMap = new Map(normalizedColumns.map((column) => [column.normalizedName, column]));
@@ -103,7 +103,7 @@ export function profileDataset(rows: DataRow[], fileName = "Ventas_Q2_2024.xlsx"
   const qualityScore = Math.max(45, Math.min(100, 100 - qualityWarnings.length * 8));
 
   return {
-    id: `dataset_${slugify(fileName).slice(0, 24) || "demo"}`,
+    id: `dataset_${slugify(fileName).slice(0, 24) || "empty"}`,
     fileName,
     rowCount,
     columnCount: columns.length,

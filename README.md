@@ -33,7 +33,7 @@ Supported files:
 - `.xlsx`
 - `.xls`
 
-The browser parser validates the file, detects workbook sheets, normalizes column names, removes empty rows, profiles the selected sheet, and generates a `DashboardSpec` from the detected fields. Demo mode is still available through `Probar demo`.
+The browser parser validates the file, detects workbook sheets, normalizes column names, removes empty rows, profiles the selected sheet, and generates a `DashboardSpec` from the detected fields. Example data is still available through `Probar con datos de ejemplo`.
 
 Current MVP limits:
 
@@ -166,7 +166,7 @@ Important folders:
 
 ## Routes
 
-- `/`: public landing with upload and demo buttons.
+- `/`: public landing with upload and example-data buttons.
 - `/login`: Supabase Auth login/signup.
 - `/logout`: sign out.
 - `/app`: internal SaaS home.
@@ -174,15 +174,15 @@ Important folders:
 - `/app/datasets/preview`: active dataset preview.
 - `/app/datasets/[datasetId]/preview`: dynamic preview alias.
 - `/app/generando`: dashboard generation progress.
-- `/app/dashboards/demo`: demo/current dashboard fallback.
+- `/app/dashboards/demo`: technical current-dashboard fallback.
 - `/app/dashboards/[dashboardId]`: dynamic dashboard alias.
 - `/app/presentaciones/crear`: presentation builder.
 - `/app/presentaciones/[presentationId]/crear`: dynamic presentation builder alias.
-- `/app/present/demo`: demo/current presentation fallback.
+- `/app/present/demo`: technical current-presentation fallback.
 - `/app/present/[presentationId]`: dynamic presentation alias.
 - `/app/dashboards/demo/compartir`: share/export fallback.
 - `/app/dashboards/[dashboardId]/compartir`: dynamic share/export alias.
-- `/share/demo`: public demo share route.
+- `/share/demo`: technical public share fallback.
 - `/share/[token]`: public share token alias.
 
 ## Testing

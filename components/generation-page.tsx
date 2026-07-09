@@ -12,6 +12,8 @@ export function GenerationPage() {
   const router = useRouter();
   const generateDashboard = useDashPilotStore((state) => state.generateDashboard);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
+  const rows = useDashPilotStore((state) => state.rows);
   const [progress, setProgress] = useState(18);
   const [status, setStatus] = useState("Generando dashboard...");
 
@@ -19,6 +21,10 @@ export function GenerationPage() {
     let active = true;
 
     async function runGeneration() {
+      if (!useDashPilotStore.getState().rows.length) {
+        setStatus("Sube un dataset para comenzar.");
+        return;
+      }
       const dashboard = generateDashboard();
       const state = useDashPilotStore.getState();
       setStatus("Guardando dashboard...");
@@ -56,9 +62,16 @@ export function GenerationPage() {
       <div className="p-5 lg:p-8">
         <div className="flex justify-end gap-3">
           <Link href="/app/datasets/preview" className="inline-flex h-11 items-center rounded-lg border border-[#dce3f4] bg-white px-5 text-sm font-semibold">Cancelar generacion</Link>
-          <Link href="/app/dashboards/demo" className="inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Ver mis dashboards</Link>
+          <Link href={activeDashboardId ? `/app/dashboards/${activeDashboardId}` : "/app/proyectos"} className="inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Ver mis dashboards</Link>
         </div>
-        <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
+        {!rows.length && (
+          <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
+            <h1 className="text-3xl font-black tracking-[-0.04em]">Sin proyecto activo</h1>
+            <p className="mt-3 text-[#617094]">Sube un dataset para comenzar.</p>
+            <Link href="/app" className="mt-6 inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Subir dataset</Link>
+          </section>
+        )}
+        {rows.length > 0 && <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
           <Sparkles className="mx-auto size-9 text-[#3d35ff]" />
           <h1 className="mt-4 text-3xl font-black tracking-[-0.04em]">Generando tu dashboard</h1>
           <p className="mt-3 text-[#617094]">Nuestra IA esta analizando tus datos y creando una historia clara con los insights mas importantes.</p>
@@ -81,7 +94,7 @@ export function GenerationPage() {
           <div className="mt-10 grid gap-5 text-left lg:grid-cols-[0.9fr_1.6fr]">
             <div className="soft-card rounded-xl p-6">
               <h2 className="font-bold">Lo que estamos encontrando</h2>
-              {["Se identificaron metricas principales", "Hay datos completos para Q2 2024", "Region y vendedor seran filtros principales", "Analizando tendencias y patrones"].map((item, index) => (
+              {["Se identificaron metricas principales", "Se reviso la completitud de columnas", "Se preparan filtros desde dimensiones detectadas", "Analizando tendencias y patrones"].map((item, index) => (
                 <p key={item} className="mt-4 flex items-center gap-3 rounded-lg p-3 text-sm text-[#34405f] last:bg-[#f0efff]">
                   <Check className={`size-5 ${index < 3 ? "text-emerald-600" : "text-[#3d35ff]"}`} /> {item}
                 </p>
@@ -105,7 +118,7 @@ export function GenerationPage() {
               <p className="mt-1 text-sm text-[#617094]">Verificaremos la calidad de los datos y entregaremos un analisis confiable y accionable.</p>
             </div>
           </div>
-        </section>
+        </section>}
       </div>
     </AppShell>
   );

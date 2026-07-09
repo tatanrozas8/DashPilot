@@ -17,12 +17,18 @@ export function ShareExportPage() {
   const setShareSettings = useDashPilotStore((state) => state.setShareSettings);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
+  const rows = useDashPilotStore((state) => state.rows);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
-  const url = generatedUrl || (typeof window === "undefined" ? "/share/demo" : `${window.location.origin}/share/demo`);
+  const hasDashboard = rows.length > 0 && dashboard.widgets.length > 0;
+  const url = generatedUrl || "Aún no hay enlaces compartidos";
   const dashboardHref = `/app/dashboards/${activeDashboardId || dashboard.id}`;
 
   async function copyLink() {
     try {
+      if (!hasDashboard) {
+        toast("Sube un dataset para comenzar.");
+        return;
+      }
       const result = await persistShareLink({
         dashboardId: activeDashboardId || dashboard.id,
         access: shareSettings.access,
@@ -108,7 +114,7 @@ export function ShareExportPage() {
           <section className="soft-card rounded-xl p-6">
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-xl font-bold">Vista previa del enlace interactivo</h2>
-              <Link href={generatedUrl ? new URL(generatedUrl).pathname : "/share/demo"} className="rounded-lg border border-[#dce3f4] px-4 py-2 text-sm font-semibold">Abrir vista previa</Link>
+              <Link href={generatedUrl ? new URL(generatedUrl).pathname : "/app/proyectos"} className="rounded-lg border border-[#dce3f4] px-4 py-2 text-sm font-semibold">Abrir vista previa</Link>
             </div>
             <div className="max-h-[520px] overflow-hidden rounded-xl border border-[#e3e8f5] bg-white p-4">
               <DashboardRenderer slideWidgetIds={["kpi_sales", "kpi_margin", "kpi_tickets", "kpi_growth", "sales_by_month", "sales_by_region"]} />

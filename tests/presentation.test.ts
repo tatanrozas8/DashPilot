@@ -10,6 +10,7 @@ describe("presentation spec", () => {
     const presentation = generatePresentationSpec(dashboard);
 
     expect(presentation.slides.length).toBeGreaterThan(4);
-    expect(presentation.slides.some((slide) => slide.widgetIds.includes("sales_by_region"))).toBe(true);
+    expect(presentation.title).toBe(`Presentacion de ${dashboard.title}`);
+    expect(presentation.slides.some((slide) => slide.widgetIds.some((widgetId) => dashboard.widgets.some((widget) => widget.id === widgetId)))).toBe(true);
   });
 });

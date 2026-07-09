@@ -31,6 +31,7 @@ import { createPresentation } from "@/lib/supabase/presentations";
 import { createShareLink, createShareLinkToken, getPublicSharedDashboard } from "@/lib/supabase/share-links";
 import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { nameFromFile } from "@/lib/utils/name-from-file";
 
 export function localModeWarning() {
   return "Supabase no esta configurado. DashPilot esta funcionando en modo local.";
@@ -54,7 +55,7 @@ export async function persistParsedDataset({ file, parsed }: ParsedDatasetPayloa
   }
 
   try {
-    const project = await createProjectIfNeeded();
+    const project = await createProjectIfNeeded(nameFromFile(parsed.fileName));
     const dataset = await createDataset(project.projectId, { ...parsed, selectedSheetName: sheet.name }, profile);
     const storagePath = await uploadOriginalFile(file, project.projectId, dataset.datasetId);
     await saveDatasetSheets(dataset.datasetId, { ...parsed, selectedSheetName: sheet.name });

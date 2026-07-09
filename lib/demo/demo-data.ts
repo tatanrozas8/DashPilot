@@ -1,21 +1,21 @@
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
-import { demoRows } from "@/lib/data/demo-dataset";
+import { demoRows as sampleRows } from "@/lib/data/demo-dataset";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
 
-export const demoDataset = demoRows;
-export const demoDatasetProfile = profileDataset(demoDataset, "Ventas_Q2_2024.xlsx");
-export const demoDashboardSpec = generateDashboardSpec(demoDatasetProfile, demoDataset);
-export const demoPresentationSpec = generatePresentationSpec(demoDashboardSpec);
+export const sampleDataset = sampleRows;
+export const sampleDatasetProfile = profileDataset(sampleDataset, "ejemplo_comercial.xlsx");
+export const sampleDashboardSpec = generateDashboardSpec(sampleDatasetProfile, sampleDataset);
+export const samplePresentationSpec = generatePresentationSpec(sampleDashboardSpec);
 
-export const demoProject = {
-  id: "project_demo",
-  name: "Analisis Comercial Q2 2024",
-  owner: "Carlos Mendoza",
-  updatedAt: "Actualizado hace 5 min"
+export const sampleProject = {
+  id: "sample-project",
+  name: "Ejemplo comercial",
+  owner: "Usuario",
+  updatedAt: "Datos de ejemplo"
 };
 
-export const demoKpis = {
+export const sampleKpis = {
   sales: "$2.45M",
   margin: "37.8%",
   tickets: "24,812",

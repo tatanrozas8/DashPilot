@@ -111,7 +111,7 @@ export function LandingPage() {
                   }}
                 />
                 <Button onClick={() => inputRef.current?.click()}><FileUp className="size-4" /> Subir Excel</Button>
-                <Button variant="secondary" onClick={startDemo}><Sparkles className="size-4" /> Probar demo</Button>
+                <Button variant="secondary" onClick={startDemo}><Sparkles className="size-4" /> Probar con datos de ejemplo</Button>
               </div>
               <p className="mt-5 flex items-center justify-center gap-2 text-sm text-[#617094]"><Lock className="size-4" /> Tus datos estan seguros y nunca se comparten.</p>
               {status && <p className="mt-4 text-sm font-semibold text-[#3d35ff]">{status}</p>}
@@ -133,7 +133,7 @@ export function LandingPage() {
           <div className="shell-shadow rounded-2xl border border-[#e3e8f5] bg-white p-5">
             <div className="mb-5 flex items-center justify-between">
               <Logo compact />
-              <span className="text-sm font-bold">Analisis Comercial Q2 2024⌄</span>
+              <span className="text-sm font-bold">Datos de ejemplo</span>
               <Link href="/app/presentaciones/crear" className="inline-flex h-9 items-center rounded-lg bg-[#3d35ff] px-4 text-sm font-semibold text-white">Presentar</Link>
             </div>
             <div className="grid grid-cols-4 gap-3">

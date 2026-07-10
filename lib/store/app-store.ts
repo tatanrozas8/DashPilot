@@ -84,6 +84,7 @@ interface DashPilotState {
   cancelDashboardEditing: () => void;
   updateDashboardDraftTitle: (title: string) => void;
   updateDashboardDraftWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
+  addDashboardWidget: (widget: DashboardWidget) => void;
   duplicateDashboardDraftWidget: (widgetId: string) => void;
   removeDashboardDraftWidget: (widgetId: string) => void;
   setDashboardDraftWidgetHidden: (widgetId: string, hidden: boolean) => void;
@@ -437,6 +438,18 @@ export const useDashPilotStore = create<DashPilotState>()(
       updateDashboardDraftWidget: (widgetId, changes) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;
         set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardWidget(draft, widgetId, changes) });
+      },
+      addDashboardWidget: (widget) => {
+        const dashboard = { ...get().dashboard, widgets: [...get().dashboard.widgets, widget], updatedAt: new Date().toISOString() };
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: [...get().versions, dashboard]
+        });
       },
       duplicateDashboardDraftWidget: (widgetId) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;

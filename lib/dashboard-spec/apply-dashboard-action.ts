@@ -63,6 +63,34 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
     return { spec, viewState: { ...viewState, filters: [], selectedDateRange: undefined }, message: "Limpie los filtros activos del dashboard." };
   }
 
+  if (action.type === "show_data_explorer") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true } }, message: "Abri la vista Datos para explorar la tabla completa." };
+  }
+
+  if (action.type === "search_table") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true, search: action.query } }, message: `Busque "${action.query}" en toda la tabla.` };
+  }
+
+  if (action.type === "select_visible_columns") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true, visibleColumns: action.columns } }, message: "Actualice las columnas visibles en la vista Datos." };
+  }
+
+  if (action.type === "sort_table") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true, sort: { field: action.field, direction: action.direction } } }, message: "Ordene la tabla con la columna solicitada." };
+  }
+
+  if (action.type === "group_by") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true, visibleColumns: action.fields } }, message: "Prepare la vista Datos agrupando visualmente por las columnas solicitadas." };
+  }
+
+  if (action.type === "explain_dataset") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true } }, message: "Abri la vista Datos para revisar columnas, tipos y calidad del Excel." };
+  }
+
+  if (action.type === "explain_column") {
+    return { spec, viewState: { ...viewState, dataExplorer: { ...viewState.dataExplorer, isOpen: true, visibleColumns: [action.field] } }, message: `Enfoque la columna ${action.field} en la vista Datos.` };
+  }
+
   if (action.type === "explain_widget") {
     return { spec, viewState: { ...viewState, highlightedWidgetId: action.widgetId }, message: "Resalte el widget para explicar su lectura." };
   }

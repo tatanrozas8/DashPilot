@@ -34,14 +34,14 @@ export const datasetProfileSchema = z.object({
 
 export const dashboardFilterSchema = z.object({
   field: z.string(),
-  operator: z.enum(["eq", "neq", "gt", "lt", "gte", "lte", "in", "between"]),
+  operator: z.enum(["eq", "neq", "contains", "gt", "lt", "gte", "lte", "in", "between", "range"]),
   value: z.unknown()
 });
 
 export const dashboardQuerySchema = z.object({
   metric: z.object({
     field: z.string(),
-    aggregation: z.enum(["sum", "avg", "count", "min", "max"])
+    aggregation: z.enum(["sum", "avg", "count", "count_distinct", "min", "max"])
   }).optional(),
   x: z.object({
     field: z.string(),
@@ -106,7 +106,14 @@ export const presentationSpecSchema = z.object({
       selectedDateRange: z.object({ from: z.string(), to: z.string() }).optional(),
       highlightedWidgetId: z.string().optional(),
       hiddenWidgetIds: z.array(z.string()).optional(),
-      sortState: z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }).optional()
+      sortState: z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }).optional(),
+      dataExplorer: z.object({
+        isOpen: z.boolean().optional(),
+        search: z.string().optional(),
+        visibleColumns: z.array(z.string()).optional(),
+        sort: z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }).optional(),
+        pageSize: z.number().optional()
+      }).optional()
     }).optional()
   })),
   createdAt: z.string(),

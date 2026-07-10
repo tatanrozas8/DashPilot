@@ -42,7 +42,7 @@ export interface DashboardWidget {
 export interface DashboardQuerySpec {
   metric?: {
     field: string;
-    aggregation: "sum" | "avg" | "count" | "min" | "max";
+    aggregation: "sum" | "avg" | "count" | "count_distinct" | "min" | "max";
   };
   x?: {
     field: string;
@@ -59,7 +59,7 @@ export interface DashboardQuerySpec {
 
 export interface DashboardFilter {
   field: string;
-  operator: "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "in" | "between";
+  operator: "eq" | "neq" | "contains" | "gt" | "lt" | "gte" | "lte" | "in" | "between" | "range";
   value: unknown;
 }
 
@@ -82,6 +82,16 @@ export interface DashboardViewState {
     field: string;
     direction: "asc" | "desc";
   };
+  dataExplorer?: {
+    isOpen?: boolean;
+    search?: string;
+    visibleColumns?: string[];
+    sort?: {
+      field: string;
+      direction: "asc" | "desc";
+    };
+    pageSize?: number;
+  };
 }
 
 export type QueryResultRow = DataRow & {
@@ -100,6 +110,13 @@ export type DashboardAction =
   | { type: "add_filter"; filter: DashboardFilter }
   | { type: "add_or_update_filter"; filter: DashboardFilter }
   | { type: "clear_filters" }
+  | { type: "show_data_explorer" }
+  | { type: "search_table"; query: string }
+  | { type: "select_visible_columns"; columns: string[] }
+  | { type: "sort_table"; field: string; direction: "asc" | "desc" }
+  | { type: "group_by"; fields: string[] }
+  | { type: "explain_dataset" }
+  | { type: "explain_column"; field: string }
   | { type: "explain_widget"; widgetId: string }
   | { type: "focus_widget"; widgetId: string }
   | { type: "reorder_widgets"; widgetIds: string[] }

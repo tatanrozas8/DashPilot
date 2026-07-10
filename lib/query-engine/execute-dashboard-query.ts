@@ -28,8 +28,9 @@ function matchesFilter(row: DataRow, filter: DashboardFilter) {
   const value = row[filter.field];
   if (filter.operator === "eq") return value === filter.value;
   if (filter.operator === "neq") return value !== filter.value;
+  if (filter.operator === "contains") return String(value ?? "").toLowerCase().includes(String(filter.value ?? "").toLowerCase());
   if (filter.operator === "in") return Array.isArray(filter.value) ? filter.value.includes(value) : true;
-  if (filter.operator === "between" && Array.isArray(filter.value)) {
+  if ((filter.operator === "between" || filter.operator === "range") && Array.isArray(filter.value)) {
     const raw = String(value);
     return raw >= String(filter.value[0]) && raw <= String(filter.value[1]);
   }
@@ -42,13 +43,15 @@ function matchesFilter(row: DataRow, filter: DashboardFilter) {
   return true;
 }
 
-function aggregate(values: number[], aggregation: Aggregation) {
+function aggregate(values: unknown[], aggregation: Aggregation) {
   if (aggregation === "count") return values.length;
-  if (values.length === 0) return 0;
-  if (aggregation === "avg") return values.reduce((sum, value) => sum + value, 0) / values.length;
-  if (aggregation === "min") return Math.min(...values);
-  if (aggregation === "max") return Math.max(...values);
-  return values.reduce((sum, value) => sum + value, 0);
+  if (aggregation === "count_distinct") return new Set(values.map((value) => String(value ?? ""))).size;
+  const numericValues = values.map(toNumber);
+  if (numericValues.length === 0) return 0;
+  if (aggregation === "avg") return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+  if (aggregation === "min") return Math.min(...numericValues);
+  if (aggregation === "max") return Math.max(...numericValues);
+  return numericValues.reduce((sum, value) => sum + value, 0);
 }
 
 export function applyDashboardFilters(rows: DataRow[], filters: DashboardFilter[] = []) {
@@ -68,22 +71,24 @@ export function executeDashboardQuery(rows: DataRow[], query: DashboardQuerySpec
 
   if (!query.groupBy?.length && !query.x?.field) {
     const field = query.metric?.field;
-    const values = field ? filtered.map((row) => toNumber(row[field])) : filtered.map(() => 1);
+    const values = field ? filtered.map((row) => row[field]) : filtered.map(() => 1);
     return [{ label: query.metric?.aggregation ?? "count", value: aggregate(values, query.metric?.aggregation ?? "count") }];
   }
 
-  const groupField = query.x?.field ?? query.groupBy?.[0];
-  if (!groupField) return filtered.slice(0, query.limit ?? 100);
+  const groupFields = query.x?.field ? [query.x.field] : query.groupBy ?? [];
+  if (!groupFields.length) return filtered.slice(0, query.limit ?? 100);
 
   const grouped = new Map<string, DataRow[]>();
   for (const row of filtered) {
-    const label = query.x?.granularity ? timeLabel(row[groupField], query.x.granularity) : String(row[groupField]);
+    const label = groupFields
+      .map((field) => query.x?.granularity && field === query.x.field ? timeLabel(row[field], query.x.granularity) : String(row[field] ?? ""))
+      .join(" / ");
     grouped.set(label, [...(grouped.get(label) ?? []), row]);
   }
 
   const metricField = query.metric?.field;
   let result = Array.from(grouped.entries()).map(([label, groupRows]) => {
-    const values = metricField ? groupRows.map((row) => toNumber(row[metricField])) : groupRows.map(() => 1);
+    const values = metricField ? groupRows.map((row) => row[metricField]) : groupRows.map(() => 1);
     return { label, value: aggregate(values, query.metric?.aggregation ?? "sum") };
   });
 

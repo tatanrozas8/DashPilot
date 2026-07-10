@@ -5,17 +5,20 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Download, FileImage, FileText, Link2, MonitorPlay, Pencil, Play, Save, Share2, Sparkles, Users, X } from "lucide-react";
 import { DashboardEditor } from "@/components/dashboard/dashboard-editor";
+import { DataExplorerPanel } from "@/components/dashboard/data-explorer";
 import { CopilotPanel, DashboardFilters, DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { AppShell } from "@/components/shared/app-shell";
 import { Button } from "@/components/shared/button";
 import { useToast } from "@/components/shared/toast";
 import { loadPersistedDashboard, updatePersistedDashboard } from "@/lib/data-access";
 import { useDashPilotStore } from "@/lib/store/app-store";
+import { cn } from "@/lib/utils";
 
 export function DashboardWorkspace() {
   const toast = useToast();
   const params = useParams<{ dashboardId?: string }>();
   const [exportOpen, setExportOpen] = useState(false);
+  const [activeView, setActiveView] = useState<"dashboard" | "data">("dashboard");
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
   const rows = useDashPilotStore((state) => state.rows);
@@ -34,6 +37,10 @@ export function DashboardWorkspace() {
   const shareHref = `/app/dashboards/${dashboardId}/compartir`;
   const visibleDashboard = isDashboardEditing && dashboardEditDraft ? dashboardEditDraft : dashboard;
   const hasRows = rows.length > 0;
+
+  useEffect(() => {
+    if (viewState.dataExplorer?.isOpen) setActiveView("data");
+  }, [viewState.dataExplorer?.isOpen]);
 
   useEffect(() => {
     if (!params.dashboardId || params.dashboardId === "demo" || params.dashboardId === activeDashboardId) return;
@@ -116,10 +123,31 @@ export function DashboardWorkspace() {
         </div>
         {hasRows ? (
           <>
-            <div className="grid gap-5 xl:grid-cols-[220px_1fr]">
-              <DashboardFilters />
-              <DashboardRenderer />
+            <div className="mb-5 flex flex-wrap gap-2">
+              {[
+                ["dashboard", "Dashboard"],
+                ["data", "Datos"]
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setActiveView(value as "dashboard" | "data")}
+                  className={cn(
+                    "h-10 rounded-lg border px-4 text-sm font-semibold transition",
+                    activeView === value ? "border-[#7a73ff] bg-[#f0f1ff] text-[#332cff]" : "border-[#dfe5f0] bg-white text-[#536088] hover:border-[#bfc9ea]"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            {activeView === "dashboard" ? (
+              <div className="grid gap-5 xl:grid-cols-[220px_1fr]">
+                <DashboardFilters />
+                <DashboardRenderer />
+              </div>
+            ) : (
+              <DataExplorerPanel />
+            )}
             <footer className="mt-5 flex gap-8 text-xs text-[#697597]">
               <span>Fuente: {profile.fileName}</span>
               <span>Ultima actualizacion: {new Date(profile.createdAt).toLocaleDateString("es-CL")}</span>

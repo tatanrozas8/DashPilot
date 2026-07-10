@@ -4,10 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
+  Cell,
   CartesianGrid,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis
@@ -127,6 +132,52 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   );
 }
 
+function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
+  const viewState = useDashPilotStore((state) => state.viewState);
+  const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const colors = ["#3d35ff", "#16a34a", "#0ea5e9", "#f97316", "#8b5cf6", "#64748b"];
+  return (
+    <Card className="min-h-[310px]">
+      <WidgetHeader title={widget.title} />
+      {data.length === 0 ? (
+        <EmptyWidget />
+      ) : (
+        <ResponsiveContainer width="100%" height={230}>
+          <PieChart>
+            <Pie data={data} dataKey="value" nameKey="label" innerRadius={58} outerRadius={92} paddingAngle={2}>
+              {data.map((item, index) => <Cell key={String(item.label ?? index)} fill={colors[index % colors.length]} />)}
+            </Pie>
+            <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+          </PieChart>
+        </ResponsiveContainer>
+      )}
+    </Card>
+  );
+}
+
+function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
+  const viewState = useDashPilotStore((state) => state.viewState);
+  const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState).map((row, index) => ({ ...row, index: index + 1 })) : [];
+  return (
+    <Card className="min-h-[310px]">
+      <WidgetHeader title={widget.title} />
+      {data.length === 0 ? (
+        <EmptyWidget />
+      ) : (
+        <ResponsiveContainer width="100%" height={230}>
+          <ScatterChart margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
+            <CartesianGrid stroke="#edf1fa" />
+            <XAxis dataKey="index" tick={{ fill: "#697597", fontSize: 12 }} />
+            <YAxis dataKey="value" tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={(value) => formatCurrency(Number(value))} />
+            <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+            <Scatter data={data} fill="#3d35ff" />
+          </ScatterChart>
+        </ResponsiveContainer>
+      )}
+    </Card>
+  );
+}
+
 function TableWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
   const filtered = useMemo(() => applyDashboardFilters(rows, viewState.filters), [rows, viewState.filters]);
@@ -211,6 +262,8 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
             {widget.type === "kpi_card" && <KpiWidget widget={widget} rows={rows} />}
             {widget.type === "line_chart" && <LineWidget widget={widget} rows={rows} />}
             {widget.type === "bar_chart" && <BarWidget widget={widget} rows={rows} />}
+            {widget.type === "donut_chart" && <DonutWidget widget={widget} rows={rows} />}
+            {widget.type === "scatter_plot" && <ScatterWidget widget={widget} rows={rows} />}
             {widget.type === "table" && <TableWidget widget={widget} rows={rows} />}
             {widget.type === "insight_text" && <InsightWidget widget={widget} />}
           </div>

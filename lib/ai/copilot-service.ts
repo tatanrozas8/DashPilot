@@ -67,6 +67,13 @@ export const copilotOutputJsonSchema = {
                 "add_filter",
                 "add_or_update_filter",
                 "clear_filters",
+                "show_data_explorer",
+                "search_table",
+                "select_visible_columns",
+                "sort_table",
+                "group_by",
+                "explain_dataset",
+                "explain_column",
                 "explain_widget",
                 "focus_widget",
                 "reorder_widgets",
@@ -171,6 +178,30 @@ function filterValue(prompt: string) {
   return match?.[1]?.trim().split(/\s+/).slice(0, 4).join(" ");
 }
 
+function requestedColumns(prompt: string, context: CopilotRequestContext) {
+  const text = normalize(prompt);
+  const direct = context.datasetProfile.columns.filter((column) => {
+    const names = [column.normalizedName, column.originalName, column.displayName].map(normalize);
+    return names.some((name) => name && text.includes(name));
+  });
+  if (direct.length) return [...new Set(direct.map((column) => column.normalizedName))];
+
+  const intents = [
+    ["geography", ["pais", "país", "region", "regiones", "zona", "ciudad"]],
+    ["seller", ["vendedor", "ejecutivo", "asesor"]],
+    ["client", ["cliente", "customer", "cuenta"]],
+    ["product", ["producto", "sku", "item"]],
+    ["category", ["categoria", "categoría"]],
+    ["revenue", ["ventas", "revenue", "ingresos", "monto"]],
+    ["margin", ["margen", "utilidad", "profit"]],
+    ["date", ["fecha", "periodo", "mes", "año", "ano"]]
+  ] as const;
+  return intents
+    .filter(([, words]) => words.some((word) => text.includes(word)))
+    .map(([intent]) => resolveColumn(prompt, availableContext(context), intent).matchedColumn?.normalizedName)
+    .filter((field): field is string => Boolean(field));
+}
+
 function availableContext(context: CopilotRequestContext) {
   return {
     datasetProfile: context.datasetProfile,
@@ -209,6 +240,114 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
       const action: DashboardAction = { type: "update_widget_title", widgetId: target.id, title };
       return { reply: `Cambie el nombre de "${target.title}" a "${title}".`, envelopes: [actionEnvelope(action, "Cambio de titulo de widget solicitado por el usuario.", 0.84)] };
     }
+  }
+
+  if (prompt.includes("tabla completa") || prompt.includes("ver datos") || prompt.includes("explorar datos") || prompt.includes("muestrame la tabla") || prompt.includes("muéstrame la tabla")) {
+    const action: DashboardAction = { type: "show_data_explorer" };
+    return { reply: "Mostre la vista Datos con la tabla completa paginada y buscable.", envelopes: [actionEnvelope(action, "El usuario pidio explorar la tabla completa.", 0.92)] };
+  }
+
+  if (prompt.includes("explicame que columnas") || prompt.includes("explícame qué columnas") || prompt.includes("que columnas tiene") || prompt.includes("qué columnas tiene") || prompt.includes("que puedo analizar") || prompt.includes("qué puedo analizar")) {
+    const action: DashboardAction = { type: "explain_dataset" };
+    const metrics = context.datasetProfile.detectedMetricColumns.slice(0, 4).join(", ") || "sin metricas confiables";
+    const dimensions = context.datasetProfile.detectedDimensionColumns.slice(0, 4).join(", ") || "sin dimensiones confiables";
+    return {
+      reply: `Este Excel tiene ${context.datasetProfile.rowCount} filas y ${context.datasetProfile.columnCount} columnas. Metricas: ${metrics}. Dimensiones: ${dimensions}.`,
+      envelopes: [actionEnvelope(action, "Explicacion del dataset solicitada.", 0.9)]
+    };
+  }
+
+  if (prompt.includes("busca") || prompt.includes("buscar")) {
+    const query = context.prompt.replace(/busca(r)?/i, "").trim();
+    if (query) {
+      const action: DashboardAction = { type: "search_table", query };
+      return { reply: `Busque "${query}" en toda la tabla cargada.`, envelopes: [actionEnvelope(action, "Busqueda global solicitada.", 0.88)] };
+    }
+  }
+
+  if ((prompt.includes("muestra") || prompt.includes("mostrar") || prompt.includes("solo")) && prompt.includes("columna")) {
+    const columns = requestedColumns(context.prompt, context);
+    if (!columns.length) return { reply: "No encontre las columnas solicitadas. Puedo mostrar columnas por nombre, por ejemplo: muestra columnas Pais, Canal y Ventas.", envelopes: [] };
+    const action: DashboardAction = { type: "select_visible_columns", columns };
+    return { reply: `Mostre solo estas columnas: ${columns.map((field) => fieldLabel(context.datasetProfile, field)).join(", ")}.`, envelopes: [actionEnvelope(action, "Seleccion de columnas visibles solicitada.", 0.86)] };
+  }
+
+  if (prompt.includes("oculta") && prompt.includes("columna")) {
+    const columns = requestedColumns(context.prompt, context);
+    const current = context.viewState.dataExplorer?.visibleColumns?.length ? context.viewState.dataExplorer.visibleColumns : context.datasetProfile.columns.map((column) => column.normalizedName);
+    if (!columns.length) return { reply: "No encontre que columna ocultar. Indica el nombre exacto o uno parecido.", envelopes: [] };
+    const action: DashboardAction = { type: "select_visible_columns", columns: current.filter((column) => !columns.includes(column)) };
+    return { reply: `Oculte ${columns.map((field) => fieldLabel(context.datasetProfile, field)).join(", ")} de la vista Datos.`, envelopes: [actionEnvelope(action, "Ocultar columnas solicitado.", 0.82)] };
+  }
+
+  if (prompt.includes("ordena") || prompt.includes("ordenar")) {
+    const field = resolveColumn(context.prompt, availableContext(context), prompt.includes("venta") || prompt.includes("monto") ? "revenue" : "dimension").matchedColumn;
+    if (!field) return { reply: "No encontre una columna compatible para ordenar la tabla.", envelopes: [] };
+    const direction = prompt.includes("menor") || prompt.includes("asc") ? "asc" : "desc";
+    const action: DashboardAction = { type: "sort_table", field: field.normalizedName, direction };
+    return { reply: `Ordene la tabla por ${field.displayName} de forma ${direction === "asc" ? "ascendente" : "descendente"}.`, envelopes: [actionEnvelope(action, "Ordenamiento de tabla solicitado.", 0.84)] };
+  }
+
+  if (prompt.includes("agrupa") || prompt.includes("agrupar")) {
+    const columns = requestedColumns(context.prompt, context);
+    if (!columns.length) return { reply: "No encontre columnas claras para agrupar. Prueba: agrupa por canal o agrupa por pais.", envelopes: [] };
+    const action: DashboardAction = { type: "group_by", fields: columns };
+    return { reply: `Agrupe la exploracion por ${columns.map((field) => fieldLabel(context.datasetProfile, field)).join(", ")}.`, envelopes: [actionEnvelope(action, "Agrupacion solicitada.", 0.78)] };
+  }
+
+  if (prompt.includes("ticket promedio") || (prompt.includes("kpi") && prompt.includes("promedio"))) {
+    const metric = resolveColumn("ventas", availableContext(context), "revenue").matchedColumn ?? context.datasetProfile.columns.find((column) => ["number", "currency"].includes(column.inferredType));
+    if (!metric) return { reply: "No encontre una metrica numerica para crear el KPI de promedio.", envelopes: [] };
+    const widget: DashboardWidget = {
+      id: nextWidgetId(context.dashboardSpec, "ai_kpi"),
+      type: "kpi_card",
+      title: `Promedio ${metric.displayName}`,
+      query: { metric: { field: metric.normalizedName, aggregation: "avg" } },
+      config: { icon: "chart", format: metric.inferredType === "currency" ? "currency" : "number", tone: "sky", generatedBy: "copilot" },
+      position: { x: 0, y: Math.max(0, ...context.dashboardSpec.widgets.map((widget) => widget.position.y + widget.position.h)), w: 3, h: 1 }
+    };
+    return { reply: `Agregue un KPI de promedio usando la columna "${metric.originalName}".`, envelopes: [actionEnvelope({ type: "add_widget", widget }, "KPI promedio solicitado.", 0.83)] };
+  }
+
+  if (prompt.includes("tabla") && (prompt.includes("importan") || prompt.includes("importantes"))) {
+    const columns = [
+      context.semanticModel.primaryDate?.field,
+      context.semanticModel.primaryGeography?.field,
+      context.semanticModel.primarySeller?.field,
+      context.semanticModel.primaryClient?.field,
+      context.semanticModel.primaryProduct?.field,
+      context.semanticModel.primaryCategory?.field,
+      context.semanticModel.primaryMetric?.field,
+      context.semanticModel.marginMetrics[0]?.field
+    ].filter((field): field is string => Boolean(field));
+    const widget: DashboardWidget = {
+      id: nextWidgetId(context.dashboardSpec, "ai_table"),
+      type: "table",
+      title: "Tabla de columnas clave",
+      config: { columns: [...new Set(columns)].slice(0, 8), limit: 10, generatedBy: "copilot" },
+      position: nextWidgetPosition(context.dashboardSpec, 12)
+    };
+    return { reply: "Agregue una tabla con las columnas mas relevantes detectadas en el Excel.", envelopes: [actionEnvelope({ type: "add_widget", widget }, "Tabla de columnas clave solicitada.", 0.8)] };
+  }
+
+  if (prompt.includes("top") && (prompt.includes("producto") || prompt.includes("productos"))) {
+    const product = resolveColumn(context.prompt, availableContext(context), "product");
+    if (!product.matchedColumn) return noColumnAction("producto", context);
+    const limit = Number(prompt.match(/\b(\d{1,2})\b/)?.[1] ?? 10);
+    const widget = createAnalysisWidget(context, { dimension: product.matchedColumn.normalizedName, title: `Top ${limit} ${product.matchedColumn.displayName}`, limit });
+    if (!widget) return { reply: "Encontre producto, pero falta una metrica para crear el top.", envelopes: [] };
+    return { reply: `Agregue top ${limit} por ${product.matchedColumn.displayName}.`, envelopes: [actionEnvelope({ type: "add_widget", widget }, "Top productos solicitado.", product.confidence)] };
+  }
+
+  if (prompt.includes("explica") && prompt.includes("columna")) {
+    const column = requestedColumns(context.prompt, context)[0];
+    if (!column) return { reply: "No encontre una columna clara para explicar.", envelopes: [] };
+    const action: DashboardAction = { type: "explain_column", field: column };
+    const profile = context.datasetProfile.columns.find((item) => item.normalizedName === column);
+    return {
+      reply: `${profile?.displayName ?? column} tiene tipo ${profile?.inferredType ?? "desconocido"}, semantic type ${profile?.semanticType ?? "unknown"}, ${profile?.uniqueCount ?? 0} valores unicos y ${profile?.nullCount ?? 0} nulos.`,
+      envelopes: [actionEnvelope(action, "Explicacion de columna solicitada.", 0.86)]
+    };
   }
 
   if (prompt.includes("ejecutivo")) {

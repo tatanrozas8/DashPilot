@@ -6,7 +6,7 @@ import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec"
 import { dashboardFilterSchema, dashboardQuerySchema } from "@/lib/validation/schemas";
 
 const widgetTypeSchema = z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]);
-const aggregationSchema = z.enum(["sum", "avg", "count", "min", "max"]);
+const aggregationSchema = z.enum(["sum", "avg", "count", "count_distinct", "min", "max"]);
 
 const dashboardWidgetSchema = z.object({
   id: z.string().min(1),
@@ -48,6 +48,13 @@ export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_filter"), filter: dashboardFilterSchema }),
   z.object({ type: z.literal("add_or_update_filter"), filter: dashboardFilterSchema }),
   z.object({ type: z.literal("clear_filters") }),
+  z.object({ type: z.literal("show_data_explorer") }),
+  z.object({ type: z.literal("search_table"), query: z.string() }),
+  z.object({ type: z.literal("select_visible_columns"), columns: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal("sort_table"), field: z.string(), direction: z.enum(["asc", "desc"]) }),
+  z.object({ type: z.literal("group_by"), fields: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal("explain_dataset") }),
+  z.object({ type: z.literal("explain_column"), field: z.string() }),
   z.object({ type: z.literal("explain_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("focus_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("reorder_widgets"), widgetIds: z.array(z.string()).min(1) }),
@@ -94,6 +101,10 @@ function configFields(config: Record<string, unknown> | undefined) {
 
 function fieldsForAction(action: DashboardAction) {
   if (action.type === "add_filter" || action.type === "add_or_update_filter") return [action.filter.field];
+  if (action.type === "select_visible_columns") return action.columns;
+  if (action.type === "sort_table") return [action.field];
+  if (action.type === "group_by") return action.fields;
+  if (action.type === "explain_column") return [action.field];
   if (action.type === "add_widget") return [...queryFields(action.widget.query), ...configFields(action.widget.config)];
   if (action.type === "update_widget") return [...queryFields(action.changes.query), ...configFields(action.changes.config)];
   if (action.type === "create_calculated_metric") return action.operands;

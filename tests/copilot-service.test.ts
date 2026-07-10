@@ -105,6 +105,36 @@ describe("copilot service", () => {
     expect(result.updatedViewState?.filters).toEqual([{ field: "Pais", operator: "in", value: ["Chile"] }]);
   });
 
+  it("opens data explorer and searches the full table", () => {
+    const ctx = context("busca Maria Lopez");
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.[0]?.type).toBe("search_table");
+    expect(result.updatedViewState?.dataExplorer?.isOpen).toBe(true);
+    expect(result.updatedViewState?.dataExplorer?.search).toBe("Maria Lopez");
+  });
+
+  it("selects requested visible columns for the data explorer", () => {
+    const ctx = customContext("muestra solo las columnas pais y ventas", [
+      { Pais: "Chile", Ventas: 1200, Canal: "Directo" },
+      { Pais: "Peru", Ventas: 900, Canal: "Partner" }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.[0]?.type).toBe("select_visible_columns");
+    expect(result.updatedViewState?.dataExplorer?.visibleColumns).toEqual(["Pais", "Ventas"]);
+  });
+
+  it("creates sales by country widgets from natural language", () => {
+    const ctx = customContext("crea un grafico de ventas por pais", [
+      { Pais: "Chile", Ventas: 1200 },
+      { Pais: "Peru", Ventas: 900 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.updatedDashboardSpec?.widgets.some((widget) => widget.query?.groupBy?.includes("Pais") && widget.query.metric?.field === "Ventas")).toBe(true);
+  });
+
   it("applies filter, clear and explain actions only to spec or view state", () => {
     const ctx = context("filtra norte");
     const filtered = applyDashboardAction(ctx.dashboardSpec, ctx.viewState, { type: "add_filter", filter: { field: "Region", operator: "in", value: ["Norte"] } });

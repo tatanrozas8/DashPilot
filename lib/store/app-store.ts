@@ -550,8 +550,13 @@ export const useDashPilotStore = create<DashPilotState>()(
           void saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage);
           void saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage);
           if (dashboardChanged) void createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot");
-        } catch {
-          set({ isCopilotThinking: false });
+        } catch (error) {
+          const botMessage = assistantMessage(error instanceof Error ? `No pude completar la accion: ${error.message}` : "No pude completar la accion. Revisa la conexion o intenta con una instruccion mas simple.");
+          set({
+            messages: [...get().messages, botMessage],
+            chatMessages: [...get().messages, botMessage],
+            isCopilotThinking: false
+          });
         }
       },
       generatePresentation: () => {

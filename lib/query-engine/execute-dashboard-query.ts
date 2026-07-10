@@ -1,18 +1,17 @@
 import type { DataRow } from "@/types/dataset";
 import type { DashboardFilter, DashboardQuerySpec, DashboardViewState, QueryResultRow } from "@/types/dashboard";
+import { compareDataValues, parseDateValue, parseLocaleNumber } from "@/lib/data/parse-values";
 
 function toNumber(value: unknown) {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return 0;
-  return Number(value.replace(/[$,%\s]/g, "").replace(",", ".")) || 0;
+  return parseLocaleNumber(value) ?? 0;
 }
 
 type Aggregation = NonNullable<DashboardQuerySpec["metric"]>["aggregation"];
 type TimeGranularity = NonNullable<DashboardQuerySpec["x"]>["granularity"];
 
 function timeLabel(value: unknown, granularity: TimeGranularity) {
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) return String(value);
+  const date = parseDateValue(value);
+  if (!date) return String(value);
   if (granularity === "day") return date.toISOString().slice(0, 10);
   if (granularity === "week") {
     const firstDay = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
@@ -31,8 +30,7 @@ function matchesFilter(row: DataRow, filter: DashboardFilter) {
   if (filter.operator === "contains") return String(value ?? "").toLowerCase().includes(String(filter.value ?? "").toLowerCase());
   if (filter.operator === "in") return Array.isArray(filter.value) ? filter.value.includes(value) : true;
   if ((filter.operator === "between" || filter.operator === "range") && Array.isArray(filter.value)) {
-    const raw = String(value);
-    return raw >= String(filter.value[0]) && raw <= String(filter.value[1]);
+    return compareDataValues(value, filter.value[0]) >= 0 && compareDataValues(value, filter.value[1]) <= 0;
   }
   const left = toNumber(value);
   const right = toNumber(filter.value);
@@ -64,8 +62,8 @@ export function executeDashboardQuery(rows: DataRow[], query: DashboardQuerySpec
 
   if (viewState.selectedDateRange && query.x?.field) {
     filtered = filtered.filter((row) => {
-      const value = String(row[query.x!.field]);
-      return value >= viewState.selectedDateRange!.from && value <= viewState.selectedDateRange!.to;
+      const value = row[query.x!.field];
+      return compareDataValues(value, viewState.selectedDateRange!.from) >= 0 && compareDataValues(value, viewState.selectedDateRange!.to) <= 0;
     });
   }
 

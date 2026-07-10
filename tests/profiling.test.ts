@@ -12,4 +12,15 @@ describe("profileDataset", () => {
     expect(profile.detectedMetricColumns).toContain("Ventas");
     expect(profile.detectedGeoColumns).toContain("Region");
   });
+
+  it("profiles LatAm currency and dates as analytical fields", () => {
+    const profile = profileDataset([
+      { Fecha: "01/04/2024", Ventas: "$1.200,50", Pais: "Chile" },
+      { Fecha: "15/04/2024", Ventas: "$2.300,25", Pais: "Peru" }
+    ], "ventas_latam.csv");
+
+    expect(profile.detectedDateColumns).toContain("Fecha");
+    expect(profile.detectedMetricColumns).toContain("Ventas");
+    expect(profile.columns.find((column) => column.normalizedName === "Ventas")?.max).toBe(2300.25);
+  });
 });

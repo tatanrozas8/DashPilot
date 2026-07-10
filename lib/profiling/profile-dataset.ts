@@ -1,4 +1,5 @@
 import type { DataRow, DatasetColumnProfile, DatasetProfile, InferredColumnType, NormalizedColumn, SemanticColumnType } from "@/types/dataset";
+import { parseDateValue, parseLocaleNumber } from "@/lib/data/parse-values";
 import { slugify } from "@/lib/utils";
 
 const geoHints = ["region", "pais", "ciudad", "zona", "comuna", "estado"];
@@ -11,19 +12,8 @@ function isEmpty(value: unknown) {
   return value === null || value === undefined || value === "";
 }
 
-function asNumber(value: unknown) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value !== "string") return null;
-  const normalized = value.replace(/[$,%\s]/g, "").replace(/\./g, "").replace(",", ".");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function isDateLike(value: unknown) {
-  if (value instanceof Date) return !Number.isNaN(value.getTime());
-  if (typeof value !== "string") return false;
-  const parsed = Date.parse(value);
-  return !Number.isNaN(parsed) && /\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(value);
+  return parseDateValue(value) !== null;
 }
 
 function inferType(name: string, values: unknown[]): InferredColumnType {
@@ -31,7 +21,7 @@ function inferType(name: string, values: unknown[]): InferredColumnType {
   const populated = values.filter((value) => !isEmpty(value));
   if (populated.length === 0) return "unknown";
   const dateRatio = populated.filter(isDateLike).length / populated.length;
-  const numberRatio = populated.filter((value) => asNumber(value) !== null).length / populated.length;
+  const numberRatio = populated.filter((value) => parseLocaleNumber(value) !== null).length / populated.length;
   const booleanRatio = populated.filter((value) => typeof value === "boolean" || ["true", "false", "si", "no"].includes(String(value).toLowerCase())).length / populated.length;
 
   if (dateRatio > 0.75 || dateHints.some((hint) => normalized.includes(hint))) return "date";
@@ -68,7 +58,7 @@ export function profileDataset(rows: DataRow[], fileName = "Datos de ejemplo.xls
     const populated = values.filter((value) => !isEmpty(value));
     const unique = new Set(populated.map((value) => String(value)));
     const inferredType = inferType(metadata?.originalName ?? column, values);
-    const numeric = populated.map(asNumber).filter((value): value is number => value !== null);
+    const numeric = populated.map(parseLocaleNumber).filter((value): value is number => value !== null);
     const numericRatio = populated.length ? numeric.length / populated.length : 0;
 
     return {

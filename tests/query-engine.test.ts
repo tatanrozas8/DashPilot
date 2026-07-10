@@ -62,4 +62,30 @@ describe("query engine", () => {
     expect(Object.keys(result.rows[0] ?? {})).toEqual(["Region", "Ventas"]);
     expect(Number(result.rows[0]?.Ventas ?? 0)).toBeGreaterThanOrEqual(Number(result.rows[1]?.Ventas ?? 0));
   });
+
+  it("handles LatAm money and day-first date ranges", () => {
+    const rows = [
+      { Fecha: "01/04/2024", Ventas: "$1.200,50", Region: "Norte" },
+      { Fecha: "15/04/2024", Ventas: "$2.300,25", Region: "Sur" },
+      { Fecha: "01/05/2024", Ventas: "$900,00", Region: "Norte" }
+    ];
+
+    const filtered = applyDashboardFilters(rows, [{ field: "Fecha", operator: "between", value: ["01/04/2024", "30/04/2024"] }]);
+    const result = executeDashboardQuery(filtered, { metric: { field: "Ventas", aggregation: "sum" } });
+
+    expect(filtered).toHaveLength(2);
+    expect(result[0]?.value).toBeCloseTo(3500.75);
+  });
+
+  it("sorts table rows with formatted numeric values", () => {
+    const rows = [
+      { Cliente: "A", Ventas: "$9.900" },
+      { Cliente: "B", Ventas: "$10.100" },
+      { Cliente: "C", Ventas: "$1.200" }
+    ];
+
+    const result = queryTableRows(rows, { sort: { field: "Ventas", direction: "desc" } });
+
+    expect(result.rows.map((row) => row.Cliente)).toEqual(["B", "A", "C"]);
+  });
 });

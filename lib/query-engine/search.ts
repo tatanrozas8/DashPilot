@@ -1,5 +1,6 @@
 import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardFilter } from "@/types/dashboard";
+import { compareDataValues } from "@/lib/data/parse-values";
 import { applyDashboardFilters } from "@/lib/query-engine/execute-dashboard-query";
 import { slugify } from "@/lib/utils";
 
@@ -15,13 +16,6 @@ export interface TableQueryState {
 
 function valueText(value: unknown) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-}
-
-function compareValues(left: unknown, right: unknown) {
-  const leftNumber = typeof left === "number" ? left : Number(String(left ?? "").replace(/[$,%\s]/g, "").replace(",", "."));
-  const rightNumber = typeof right === "number" ? right : Number(String(right ?? "").replace(/[$,%\s]/g, "").replace(",", "."));
-  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber - rightNumber;
-  return String(left ?? "").localeCompare(String(right ?? ""), "es", { numeric: true, sensitivity: "base" });
 }
 
 export function searchRows(rows: DataRow[], query = "", columns?: string[]) {
@@ -44,7 +38,7 @@ export function selectColumns(rows: DataRow[], columns: string[]) {
 export function sortRows(rows: DataRow[], sort?: TableQueryState["sort"]) {
   if (!sort) return rows;
   return [...rows].sort((left, right) => {
-    const diff = compareValues(left[sort.field], right[sort.field]);
+    const diff = compareDataValues(left[sort.field], right[sort.field]);
     return sort.direction === "asc" ? diff : -diff;
   });
 }

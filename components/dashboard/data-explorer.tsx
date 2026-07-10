@@ -1,15 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { BarChart3, Download, Eye, Filter, Plus, Search, Table2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, BarChart3, CheckCircle2, Download, Eye, Filter, Plus, Search, Table2 } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { queryTableRows } from "@/lib/query-engine/search";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatNumber } from "@/lib/utils";
-import type { DatasetColumnProfile } from "@/types/dataset";
-import type { DashboardWidget, WidgetType } from "@/types/dashboard";
+import type { DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
+import type { DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 
 const PAGE_SIZE = 50;
 
@@ -48,7 +48,7 @@ function FieldRow({ column, selected, onToggle, onFilter }: { column: DatasetCol
           <p className="truncate text-sm font-bold text-[#071334]">{column.displayName}</p>
           <p className="truncate text-xs text-[#697597]">{column.originalName}</p>
         </button>
-        <button onClick={onFilter} className="grid size-8 shrink-0 place-items-center rounded-md text-[#3d35ff] hover:bg-[#f4f5ff]" aria-label={`Filtrar por ${column.displayName}`}>
+        <button onClick={onFilter} className="grid size-8 shrink-0 place-items-center rounded-md text-[#3d35ff] hover:bg-[#f4f5ff]" aria-label={`Mostrar solo ${column.displayName}`}>
           <Filter className="size-4" />
         </button>
       </div>
@@ -60,6 +60,39 @@ function FieldRow({ column, selected, onToggle, onFilter }: { column: DatasetCol
         {selected && <span className="rounded-full bg-[#f0f1ff] px-2 py-1 text-[#3d35ff]">visible</span>}
       </div>
     </div>
+  );
+}
+
+function DataQualitySummary({ profile }: { profile: DatasetProfile }) {
+  const warnings = profile.qualityWarnings.slice(0, 2);
+  const qualityTone = profile.qualityScore >= 85 ? "text-emerald-700 bg-emerald-50" : profile.qualityScore >= 70 ? "text-amber-700 bg-amber-50" : "text-rose-700 bg-rose-50";
+  const summaryItems = [
+    { label: "Filas", value: formatNumber(profile.rowCount), detail: `${profile.columnCount} columnas`, icon: Table2 },
+    { label: "Metricas", value: formatNumber(profile.detectedMetricColumns.length), detail: "listas para KPIs", icon: BarChart3 },
+    { label: "Dimensiones", value: formatNumber(profile.detectedDimensionColumns.length), detail: "para segmentar", icon: Eye },
+    { label: "Calidad", value: `${profile.qualityScore}/100`, detail: warnings[0] ?? "sin alertas criticas", icon: profile.qualityScore >= 85 ? CheckCircle2 : AlertTriangle }
+  ];
+
+  return (
+    <section className="grid gap-3 md:grid-cols-4">
+      {summaryItems.map((item) => (
+        <div key={item.label} className="soft-card rounded-xl p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold uppercase tracking-[0.08em] text-[#697597]">{item.label}</p>
+            <span className={cn("grid size-8 place-items-center rounded-lg", item.label === "Calidad" ? qualityTone : "bg-[#f4f5ff] text-[#3d35ff]")}>
+              <item.icon className="size-4" />
+            </span>
+          </div>
+          <p className="mt-3 text-2xl font-bold tracking-[-0.03em]">{item.value}</p>
+          <p className="mt-1 text-xs font-semibold leading-5 text-[#697597]">{item.detail}</p>
+        </div>
+      ))}
+      {warnings.length > 1 && (
+        <div className="soft-card rounded-xl border-amber-100 bg-amber-50/60 p-4 md:col-span-4">
+          <p className="text-sm font-semibold text-amber-800">{warnings.join(" ")}</p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -132,16 +165,22 @@ export function DataExplorerPanel() {
   const viewState = useDashPilotStore((state) => state.viewState);
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const [page, setPage] = useState(0);
-  const allColumns = profile.columns.map((column) => column.normalizedName);
-  const visibleColumns = viewState.dataExplorer?.visibleColumns?.length ? viewState.dataExplorer.visibleColumns : allColumns.slice(0, 8);
+  const allColumns = useMemo(() => profile.columns.map((column) => column.normalizedName), [profile.columns]);
+  const allColumnSet = useMemo(() => new Set(allColumns), [allColumns]);
+  const persistedColumns = viewState.dataExplorer?.visibleColumns?.filter((column) => allColumnSet.has(column)) ?? [];
+  const visibleColumns = persistedColumns.length ? persistedColumns : allColumns.slice(0, 8);
   const search = viewState.dataExplorer?.search ?? "";
-  const sort = viewState.dataExplorer?.sort;
+  const sort = viewState.dataExplorer?.sort && allColumnSet.has(viewState.dataExplorer.sort.field) ? viewState.dataExplorer.sort : undefined;
   const table = useMemo(() => queryTableRows(rows, { search, columns: visibleColumns, filters: viewState.filters, sort }), [rows, search, sort, viewState.filters, visibleColumns]);
   const pageRows = table.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const columnGroups = useMemo(() => groupColumns(profile.columns), [profile.columns]);
   const pageCount = Math.max(1, Math.ceil(table.filteredRows / PAGE_SIZE));
 
-  function patchExplorer(patch: NonNullable<typeof viewState.dataExplorer>) {
+  useEffect(() => {
+    setPage((value) => Math.min(value, pageCount - 1));
+  }, [pageCount]);
+
+  function patchExplorer(patch: Partial<NonNullable<DashboardViewState["dataExplorer"]>>) {
     setViewState({ dataExplorer: { ...viewState.dataExplorer, ...patch, isOpen: true } });
   }
 
@@ -152,7 +191,8 @@ export function DataExplorerPanel() {
   }
 
   function exportCsv() {
-    const header = visibleColumns.join(",");
+    const labelFor = (column: string) => profile.columns.find((item) => item.normalizedName === column)?.displayName ?? column;
+    const header = visibleColumns.map(labelFor).join(",");
     const body = table.rows
       .map((row) => visibleColumns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -166,6 +206,7 @@ export function DataExplorerPanel() {
 
   return (
     <section className="space-y-5">
+      <DataQualitySummary profile={profile} />
       <div className="grid gap-5 xl:grid-cols-[280px_1fr]">
         <aside className="soft-card max-h-[720px] overflow-y-auto rounded-xl p-4">
           <h3 className="flex items-center gap-2 font-bold"><Eye className="size-4 text-[#3d35ff]" /> Campos</h3>
@@ -217,11 +258,17 @@ export function DataExplorerPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.map((row, index) => (
-                    <tr key={`${page}-${index}`} className="border-b border-[#edf1fa] last:border-0">
+                  {pageRows.length ? pageRows.map((row, index) => (
+                    <tr key={`${page}-${index}`} className="border-b border-[#edf1fa] last:border-0 hover:bg-[#fbfcff]">
                       {visibleColumns.map((column) => <td key={column} className="max-w-[240px] truncate px-3 py-3 text-[#1c2748]">{String(row[column] ?? "-")}</td>)}
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={Math.max(1, visibleColumns.length)} className="px-4 py-10 text-center text-sm font-semibold text-[#697597]">
+                        No hay filas para la busqueda o filtros actuales.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

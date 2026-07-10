@@ -10,3 +10,8 @@ Object.defineProperty(globalThis, "ResizeObserver", {
   value: ResizeObserverMock,
   writable: true
 });
+
+Object.defineProperty(Element.prototype, "scrollIntoView", {
+  value: () => {},
+  writable: true
+});

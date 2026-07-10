@@ -72,6 +72,8 @@ interface DashPilotState {
   uploadedFileName: string;
   presentationOptions: PresentationOptions;
   shareSettings: ShareSettings;
+  isCopilotPanelOpen: boolean;
+  isCopilotThinking: boolean;
   setDataset: (rows: DataRow[], fileName: string) => void;
   setParsedDataset: (parsed: FileParseResult) => void;
   selectSheet: (sheetName: string) => void;
@@ -94,6 +96,7 @@ interface DashPilotState {
   generatePresentation: () => void;
   setPresentationOptions: (options: Partial<PresentationOptions>) => void;
   setShareSettings: (settings: Partial<ShareSettings>) => void;
+  toggleCopilotPanel: () => void;
 }
 
 function createProjectSummary(fileName: string, id = "local-project"): ProjectSummary {
@@ -204,7 +207,9 @@ function createInitialState() {
       requirePassword: false,
       access: "public" as const,
       expiresAt: "2026-12-31"
-    }
+    },
+    isCopilotPanelOpen: true,
+    isCopilotThinking: false
   };
 }
 
@@ -484,38 +489,44 @@ export const useDashPilotStore = create<DashPilotState>()(
         const before = get();
         set({
           messages: [...before.messages, userMessage],
-          chatMessages: [...before.messages, userMessage]
+          chatMessages: [...before.messages, userMessage],
+          isCopilotThinking: true
         });
-        const { reply, action, rejectedActionReason } = await requestCopilotResponse({
-          prompt,
-          datasetProfile: before.profile,
-          semanticModel: inferSemanticLayer(before.profile, before.rows),
-          dashboardSpec: before.dashboard,
-          viewState: before.viewState
-        });
-        let nextDashboard = get().dashboard;
-        let nextViewState = get().viewState;
-        let finalReply = rejectedActionReason ? `${reply} No aplique cambios.` : reply;
-        if (action && action.type !== "generate_presentation") {
-          const applied = applyDashboardAction(nextDashboard, nextViewState, action);
-          nextDashboard = applied.spec;
-          nextViewState = applied.viewState;
-          finalReply = `${reply} ${applied.message}`;
+        try {
+          const { reply, action, rejectedActionReason } = await requestCopilotResponse({
+            prompt,
+            datasetProfile: before.profile,
+            semanticModel: inferSemanticLayer(before.profile, before.rows),
+            dashboardSpec: before.dashboard,
+            viewState: before.viewState
+          });
+          let nextDashboard = get().dashboard;
+          let nextViewState = get().viewState;
+          let finalReply = rejectedActionReason ? `${reply} No aplique cambios.` : reply;
+          if (action && action.type !== "generate_presentation") {
+            const applied = applyDashboardAction(nextDashboard, nextViewState, action);
+            nextDashboard = applied.spec;
+            nextViewState = applied.viewState;
+            finalReply = `${reply} ${applied.message}`;
+          }
+          const botMessage = assistantMessage(finalReply, action);
+          const dashboardChanged = nextDashboard !== get().dashboard;
+          set({
+            dashboard: nextDashboard,
+            dashboardSpec: nextDashboard,
+            viewState: nextViewState,
+            filters: nextViewState,
+            messages: [...get().messages, botMessage],
+            chatMessages: [...get().messages, botMessage],
+            versions: dashboardChanged ? [...get().versions, nextDashboard] : get().versions,
+            isCopilotThinking: false
+          });
+          void saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage);
+          void saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage);
+          if (dashboardChanged) void createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot");
+        } catch {
+          set({ isCopilotThinking: false });
         }
-        const botMessage = assistantMessage(finalReply, action);
-        const dashboardChanged = nextDashboard !== get().dashboard;
-        set({
-          dashboard: nextDashboard,
-          dashboardSpec: nextDashboard,
-          viewState: nextViewState,
-          filters: nextViewState,
-          messages: [...get().messages, botMessage],
-          chatMessages: [...get().messages, botMessage],
-          versions: dashboardChanged ? [...get().versions, nextDashboard] : get().versions
-        });
-        void saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage);
-        void saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage);
-        if (dashboardChanged) void createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot");
       },
       generatePresentation: () => {
         const presentation = generatePresentationSpec(get().dashboard, get().presentationOptions.theme);
@@ -527,7 +538,8 @@ export const useDashPilotStore = create<DashPilotState>()(
         });
       },
       setPresentationOptions: (options) => set({ presentationOptions: { ...get().presentationOptions, ...options } }),
-      setShareSettings: (settings) => set({ shareSettings: { ...get().shareSettings, ...settings } })
+      setShareSettings: (settings) => set({ shareSettings: { ...get().shareSettings, ...settings } }),
+      toggleCopilotPanel: () => set({ isCopilotPanelOpen: !get().isCopilotPanelOpen })
     }),
     {
       name: "dashpilot-mvp",
@@ -569,7 +581,8 @@ export const useDashPilotStore = create<DashPilotState>()(
         isDemoMode: state.isDemoMode,
         uploadedFileName: state.uploadedFileName,
         presentationOptions: state.presentationOptions,
-        shareSettings: state.shareSettings
+        shareSettings: state.shareSettings,
+        isCopilotPanelOpen: state.isCopilotPanelOpen
       })
     }
   )

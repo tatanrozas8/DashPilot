@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Download, FileImage, FileText, Link2, MonitorPlay, Pencil, Play, Save, Share2, Users, X } from "lucide-react";
+import { Download, FileImage, FileText, Link2, MonitorPlay, Pencil, Play, Save, Share2, Sparkles, Users, X } from "lucide-react";
 import { DashboardEditor } from "@/components/dashboard/dashboard-editor";
 import { CopilotPanel, DashboardFilters, DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { AppShell } from "@/components/shared/app-shell";
@@ -23,9 +23,11 @@ export function DashboardWorkspace() {
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
   const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
+  const isCopilotPanelOpen = useDashPilotStore((state) => state.isCopilotPanelOpen);
   const startDashboardEditing = useDashPilotStore((state) => state.startDashboardEditing);
   const cancelDashboardEditing = useDashPilotStore((state) => state.cancelDashboardEditing);
   const commitDashboardEditing = useDashPilotStore((state) => state.commitDashboardEditing);
+  const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
   const hydrateDashboard = useDashPilotStore((state) => state.hydrateDashboard);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const dashboardId = params.dashboardId ?? activeDashboardId;
@@ -73,7 +75,7 @@ export function DashboardWorkspace() {
   }
 
   return (
-    <AppShell right={isDashboardEditing ? <DashboardEditor /> : <CopilotPanel />}>
+    <AppShell right={isDashboardEditing ? <DashboardEditor /> : isCopilotPanelOpen ? <CopilotPanel /> : undefined}>
       <div className="p-5 lg:p-8">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
@@ -90,6 +92,9 @@ export function DashboardWorkspace() {
               <>
                 <Button onClick={startDashboardEditing} variant="secondary"><Pencil className="size-4" /> Editar dashboard</Button>
                 <Button onClick={saveDashboard} variant="secondary"><Save className="size-4" /> Guardar</Button>
+                {!isCopilotPanelOpen && (
+                  <Button onClick={toggleCopilotPanel} variant="soft"><Sparkles className="size-4" /> Copiloto IA</Button>
+                )}
               </>
             )}
             <Link href="/app/presentaciones/crear" className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25"><Play className="size-4" /> Presentar</Link>

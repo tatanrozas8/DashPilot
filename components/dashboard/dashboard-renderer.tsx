@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -314,42 +314,92 @@ export function DashboardFilters() {
 export function CopilotPanel() {
   const messages = useDashPilotStore((state) => state.messages);
   const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
+  const isCopilotThinking = useDashPilotStore((state) => state.isCopilotThinking);
+  const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
+  const quickPrompts = [
+    "Hazlo mas ejecutivo",
+    "Analizar margen por categoria",
+    "Enfocar analisis por region",
+    "Agregar analisis por vendedor"
+  ];
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, isCopilotThinking]);
+
+  function submitPrompt(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed || isCopilotThinking) return;
+    void sendPrompt(trimmed);
+    setPrompt("");
+  }
 
   return (
-    <aside className="fixed bottom-0 right-0 top-20 z-20 hidden w-[360px] border-l border-[#e3e8f5] bg-white p-5 xl:block">
-      <div className="flex items-center justify-between">
+    <aside className="fixed bottom-0 right-0 top-20 z-40 flex w-full min-w-0 flex-col border-l border-[#e3e8f5] bg-white shadow-2xl shadow-slate-900/10 sm:w-[420px] xl:z-20 xl:w-[360px] xl:shadow-none">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b border-[#edf1fa] px-5">
         <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-6 text-[#3d35ff]" /> Copiloto IA</h2>
-        <button onClick={() => sendPrompt("Oculta el panel cuando conectemos modo compacto")} className="text-[#697597]"><X className="size-5" /></button>
+        <button
+          aria-label="Cerrar Copiloto IA"
+          onClick={toggleCopilotPanel}
+          className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff]"
+        >
+          <X className="size-5" />
+        </button>
       </div>
-      <div className="scrollbar-soft mt-7 h-[calc(100dvh-330px)] space-y-4 overflow-y-auto pr-1">
+      <div className="scrollbar-soft min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
         {messages.map((message) => (
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>
             <p className="mb-1 text-xs font-bold text-[#697597]">{message.role === "user" ? "Tu" : "Copiloto IA"}</p>
             {message.content}
           </div>
         ))}
+        {isCopilotThinking && (
+          <div className="mr-4 rounded-xl border border-[#e5e9f5] bg-white p-4 text-sm font-semibold leading-6 text-[#697597]">
+            <p className="mb-1 text-xs font-bold text-[#697597]">Copiloto IA</p>
+            Pensando...
+          </div>
+        )}
+        <div ref={messagesEndRef} />
       </div>
-      <div className="mt-5 space-y-2">
-        {["Mostrar solo las 5 regiones principales", "Analizar margen por categoria", "¿Que factores impulsaron el crecimiento?"].map((quick) => (
-          <button key={quick} onClick={() => sendPrompt(quick)} className="w-full rounded-full border border-[#dfe5fb] px-4 py-2 text-left text-xs font-semibold text-[#3d35ff] hover:bg-[#f6f7ff]">
-            <Sparkles className="mr-2 inline size-3" /> {quick}
+      <div className="shrink-0 border-t border-[#edf1fa] px-5 pb-5 pt-4">
+        <div className="space-y-2">
+          {quickPrompts.map((quick) => (
+            <button
+              key={quick}
+              disabled={isCopilotThinking}
+              onClick={() => submitPrompt(quick)}
+              className="w-full rounded-full border border-[#dfe5fb] px-4 py-2 text-left text-xs font-semibold text-[#3d35ff] transition hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Sparkles className="mr-2 inline size-3" /> {quick}
+            </button>
+          ))}
+        </div>
+        <form
+          className="mt-4 flex items-center gap-2 rounded-xl border border-[#dfe5f0] bg-white p-2 focus-within:border-[#3d35ff] focus-within:ring-2 focus-within:ring-[#d8dcff]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitPrompt(prompt);
+          }}
+        >
+          <input
+            className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none"
+            placeholder="Escribe tu mensaje..."
+            value={prompt}
+            disabled={isCopilotThinking}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+          <button
+            aria-label="Enviar mensaje"
+            disabled={!prompt.trim() || isCopilotThinking}
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-[#3d35ff] text-white transition hover:bg-[#3028df] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Send className="size-4" />
           </button>
-        ))}
+        </form>
+        <p className="mt-3 text-center text-xs text-[#697597]">DashPilot puede cometer errores. Verifica la informacion importante.</p>
       </div>
-      <form
-        className="mt-4 flex items-center gap-2 rounded-xl border border-[#dfe5f0] p-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!prompt.trim()) return;
-          sendPrompt(prompt);
-          setPrompt("");
-        }}
-      >
-        <input className="min-w-0 flex-1 px-2 text-sm outline-none" placeholder="Escribe tu mensaje..." value={prompt} onChange={(event) => setPrompt(event.target.value)} />
-        <button className="grid size-10 place-items-center rounded-full bg-[#3d35ff] text-white"><Send className="size-4" /></button>
-      </form>
-      <p className="mt-3 text-center text-xs text-[#697597]">DashPilot puede cometer errores. Verifica la informacion importante.</p>
     </aside>
   );
 }

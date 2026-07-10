@@ -99,6 +99,42 @@ function createWidget(context: CopilotRequestContext, dimension?: string): Dashb
   };
 }
 
+function createAnalysisWidget(context: CopilotRequestContext, options: { metric?: string; dimension?: string; title: string; aggregation?: "sum" | "avg" | "count" | "min" | "max"; format?: string }) {
+  const metric = firstExisting([
+    options.metric,
+    context.semanticModel.primaryMetric?.field,
+    context.datasetProfile.detectedMetricColumns[0]
+  ], context.datasetProfile);
+  const dimension = firstExisting([
+    options.dimension,
+    context.semanticModel.primaryDimension?.field,
+    context.datasetProfile.detectedDimensionColumns[0]
+  ], context.datasetProfile);
+  if (!metric || !dimension) return undefined;
+
+  return {
+    id: nextWidgetId(context.dashboardSpec),
+    type: "bar_chart" as const,
+    title: options.title,
+    query: { metric: { field: metric, aggregation: options.aggregation ?? "sum" }, groupBy: [dimension], orderBy: { field: "value" as const, direction: "desc" as const }, limit: 5 },
+    config: { format: options.format ?? "number", compact: true },
+    position: { x: 0, y: Math.max(0, ...context.dashboardSpec.widgets.map((widget) => widget.position.y + widget.position.h)), w: 6, h: 3 }
+  };
+}
+
+function widgetGroupedBy(spec: DashboardSpec, field?: string) {
+  if (!field) return undefined;
+  return spec.widgets.find((widget) => widget.query?.groupBy?.includes(field));
+}
+
+function firstWidgetByType(spec: DashboardSpec, type: DashboardWidget["type"]) {
+  return spec.widgets.find((widget) => widget.type === type);
+}
+
+function comparisonTarget(context: CopilotRequestContext) {
+  return context.dashboardSpec.widgets.find((widget) => widget.query?.x?.field) ?? firstWidgetByType(context.dashboardSpec, "line_chart") ?? firstWidgetByType(context.dashboardSpec, "kpi_card");
+}
+
 function filterValue(prompt: string) {
   const match = prompt.match(/(?:region|zona|territorio|cliente|vendedor|producto|categoria|estado)\s+([a-z0-9\s]+)/i);
   return match?.[1]?.trim().split(/\s+/).slice(0, 3).join(" ");
@@ -107,6 +143,63 @@ function filterValue(prompt: string) {
 function mockAction(context: CopilotRequestContext): { reply: string; action?: DashboardAction } {
   const prompt = normalize(context.prompt);
   const target = preferredWidget(context.dashboardSpec, context.prompt);
+
+  if (prompt.includes("ejecutivo")) {
+    const kpi = firstWidgetByType(context.dashboardSpec, "kpi_card") ?? firstWidgetByType(context.dashboardSpec, "insight_text");
+    if (!kpi) return { reply: "Simplifique la vista ejecutiva, pero no encontre KPIs existentes para destacar." };
+    return {
+      reply: "Simplifique la vista ejecutiva y destaque los KPIs principales para que la lectura sea mas directa.",
+      action: { type: "explain_widget", widgetId: kpi.id }
+    };
+  }
+
+  if (prompt.includes("vendedor")) {
+    const seller = context.semanticModel.primarySeller?.field;
+    if (!seller) return { reply: "No encontre una columna compatible de vendedor en el dataset, asi que no aplique cambios." };
+    const existing = widgetGroupedBy(context.dashboardSpec, seller);
+    if (existing) {
+      return { reply: `Enfoque el analisis por vendedor usando la columna ${seller}.`, action: { type: "explain_widget", widgetId: existing.id } };
+    }
+    const widget = createAnalysisWidget(context, { dimension: seller, title: "Analisis por Vendedor" });
+    if (widget) return { reply: `Agregue un analisis por vendedor usando la columna ${seller}.`, action: { type: "add_widget", widget } };
+    return { reply: "Encontre una columna de vendedor, pero faltan metricas compatibles para crear el analisis." };
+  }
+
+  if (prompt.includes("region")) {
+    const region = context.semanticModel.primaryGeography?.field ?? firstExisting(context.datasetProfile.detectedGeoColumns, context.datasetProfile);
+    if (!region) return { reply: "No encontre una columna compatible de region en el dataset, asi que no aplique cambios." };
+    const existing = widgetGroupedBy(context.dashboardSpec, region);
+    if (existing) {
+      return { reply: `Enfoque el dashboard en el analisis por region usando la columna ${region}.`, action: { type: "explain_widget", widgetId: existing.id } };
+    }
+    const widget = createAnalysisWidget(context, { dimension: region, title: "Analisis por Region" });
+    if (widget) return { reply: `Agregue un analisis por region usando la columna ${region}.`, action: { type: "add_widget", widget } };
+    return { reply: "Encontre una columna de region, pero faltan metricas compatibles para crear el analisis." };
+  }
+
+  if (prompt.includes("margen")) {
+    const margin = context.semanticModel.marginMetrics[0]?.field;
+    if (!margin) return { reply: "No encontre una columna compatible de margen en el dataset, asi que no aplique cambios." };
+    const existing = context.dashboardSpec.widgets.find((widget) => widget.query?.metric?.field === margin);
+    if (existing) {
+      return { reply: `Analice el margen usando la columna ${margin} y destaque el widget existente.`, action: { type: "explain_widget", widgetId: existing.id } };
+    }
+    const dimension = context.semanticModel.primaryCategory?.field ?? context.semanticModel.primarySeller?.field ?? context.semanticModel.primaryGeography?.field ?? context.semanticModel.primaryDimension?.field;
+    const widget = createAnalysisWidget(context, { metric: margin, dimension, title: "Margen por Segmento", aggregation: "avg", format: "percentage" });
+    if (widget) return { reply: `Agregue un analisis de margen promedio usando la columna ${margin}.`, action: { type: "add_widget", widget } };
+    return { reply: "Encontre una columna de margen, pero falta una dimension compatible para segmentarla." };
+  }
+
+  if (prompt.includes("comparar") || prompt.includes("trimestre anterior")) {
+    const date = context.semanticModel.primaryDate?.field ?? context.datasetProfile.detectedDateColumns[0];
+    if (!date) return { reply: "No encontre una columna de fecha suficiente para activar la comparacion con periodos anteriores." };
+    const widget = comparisonTarget(context);
+    if (!widget) return { reply: "Encontre una columna de fecha, pero no hay un widget compatible para activar la comparacion." };
+    return {
+      reply: `Active la comparacion contra el periodo anterior usando la columna temporal ${date}.`,
+      action: { type: "update_widget", widgetId: widget.id, changes: { config: { comparison: true, comparisonMode: "previous_quarter", comparisonField: date } } }
+    };
+  }
 
   if ((prompt.includes("limpia") || prompt.includes("borra") || prompt.includes("clear")) && prompt.includes("filtro")) {
     return { reply: "Limpie los filtros activos para volver a la vista general.", action: { type: "clear_filters" } };

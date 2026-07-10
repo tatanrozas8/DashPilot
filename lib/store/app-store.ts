@@ -6,15 +6,14 @@ import type { ChatMessage } from "@/types/ai";
 import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
 import type { DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
+import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { requestCopilotResponse } from "@/lib/ai/copilot-client";
 import { assistantMessage } from "@/lib/ai/copilot-service";
-import { applyDashboardAction } from "@/lib/dashboard-spec/apply-dashboard-action";
 import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { createDemoDataset } from "@/lib/data/demo-dataset";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
-import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { createDashboardVersion } from "@/lib/supabase/dashboards";
 import { saveChatMessage } from "@/lib/supabase/chat";
 import { nameFromFile } from "@/lib/utils/name-from-file";
@@ -493,32 +492,46 @@ export const useDashPilotStore = create<DashPilotState>()(
           isCopilotThinking: true
         });
         try {
-          const { reply, action, rejectedActionReason } = await requestCopilotResponse({
+          const copilotContext = buildCopilotContext({
+            rows: before.rows,
+            datasetProfile: before.profile,
+            dashboardSpec: before.dashboard,
+            viewState: before.viewState,
+            presentationSpec: before.presentation,
+            messages: before.messages
+          });
+          const result = await requestCopilotResponse({
             prompt,
             datasetProfile: before.profile,
-            semanticModel: inferSemanticLayer(before.profile, before.rows),
+            semanticModel: copilotContext.semanticModel,
             dashboardSpec: before.dashboard,
-            viewState: before.viewState
+            viewState: before.viewState,
+            presentationSpec: before.presentation,
+            messages: before.messages,
+            copilotContext
           });
-          let nextDashboard = get().dashboard;
-          let nextViewState = get().viewState;
-          let finalReply = rejectedActionReason ? `${reply} No aplique cambios.` : reply;
-          if (action && action.type !== "generate_presentation") {
-            const applied = applyDashboardAction(nextDashboard, nextViewState, action);
-            nextDashboard = applied.spec;
-            nextViewState = applied.viewState;
-            finalReply = `${reply} ${applied.message}`;
+          let nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
+          let nextViewState = result.updatedViewState ?? get().viewState;
+          let nextPresentation = result.updatedPresentationSpec ?? get().presentation;
+          if (result.actions?.some((action) => action.type === "generate_presentation")) {
+            nextPresentation = generatePresentationSpec(nextDashboard, get().presentationOptions.theme);
           }
-          const botMessage = assistantMessage(finalReply, action);
+          const warningText = result.warnings?.length ? ` Advertencias: ${result.warnings.join(" ")}` : "";
+          const botMessage = assistantMessage(`${result.reply}${warningText}`, result.action);
           const dashboardChanged = nextDashboard !== get().dashboard;
+          const presentationChanged = nextPresentation !== get().presentation;
           set({
             dashboard: nextDashboard,
             dashboardSpec: nextDashboard,
             viewState: nextViewState,
             filters: nextViewState,
+            presentation: nextPresentation,
+            presentationSpec: nextPresentation,
+            activePresentationId: nextPresentation.id,
             messages: [...get().messages, botMessage],
             chatMessages: [...get().messages, botMessage],
             versions: dashboardChanged ? [...get().versions, nextDashboard] : get().versions,
+            presentationOptions: presentationChanged ? { ...get().presentationOptions, generated: true } : get().presentationOptions,
             isCopilotThinking: false
           });
           void saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage);

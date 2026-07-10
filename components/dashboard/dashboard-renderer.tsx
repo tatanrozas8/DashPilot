@@ -17,6 +17,7 @@ import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
 import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
+import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
@@ -313,17 +314,28 @@ export function DashboardFilters() {
 
 export function CopilotPanel() {
   const messages = useDashPilotStore((state) => state.messages);
+  const rows = useDashPilotStore((state) => state.rows);
+  const profile = useDashPilotStore((state) => state.profile);
   const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
   const isCopilotThinking = useDashPilotStore((state) => state.isCopilotThinking);
   const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
-  const quickPrompts = [
-    "Hazlo mas ejecutivo",
-    "Analizar margen por categoria",
-    "Enfocar analisis por region",
-    "Agregar analisis por vendedor"
-  ];
+  const quickPrompts = useMemo(() => {
+    const semantic = inferSemanticLayer(profile, rows);
+    const prompts = ["Hazlo mas ejecutivo"];
+    const geo = semantic.primaryGeography;
+    const seller = semantic.primarySeller;
+    const margin = semantic.marginMetrics[0];
+    const date = semantic.primaryDate;
+    const productOrCategory = semantic.primaryProduct ?? semantic.primaryCategory;
+    if (geo) prompts.push(`Analizar por ${geo.displayName}`);
+    if (seller) prompts.push("Agregar ranking por vendedor");
+    if (margin) prompts.push("Analizar margen");
+    if (date) prompts.push("Comparar con periodo anterior");
+    if (productOrCategory) prompts.push(`Top ${productOrCategory.displayName}`);
+    return prompts.slice(0, 5);
+  }, [profile, rows]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });

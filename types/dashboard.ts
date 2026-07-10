@@ -91,12 +91,20 @@ export type QueryResultRow = DataRow & {
 
 export type DashboardAction =
   | { type: "add_widget"; widget: DashboardWidget }
+  | { type: "update_dashboard_title"; title: string }
+  | { type: "update_widget_title"; widgetId: string; title: string }
   | { type: "update_widget"; widgetId: string; changes: Partial<DashboardWidget> }
   | { type: "remove_widget"; widgetId: string }
+  | { type: "duplicate_widget"; widgetId: string }
   | { type: "change_chart_type"; widgetId: string; chartType: WidgetType }
   | { type: "add_filter"; filter: DashboardFilter }
+  | { type: "add_or_update_filter"; filter: DashboardFilter }
   | { type: "clear_filters" }
   | { type: "explain_widget"; widgetId: string }
+  | { type: "focus_widget"; widgetId: string }
+  | { type: "reorder_widgets"; widgetIds: string[] }
+  | { type: "create_calculated_metric"; id: string; title: string; formula: string; operands: string[] }
+  | { type: "generate_insight"; widgetId?: string; content: string }
   | { type: "update_view_state"; viewState: Partial<DashboardViewState> }
   | { type: "generate_presentation"; options: PresentationGenerationOptions };
 

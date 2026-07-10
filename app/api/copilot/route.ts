@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { datasetProfileSchema, dashboardSpecSchema } from "@/lib/validation/schemas";
+import { datasetProfileSchema, dashboardSpecSchema, presentationSpecSchema } from "@/lib/validation/schemas";
 import { buildCopilotPrompt, copilotOutputJsonSchema, createMockCopilotResponse, parseCopilotProviderOutput, type CopilotRequestContext } from "@/lib/ai/copilot-service";
 
 function outputText(payload: unknown) {
@@ -20,6 +20,7 @@ function parseContext(raw: unknown): CopilotRequestContext | null {
   const input = raw as Record<string, unknown>;
   const datasetProfile = datasetProfileSchema.safeParse(input.datasetProfile);
   const dashboardSpec = dashboardSpecSchema.safeParse(input.dashboardSpec);
+  const presentationSpec = input.presentationSpec ? presentationSpecSchema.safeParse(input.presentationSpec) : null;
   if (!datasetProfile.success || !dashboardSpec.success || typeof input.prompt !== "string" || typeof input.semanticModel !== "object" || !input.semanticModel || typeof input.viewState !== "object" || !input.viewState) {
     return null;
   }
@@ -28,7 +29,10 @@ function parseContext(raw: unknown): CopilotRequestContext | null {
     datasetProfile: datasetProfile.data,
     semanticModel: input.semanticModel as CopilotRequestContext["semanticModel"],
     dashboardSpec: dashboardSpec.data,
-    viewState: input.viewState as CopilotRequestContext["viewState"]
+    viewState: input.viewState as CopilotRequestContext["viewState"],
+    presentationSpec: presentationSpec?.success ? presentationSpec.data : undefined,
+    messages: Array.isArray(input.messages) ? input.messages as CopilotRequestContext["messages"] : undefined,
+    copilotContext: typeof input.copilotContext === "object" && input.copilotContext ? input.copilotContext as CopilotRequestContext["copilotContext"] : undefined
   };
 }
 

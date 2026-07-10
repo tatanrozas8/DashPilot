@@ -1,8 +1,13 @@
 import type { ChatMessage } from "@/types/ai";
 import type { DatasetProfile } from "@/types/dataset";
-import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
+import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
+import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
+import { applyAction } from "@/lib/ai/apply-action";
+import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
+import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { missingColumnMessage, resolveColumn } from "@/lib/semantic-layer";
 import { copilotOutputSchema, validateCopilotAction } from "@/lib/validation/copilot-actions";
 
 export interface CopilotRequestContext {
@@ -11,13 +16,29 @@ export interface CopilotRequestContext {
   semanticModel: SemanticLayer;
   dashboardSpec: DashboardSpec;
   viewState: DashboardViewState;
+  presentationSpec?: PresentationSpec;
+  messages?: ChatMessage[];
+  copilotContext?: CopilotContext;
 }
 
 export interface CopilotResult {
   reply: string;
   action?: DashboardAction;
+  actions?: DashboardAction[];
+  actionEnvelopes?: CopilotActionEnvelope[];
+  warnings?: string[];
   rejectedActionReason?: string;
+  updatedDashboardSpec?: DashboardSpec;
+  updatedViewState?: DashboardViewState;
+  updatedPresentationSpec?: PresentationSpec;
   source: "mock" | "provider";
+}
+
+export interface HandleCopilotMessageInput extends CopilotRequestContext {
+  source?: "mock" | "provider";
+  proposedActions?: DashboardAction[];
+  providerReply?: string;
+  rows?: never;
 }
 
 export const copilotOutputJsonSchema = {
@@ -35,7 +56,25 @@ export const copilotOutputJsonSchema = {
           required: ["type"],
           properties: {
             type: {
-              enum: ["add_widget", "update_widget", "remove_widget", "change_chart_type", "add_filter", "clear_filters", "explain_widget"]
+              enum: [
+                "update_dashboard_title",
+                "update_widget_title",
+                "add_widget",
+                "update_widget",
+                "remove_widget",
+                "duplicate_widget",
+                "change_chart_type",
+                "add_filter",
+                "add_or_update_filter",
+                "clear_filters",
+                "explain_widget",
+                "focus_widget",
+                "reorder_widgets",
+                "create_calculated_metric",
+                "generate_insight",
+                "update_view_state",
+                "generate_presentation"
+              ]
             }
           }
         }
@@ -53,6 +92,10 @@ function firstExisting(fields: (string | undefined)[], profile: DatasetProfile) 
   return fields.find((field) => field && columns.has(field));
 }
 
+function fieldLabel(profile: DatasetProfile, field?: string) {
+  return profile.columns.find((column) => column.normalizedName === field)?.displayName ?? field ?? "campo";
+}
+
 function chartWidgets(spec: DashboardSpec) {
   return spec.widgets.filter((widget) => compatibleWidgetTypes(widget).length > 1);
 }
@@ -62,44 +105,26 @@ function widgetByText(spec: DashboardSpec, text: string) {
   return spec.widgets.find((widget) => normalized.includes(normalize(widget.title)) || normalized.includes(normalize(widget.id)));
 }
 
-function preferredWidget(spec: DashboardSpec, prompt: string) {
-  return widgetByText(spec, prompt) ?? chartWidgets(spec)[0] ?? spec.widgets[0];
+function preferredWidget(spec: DashboardSpec, prompt: string, viewState?: DashboardViewState) {
+  return (viewState?.highlightedWidgetId ? spec.widgets.find((widget) => widget.id === viewState.highlightedWidgetId) : undefined) ?? widgetByText(spec, prompt) ?? chartWidgets(spec)[0] ?? spec.widgets[0];
 }
 
-function nextWidgetId(spec: DashboardSpec) {
+function nextWidgetId(spec: DashboardSpec, prefix = "ai_widget") {
   const ids = new Set(spec.widgets.map((widget) => widget.id));
   let index = spec.widgets.length + 1;
-  let id = `ai_widget_${index}`;
+  let id = `${prefix}_${index}`;
   while (ids.has(id)) {
     index += 1;
-    id = `ai_widget_${index}`;
+    id = `${prefix}_${index}`;
   }
   return id;
 }
 
-function createWidget(context: CopilotRequestContext, dimension?: string): DashboardWidget | undefined {
-  const metric = firstExisting([
-    context.semanticModel.primaryMetric?.field,
-    context.datasetProfile.detectedMetricColumns[0]
-  ], context.datasetProfile);
-  const groupBy = firstExisting([
-    dimension,
-    context.semanticModel.primaryDimension?.field,
-    context.datasetProfile.detectedDimensionColumns[0]
-  ], context.datasetProfile);
-  if (!metric || !groupBy) return undefined;
-
-  return {
-    id: nextWidgetId(context.dashboardSpec),
-    type: "bar_chart",
-    title: `Top ${groupBy}`,
-    query: { metric: { field: metric, aggregation: "sum" }, groupBy: [groupBy], orderBy: { field: "value", direction: "desc" }, limit: 5 },
-    config: { format: "number", compact: true },
-    position: { x: 0, y: Math.max(0, ...context.dashboardSpec.widgets.map((widget) => widget.position.y + widget.position.h)), w: 6, h: 3 }
-  };
+function nextWidgetPosition(spec: DashboardSpec, width = 6) {
+  return { x: 0, y: Math.max(0, ...spec.widgets.map((widget) => widget.position.y + widget.position.h)), w: width, h: 3 };
 }
 
-function createAnalysisWidget(context: CopilotRequestContext, options: { metric?: string; dimension?: string; title: string; aggregation?: "sum" | "avg" | "count" | "min" | "max"; format?: string }) {
+function createAnalysisWidget(context: CopilotRequestContext, options: { metric?: string; dimension?: string; title: string; aggregation?: "sum" | "avg" | "count" | "min" | "max"; format?: string; type?: WidgetType; limit?: number }) {
   const metric = firstExisting([
     options.metric,
     context.semanticModel.primaryMetric?.field,
@@ -114,12 +139,12 @@ function createAnalysisWidget(context: CopilotRequestContext, options: { metric?
 
   return {
     id: nextWidgetId(context.dashboardSpec),
-    type: "bar_chart" as const,
+    type: options.type ?? "bar_chart",
     title: options.title,
-    query: { metric: { field: metric, aggregation: options.aggregation ?? "sum" }, groupBy: [dimension], orderBy: { field: "value" as const, direction: "desc" as const }, limit: 5 },
-    config: { format: options.format ?? "number", compact: true },
-    position: { x: 0, y: Math.max(0, ...context.dashboardSpec.widgets.map((widget) => widget.position.y + widget.position.h)), w: 6, h: 3 }
-  };
+    query: { metric: { field: metric, aggregation: options.aggregation ?? "sum" }, groupBy: [dimension], orderBy: { field: "value" as const, direction: "desc" as const }, limit: options.limit ?? 5 },
+    config: { format: options.format ?? "number", compact: true, generatedBy: "copilot" },
+    position: nextWidgetPosition(context.dashboardSpec)
+  } satisfies DashboardWidget;
 }
 
 function widgetGroupedBy(spec: DashboardSpec, field?: string) {
@@ -135,173 +160,281 @@ function comparisonTarget(context: CopilotRequestContext) {
   return context.dashboardSpec.widgets.find((widget) => widget.query?.x?.field) ?? firstWidgetByType(context.dashboardSpec, "line_chart") ?? firstWidgetByType(context.dashboardSpec, "kpi_card");
 }
 
-function filterValue(prompt: string) {
-  const match = prompt.match(/(?:region|zona|territorio|cliente|vendedor|producto|categoria|estado)\s+([a-z0-9\s]+)/i);
-  return match?.[1]?.trim().split(/\s+/).slice(0, 3).join(" ");
+function extractQuotedTitle(prompt: string) {
+  const quoted = prompt.match(/["“”']([^"“”']+)["“”']/)?.[1];
+  if (quoted) return quoted.trim();
+  return prompt.match(/(?:nombre|titulo|título)\s+(?:a|por|como)\s+(.+)$/i)?.[1]?.trim();
 }
 
-function mockAction(context: CopilotRequestContext): { reply: string; action?: DashboardAction } {
+function filterValue(prompt: string) {
+  const match = prompt.match(/(?:filtra|filtrar|filtro|solo|por)\s+(?:por\s+)?(?:region|zona|territorio|cliente|vendedor|producto|categoria|estado|pais|país|ciudad|comuna)?\s*(?:=|:|a|en|por)?\s+([a-zA-Z0-9 áéíóúÁÉÍÓÚñÑ_-]+)/i);
+  return match?.[1]?.trim().split(/\s+/).slice(0, 4).join(" ");
+}
+
+function availableContext(context: CopilotRequestContext) {
+  return {
+    datasetProfile: context.datasetProfile,
+    semanticModel: context.semanticModel
+  };
+}
+
+function noColumnAction(label: string, context: CopilotRequestContext) {
+  return { reply: missingColumnMessage(label, context.datasetProfile), envelopes: [] };
+}
+
+function planLocalActions(context: CopilotRequestContext): { reply: string; envelopes: CopilotActionEnvelope[]; warnings?: string[] } {
   const prompt = normalize(context.prompt);
-  const target = preferredWidget(context.dashboardSpec, context.prompt);
+  const target = preferredWidget(context.dashboardSpec, context.prompt, context.viewState);
+
+  if (prompt.includes("elimina") || prompt.includes("quita") || prompt.includes("borra")) {
+    if (!target) return { reply: "No encontre un widget enfocado para eliminar. Indica el nombre del grafico o enfocarlo primero.", envelopes: [] };
+    if (!prompt.includes("confirma") && !prompt.includes("confirmo")) {
+      return {
+        reply: `Eliminar "${target.title}" es destructivo. Confirma con "confirma eliminar ${target.title}" para aplicarlo.`,
+        envelopes: [],
+        warnings: ["remove_widget requiere confirmacion explicita"]
+      };
+    }
+    const action: DashboardAction = { type: "remove_widget", widgetId: target.id };
+    return { reply: `Elimine el widget "${target.title}" despues de recibir confirmacion.`, envelopes: [actionEnvelope(action, "El usuario confirmo una accion destructiva.", 0.86)] };
+  }
+
+  if (prompt.includes("nombre") || prompt.includes("titulo") || prompt.includes("título")) {
+    const title = extractQuotedTitle(context.prompt);
+    if (title && (prompt.includes("dashboard") || prompt.includes("tablero"))) {
+      const action: DashboardAction = { type: "update_dashboard_title", title };
+      return { reply: `Cambie el titulo del dashboard a "${title}".`, envelopes: [actionEnvelope(action, "Cambio de titulo del dashboard solicitado por el usuario.", 0.9)] };
+    }
+    if (title && target) {
+      const action: DashboardAction = { type: "update_widget_title", widgetId: target.id, title };
+      return { reply: `Cambie el nombre de "${target.title}" a "${title}".`, envelopes: [actionEnvelope(action, "Cambio de titulo de widget solicitado por el usuario.", 0.84)] };
+    }
+  }
 
   if (prompt.includes("ejecutivo")) {
-    const kpi = firstWidgetByType(context.dashboardSpec, "kpi_card") ?? firstWidgetByType(context.dashboardSpec, "insight_text");
-    if (!kpi) return { reply: "Simplifique la vista ejecutiva, pero no encontre KPIs existentes para destacar." };
+    const kpis = context.dashboardSpec.widgets.filter((widget) => widget.type === "kpi_card").map((widget) => widget.id);
+    const summary = firstWidgetByType(context.dashboardSpec, "insight_text") ?? context.dashboardSpec.widgets.find((widget) => widget.title.toLowerCase().includes("resumen"));
+    const actions: DashboardAction[] = [
+      { type: "update_dashboard_title", title: context.dashboardSpec.title.replace(/^Dashboard de /, "Vista Ejecutiva de ") },
+      ...(summary ? [{ type: "focus_widget" as const, widgetId: summary.id }] : kpis[0] ? [{ type: "focus_widget" as const, widgetId: kpis[0] }] : []),
+      { type: "reorder_widgets", widgetIds: [...kpis, ...context.dashboardSpec.widgets.filter((widget) => !kpis.includes(widget.id)).map((widget) => widget.id)] }
+    ];
     return {
-      reply: "Simplifique la vista ejecutiva y destaque los KPIs principales para que la lectura sea mas directa.",
-      action: { type: "explain_widget", widgetId: kpi.id }
+      reply: "Simplifique la vista ejecutiva, priorice KPIs y destaque el resumen para una lectura directiva.",
+      envelopes: actions.map((action) => actionEnvelope(action, "Modo ejecutivo solicitado.", 0.82))
     };
   }
 
-  if (prompt.includes("vendedor")) {
-    const seller = context.semanticModel.primarySeller?.field;
-    if (!seller) return { reply: "No encontre una columna compatible de vendedor en el dataset, asi que no aplique cambios." };
-    const existing = widgetGroupedBy(context.dashboardSpec, seller);
-    if (existing) {
-      return { reply: `Enfoque el analisis por vendedor usando la columna ${seller}.`, action: { type: "explain_widget", widgetId: existing.id } };
+  if ((prompt.includes("filtra") || prompt.includes("filtro") || prompt.includes("solo ")) && context.datasetProfile.columns.length) {
+    const resolved = resolveColumn(context.prompt, availableContext(context));
+    const value = filterValue(context.prompt);
+    if (!resolved.matchedColumn || !value) {
+      return { reply: "Puedo aplicar filtros, pero necesito una columna y un valor claros. Por ejemplo: filtra Pais Chile.", envelopes: [] };
     }
-    const widget = createAnalysisWidget(context, { dimension: seller, title: "Analisis por Vendedor" });
-    if (widget) return { reply: `Agregue un analisis por vendedor usando la columna ${seller}.`, action: { type: "add_widget", widget } };
-    return { reply: "Encontre una columna de vendedor, pero faltan metricas compatibles para crear el analisis." };
+    const action: DashboardAction = { type: "add_or_update_filter", filter: { field: resolved.matchedColumn.normalizedName, operator: "in", value: [value] } };
+    return { reply: `Aplique filtro sobre "${resolved.matchedColumn.originalName}" con valor "${value}".`, envelopes: [actionEnvelope(action, resolved.reason, resolved.confidence)] };
   }
 
-  if (prompt.includes("region")) {
-    const region = context.semanticModel.primaryGeography?.field ?? firstExisting(context.datasetProfile.detectedGeoColumns, context.datasetProfile);
-    if (!region) return { reply: "No encontre una columna compatible de region en el dataset, asi que no aplique cambios." };
-    const existing = widgetGroupedBy(context.dashboardSpec, region);
+  if (prompt.includes("region") || prompt.includes("regiones") || prompt.includes("zona") || prompt.includes("pais") || prompt.includes("ciudad") || prompt.includes("comuna")) {
+    const resolved = resolveColumn(context.prompt, availableContext(context), "geography");
+    if (!resolved.matchedColumn) return noColumnAction("region", context);
+    const field = resolved.matchedColumn.normalizedName;
+    const existing = widgetGroupedBy(context.dashboardSpec, field);
+    const actions: DashboardAction[] = [];
     if (existing) {
-      return { reply: `Enfoque el dashboard en el analisis por region usando la columna ${region}.`, action: { type: "explain_widget", widgetId: existing.id } };
+      actions.push({ type: "focus_widget", widgetId: existing.id });
+    } else {
+      const widget = createAnalysisWidget(context, { dimension: field, title: `Analisis por ${fieldLabel(context.datasetProfile, field)}` });
+      if (widget) actions.push({ type: "add_widget", widget });
     }
-    const widget = createAnalysisWidget(context, { dimension: region, title: "Analisis por Region" });
-    if (widget) return { reply: `Agregue un analisis por region usando la columna ${region}.`, action: { type: "add_widget", widget } };
-    return { reply: "Encontre una columna de region, pero faltan metricas compatibles para crear el analisis." };
+    return {
+      reply: `Analice por ${fieldLabel(context.datasetProfile, field)} usando la columna real "${resolved.matchedColumn.originalName}".`,
+      envelopes: actions.map((action) => actionEnvelope(action, resolved.reason, resolved.confidence))
+    };
   }
 
-  if (prompt.includes("margen")) {
-    const margin = context.semanticModel.marginMetrics[0]?.field;
-    if (!margin) return { reply: "No encontre una columna compatible de margen en el dataset, asi que no aplique cambios." };
-    const existing = context.dashboardSpec.widgets.find((widget) => widget.query?.metric?.field === margin);
-    if (existing) {
-      return { reply: `Analice el margen usando la columna ${margin} y destaque el widget existente.`, action: { type: "explain_widget", widgetId: existing.id } };
-    }
-    const dimension = context.semanticModel.primaryCategory?.field ?? context.semanticModel.primarySeller?.field ?? context.semanticModel.primaryGeography?.field ?? context.semanticModel.primaryDimension?.field;
-    const widget = createAnalysisWidget(context, { metric: margin, dimension, title: "Margen por Segmento", aggregation: "avg", format: "percentage" });
-    if (widget) return { reply: `Agregue un analisis de margen promedio usando la columna ${margin}.`, action: { type: "add_widget", widget } };
-    return { reply: "Encontre una columna de margen, pero falta una dimension compatible para segmentarla." };
+  if (prompt.includes("vendedor") || prompt.includes("ejecutivo comercial") || prompt.includes("asesor") || prompt.includes("salesperson")) {
+    const seller = resolveColumn(context.prompt, availableContext(context), "seller");
+    if (!seller.matchedColumn) return noColumnAction("vendedor", context);
+    const metric = resolveColumn("ventas", availableContext(context), "revenue");
+    const widget = createAnalysisWidget(context, {
+      metric: metric.matchedColumn?.normalizedName,
+      dimension: seller.matchedColumn.normalizedName,
+      title: `Top ${fieldLabel(context.datasetProfile, seller.matchedColumn.normalizedName)}`,
+      limit: 5
+    });
+    if (!widget) return { reply: "Encontre vendedor, pero no encontre una metrica compatible para construir el ranking.", envelopes: [] };
+    return {
+      reply: `Agregue ranking por vendedor usando "${seller.matchedColumn.originalName}" y la metrica "${metric.matchedColumn?.originalName ?? fieldLabel(context.datasetProfile, widget.query?.metric?.field)}".`,
+      envelopes: [actionEnvelope({ type: "add_widget", widget }, "Ranking comercial solicitado.", Math.min(seller.confidence, metric.confidence || 0.7))]
+    };
   }
 
-  if (prompt.includes("comparar") || prompt.includes("trimestre anterior")) {
-    const date = context.semanticModel.primaryDate?.field ?? context.datasetProfile.detectedDateColumns[0];
-    if (!date) return { reply: "No encontre una columna de fecha suficiente para activar la comparacion con periodos anteriores." };
+  if (prompt.includes("margen") || prompt.includes("utilidad") || prompt.includes("profit")) {
+    const margin = resolveColumn(context.prompt, availableContext(context), "margin");
+    if (!margin.matchedColumn) {
+      const revenue = resolveColumn("ventas", availableContext(context), "revenue");
+      const cost = context.datasetProfile.columns.find((column) => normalize(`${column.originalName} ${column.displayName}`).includes("costo") || normalize(`${column.originalName} ${column.displayName}`).includes("cost"));
+      if (revenue.matchedColumn && cost) {
+        const action: DashboardAction = {
+          type: "create_calculated_metric",
+          id: "margin_rate",
+          title: "Margen calculado",
+          formula: `(${revenue.matchedColumn.normalizedName} - ${cost.normalizedName}) / ${revenue.matchedColumn.normalizedName}`,
+          operands: [revenue.matchedColumn.normalizedName, cost.normalizedName]
+        };
+        return { reply: `No encontre margen directo, pero propuse calcularlo con "${revenue.matchedColumn.originalName}" y "${cost.originalName}".`, envelopes: [actionEnvelope(action, "Margen derivable desde ventas y costo.", 0.65, true)] };
+      }
+      return { reply: "No encontre una columna compatible de margen ni una combinacion clara de ventas y costo para calcularlo.", envelopes: [] };
+    }
+    const dimension = resolveColumn("categoria", availableContext(context), "category").matchedColumn?.normalizedName ?? context.semanticModel.primaryDimension?.field;
+    const widget = createAnalysisWidget(context, { metric: margin.matchedColumn.normalizedName, dimension, title: "Margen por Segmento", aggregation: "avg", format: "percentage" });
+    if (!widget) return { reply: "Encontre margen, pero falta una dimension compatible para segmentarlo.", envelopes: [] };
+    return { reply: `Agregue analisis de margen usando la columna "${margin.matchedColumn.originalName}".`, envelopes: [actionEnvelope({ type: "add_widget", widget }, margin.reason, margin.confidence)] };
+  }
+
+  if (prompt.includes("comparar") || prompt.includes("periodo anterior") || prompt.includes("trimestre anterior")) {
+    const date = resolveColumn(context.prompt, availableContext(context), "date");
+    if (!date.matchedColumn) return { reply: "No encontre una columna de fecha suficiente para activar comparacion con periodos anteriores.", envelopes: [] };
     const widget = comparisonTarget(context);
-    if (!widget) return { reply: "Encontre una columna de fecha, pero no hay un widget compatible para activar la comparacion." };
-    return {
-      reply: `Active la comparacion contra el periodo anterior usando la columna temporal ${date}.`,
-      action: { type: "update_widget", widgetId: widget.id, changes: { config: { comparison: true, comparisonMode: "previous_quarter", comparisonField: date } } }
-    };
-  }
-
-  if ((prompt.includes("limpia") || prompt.includes("borra") || prompt.includes("clear")) && prompt.includes("filtro")) {
-    return { reply: "Limpie los filtros activos para volver a la vista general.", action: { type: "clear_filters" } };
-  }
-
-  if (prompt.includes("explica") || prompt.includes("explicame")) {
-    const widget = target ?? context.dashboardSpec.widgets[0];
-    if (!widget) return { reply: "No encontre un widget para explicar." };
-    return { reply: `Este widget muestra ${widget.title}. Lo resalte para revisar su metrica, dimension y lectura principal.`, action: { type: "explain_widget", widgetId: widget.id } };
+    if (!widget) return { reply: "Encontre fecha, pero no hay un widget compatible para activar comparacion.", envelopes: [] };
+    const action: DashboardAction = { type: "update_widget", widgetId: widget.id, changes: { config: { comparison: true, comparisonMode: "previous_period", comparisonField: date.matchedColumn.normalizedName } } };
+    return { reply: `Active comparacion contra periodo anterior usando "${date.matchedColumn.originalName}".`, envelopes: [actionEnvelope(action, date.reason, date.confidence)] };
   }
 
   if ((prompt.includes("barra") || prompt.includes("barras")) && target) {
-    return { reply: `Cambie ${target.title} a grafico de barras.`, action: { type: "change_chart_type", widgetId: target.id, chartType: "bar_chart" } };
+    const action: DashboardAction = { type: "change_chart_type", widgetId: target.id, chartType: "bar_chart" };
+    return { reply: `Cambie "${target.title}" a grafico de barras.`, envelopes: [actionEnvelope(action, "Cambio de tipo de grafico solicitado.", 0.86)] };
   }
 
-  if ((prompt.includes("linea") || prompt.includes("tendencia")) && target) {
-    return { reply: `Cambie ${target.title} a grafico de linea.`, action: { type: "change_chart_type", widgetId: target.id, chartType: "line_chart" } };
+  if ((prompt.includes("linea") || prompt.includes("línea") || prompt.includes("tendencia")) && target) {
+    const action: DashboardAction = { type: "change_chart_type", widgetId: target.id, chartType: "line_chart" };
+    return { reply: `Cambie "${target.title}" a grafico de linea.`, envelopes: [actionEnvelope(action, "Cambio de tipo de grafico solicitado.", 0.84)] };
   }
 
-  if ((prompt.includes("elimina") || prompt.includes("quita")) && target) {
-    return { reply: `Quite el widget ${target.title} del dashboard.`, action: { type: "remove_widget", widgetId: target.id } };
+  if (prompt.includes("limpia") && prompt.includes("filtro")) {
+    return { reply: "Limpie los filtros activos para volver a la vista general.", envelopes: [actionEnvelope({ type: "clear_filters" }, "Limpiar filtros solicitado.", 0.92)] };
   }
 
-  if (prompt.includes("filtro") || prompt.includes("solo ")) {
-    const field = firstExisting([
-      context.semanticModel.primaryGeography?.field,
-      context.semanticModel.primaryClient?.field,
-      context.semanticModel.primarySeller?.field,
-      context.semanticModel.primaryCategory?.field,
-      context.datasetProfile.detectedDimensionColumns[0]
-    ], context.datasetProfile);
-    const value = filterValue(prompt) ?? (prompt.includes("norte") ? "Norte" : undefined);
-    if (field && value) return { reply: `Aplique un filtro sobre ${field}: ${value}.`, action: { type: "add_filter", filter: { field, operator: "in", value: [value] } } };
+  if (prompt.includes("agrega") || prompt.includes("anade") || prompt.includes("añade") || prompt.includes("nuevo grafico") || prompt.includes("nuevo gráfico")) {
+    const dimensionIntent = prompt.includes("producto") ? "product" : prompt.includes("categoria") || prompt.includes("categoría") ? "category" : "dimension";
+    const dimension = resolveColumn(context.prompt, availableContext(context), dimensionIntent);
+    if (!dimension.matchedColumn) return noColumnAction(dimensionIntent, context);
+    const widget = createAnalysisWidget(context, { dimension: dimension.matchedColumn.normalizedName, title: `Top ${fieldLabel(context.datasetProfile, dimension.matchedColumn.normalizedName)}` });
+    if (!widget) return { reply: "Encontre la dimension solicitada, pero falta una metrica compatible para crear el grafico.", envelopes: [] };
+    return { reply: `Agregue un grafico usando "${dimension.matchedColumn.originalName}" y la metrica principal.`, envelopes: [actionEnvelope({ type: "add_widget", widget }, dimension.reason, dimension.confidence)] };
   }
 
-  if (prompt.includes("promedio") || prompt.includes("media")) {
-    const widget = target;
-    if (widget?.query?.metric) {
-      return {
-        reply: `Cambie la agregacion de ${widget.title} a promedio.`,
-        action: { type: "update_widget", widgetId: widget.id, changes: { query: { ...widget.query, metric: { ...widget.query.metric, aggregation: "avg" } } } }
-      };
+  if (prompt.includes("explica") || prompt.includes("insight")) {
+    const action: DashboardAction = {
+      type: "generate_insight",
+      widgetId: target?.id,
+      content: target ? `El widget "${target.title}" concentra la lectura principal con los filtros actuales.` : "El dashboard resume las metricas y dimensiones detectadas en el dataset."
+    };
+    return { reply: "Genere un insight accionable basado en el dashboard actual.", envelopes: [actionEnvelope(action, "Insight solicitado.", 0.72)] };
+  }
+
+  if (prompt.includes("presentacion") || prompt.includes("presentación")) {
+    return {
+      reply: "Prepare la presentacion desde el dashboard vivo con foco ejecutivo.",
+      envelopes: [actionEnvelope({ type: "generate_presentation", options: { theme: "executive", durationMinutes: 5, detailLevel: "summary" } }, "Presentacion solicitada.", 0.78)]
+    };
+  }
+
+  return {
+    reply: "Puedo modificar el dashboard con acciones validadas: agregar graficos por columnas reales, aplicar filtros, cambiar titulos, comparar periodos, generar insights o preparar presentacion. Prueba: 'pon las regiones', 'ventas por vendedor' o 'filtra Pais Chile'.",
+    envelopes: []
+  };
+}
+
+function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotActionEnvelope[], source: "mock" | "provider", baseReply: string, warnings: string[] = []): CopilotResult {
+  let nextDashboard = input.dashboardSpec;
+  let nextViewState = input.viewState;
+  let nextPresentation = input.presentationSpec;
+  const appliedActions: DashboardAction[] = [];
+  const appliedEnvelopes: CopilotActionEnvelope[] = [];
+  const messages: string[] = [];
+
+  for (const envelope of envelopes) {
+    if (envelope.requiresConfirmation) {
+      warnings.push(`La accion ${envelope.type} requiere confirmacion.`);
+      continue;
     }
-  }
-
-  if (prompt.includes("top")) {
-    const limit = Number(prompt.match(/\b(\d{1,2})\b/)?.[1] ?? 5);
-    if (target?.query) {
-      return { reply: `Limite ${target.title} al top ${limit}.`, action: { type: "update_widget", widgetId: target.id, changes: { query: { ...target.query, limit } } } };
+    const validation = validateCopilotAction(envelope.action, { datasetProfile: input.datasetProfile, semanticModel: input.semanticModel, dashboardSpec: nextDashboard, viewState: nextViewState });
+    if (!validation.success) {
+      warnings.push(validation.error);
+      continue;
     }
+    if (validation.action.type === "generate_presentation") {
+      nextPresentation = input.presentationSpec;
+      appliedActions.push(validation.action);
+      appliedEnvelopes.push(envelope);
+      messages.push("La presentacion se puede regenerar desde el constructor interactivo.");
+      continue;
+    }
+    const applied = applyAction(nextDashboard, nextViewState, validation.action);
+    nextDashboard = applied.spec;
+    nextViewState = applied.viewState;
+    appliedActions.push(validation.action);
+    appliedEnvelopes.push(envelope);
+    messages.push(applied.message);
   }
 
-  if (prompt.includes("agrega") || prompt.includes("anade") || prompt.includes("nuevo grafico")) {
-    const dimension = context.semanticModel.primaryProduct?.field ?? context.semanticModel.primaryCategory?.field ?? context.semanticModel.primaryDimension?.field;
-    const widget = createWidget(context, dimension);
-    if (widget) return { reply: `Agregue un widget basado en ${widget.query?.groupBy?.[0]} y la metrica principal.`, action: { type: "add_widget", widget } };
-  }
+  return {
+    reply: [baseReply, ...messages].filter(Boolean).join(" "),
+    action: appliedActions[0],
+    actions: appliedActions,
+    actionEnvelopes: appliedEnvelopes,
+    warnings,
+    rejectedActionReason: warnings[0],
+    updatedDashboardSpec: nextDashboard,
+    updatedViewState: nextViewState,
+    updatedPresentationSpec: nextPresentation,
+    source
+  };
+}
 
-  return { reply: "Puedo cambiar tipos de grafico, agregar widgets, ajustar metricas, aplicar o limpiar filtros y explicar widgets usando acciones validadas." };
+export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotResult {
+  const source = input.source ?? "mock";
+  if (input.proposedActions) {
+    return applyValidatedActions(input, input.proposedActions.map((action) => actionEnvelope(action, "Accion propuesta por proveedor.", 0.74)), source, input.providerReply ?? "Aplique acciones estructuradas validadas.");
+  }
+  const plan = planLocalActions(input);
+  return applyValidatedActions(input, plan.envelopes, source, plan.reply, plan.warnings ?? []);
 }
 
 export function createMockCopilotResponse(context: CopilotRequestContext): CopilotResult {
-  const result = mockAction(context);
-  if (!result.action) return { reply: result.reply, source: "mock" };
-  const validation = validateCopilotAction(result.action, context);
-  if (!validation.success) return { reply: validation.error, rejectedActionReason: validation.error, source: "mock" };
-  return { reply: result.reply, action: validation.action, source: "mock" };
+  return handleCopilotMessage({ ...context, source: "mock" });
 }
 
 export function parseCopilotProviderOutput(raw: unknown, context: CopilotRequestContext): CopilotResult {
   const parsed = copilotOutputSchema.safeParse(raw);
   if (!parsed.success) {
-    return { reply: "La respuesta del proveedor no paso la validacion estructurada.", rejectedActionReason: "output_schema", source: "provider" };
+    return { reply: "La respuesta del proveedor no paso la validacion estructurada.", rejectedActionReason: "output_schema", warnings: ["output_schema"], source: "provider" };
   }
-  if (!parsed.data.action) return { reply: parsed.data.reply, source: "provider" };
-  const validation = validateCopilotAction(parsed.data.action, context);
-  if (!validation.success) return { reply: validation.error, rejectedActionReason: validation.error, source: "provider" };
-  return { reply: parsed.data.reply, action: validation.action, source: "provider" };
+  if (!parsed.data.action) return { reply: parsed.data.reply, actions: [], updatedDashboardSpec: context.dashboardSpec, updatedViewState: context.viewState, updatedPresentationSpec: context.presentationSpec, source: "provider" };
+  return handleCopilotMessage({ ...context, source: "provider", providerReply: parsed.data.reply, proposedActions: [parsed.data.action] });
 }
 
 export function buildCopilotPrompt(context: CopilotRequestContext) {
+  const providerContext = context.copilotContext
+    ? toProviderContext(context.copilotContext)
+    : toProviderContext(buildCopilotContext({
+        rows: [],
+        datasetProfile: context.datasetProfile,
+        dashboardSpec: context.dashboardSpec,
+        viewState: context.viewState,
+        presentationSpec: context.presentationSpec,
+        messages: context.messages
+      }));
   return [
-    "Eres el Copiloto IA de DashPilot. Devuelve solo acciones estructuradas validas.",
-    "Nunca inventes columnas ni widgets. Solo usa los IDs y campos entregados.",
-    "No puedes modificar React ni UI directamente. Solo DashboardSpec o DashboardViewState.",
+    "Eres el Copiloto IA de DashPilot. Devuelve solo acciones estructuradas validas en JSON.",
+    "Nunca inventes columnas ni widgets. Solo usa IDs y campos entregados.",
+    "No puedes modificar React ni UI directamente. Solo DashboardSpec, DashboardViewState o PresentationSpec via acciones.",
+    "No ejecutes codigo. No crees formulas peligrosas. Las acciones destructivas deben requerir confirmacion.",
     JSON.stringify({
       userPrompt: context.prompt,
-      datasetProfile: {
-        fileName: context.datasetProfile.fileName,
-        columns: context.datasetProfile.columns.map((column) => ({ field: column.normalizedName, type: column.inferredType, semanticType: column.semanticType })),
-        detectedMetricColumns: context.datasetProfile.detectedMetricColumns,
-        detectedDimensionColumns: context.datasetProfile.detectedDimensionColumns,
-        detectedDateColumns: context.datasetProfile.detectedDateColumns,
-        detectedGeoColumns: context.datasetProfile.detectedGeoColumns
-      },
-      semanticModel: context.semanticModel,
-      dashboard: {
-        id: context.dashboardSpec.id,
-        title: context.dashboardSpec.title,
-        widgets: context.dashboardSpec.widgets.map((widget) => ({ id: widget.id, title: widget.title, type: widget.type, query: widget.query }))
-      },
-      viewState: context.viewState
+      context: providerContext
     })
   ].join("\n");
 }

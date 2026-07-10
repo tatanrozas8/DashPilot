@@ -39,12 +39,20 @@ const widgetChangesSchema = z.object({
 
 export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_widget"), widget: dashboardWidgetSchema }),
+  z.object({ type: z.literal("update_dashboard_title"), title: z.string().min(1).max(120) }),
+  z.object({ type: z.literal("update_widget_title"), widgetId: z.string(), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_widget"), widgetId: z.string(), changes: widgetChangesSchema }),
   z.object({ type: z.literal("remove_widget"), widgetId: z.string() }),
+  z.object({ type: z.literal("duplicate_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("change_chart_type"), widgetId: z.string(), chartType: widgetTypeSchema }),
   z.object({ type: z.literal("add_filter"), filter: dashboardFilterSchema }),
+  z.object({ type: z.literal("add_or_update_filter"), filter: dashboardFilterSchema }),
   z.object({ type: z.literal("clear_filters") }),
   z.object({ type: z.literal("explain_widget"), widgetId: z.string() }),
+  z.object({ type: z.literal("focus_widget"), widgetId: z.string() }),
+  z.object({ type: z.literal("reorder_widgets"), widgetIds: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal("create_calculated_metric"), id: z.string().min(1), title: z.string().min(1), formula: z.string().min(1), operands: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal("generate_insight"), widgetId: z.string().optional(), content: z.string().min(1) }),
   z.object({ type: z.literal("update_view_state"), viewState: z.record(z.string(), z.unknown()) }),
   z.object({
     type: z.literal("generate_presentation"),
@@ -85,9 +93,10 @@ function configFields(config: Record<string, unknown> | undefined) {
 }
 
 function fieldsForAction(action: DashboardAction) {
-  if (action.type === "add_filter") return [action.filter.field];
+  if (action.type === "add_filter" || action.type === "add_or_update_filter") return [action.filter.field];
   if (action.type === "add_widget") return [...queryFields(action.widget.query), ...configFields(action.widget.config)];
   if (action.type === "update_widget") return [...queryFields(action.changes.query), ...configFields(action.changes.config)];
+  if (action.type === "create_calculated_metric") return action.operands;
   if (action.type === "update_view_state") {
     const filters = action.viewState.filters;
     return Array.isArray(filters) ? filters.map((filter) => typeof filter === "object" && filter && "field" in filter ? String(filter.field) : "") : [];
@@ -106,8 +115,18 @@ export function validateCopilotAction(rawAction: unknown, context: CopilotValida
   const missingField = fieldsForAction(action).find((field) => field && !columns.has(field));
   if (missingField) return { success: false, error: `La accion referencia una columna inexistente: ${missingField}.` };
 
-  if (["update_widget", "remove_widget", "change_chart_type", "explain_widget"].includes(action.type) && !widgets.has("widgetId" in action ? action.widgetId : "")) {
-    return { success: false, error: "La accion referencia un widget inexistente." };
+  if (["update_widget", "update_widget_title", "remove_widget", "duplicate_widget", "change_chart_type", "explain_widget", "focus_widget"].includes(action.type)) {
+    const widgetId = "widgetId" in action ? action.widgetId : undefined;
+    if (!widgetId || !widgets.has(widgetId)) return { success: false, error: "La accion referencia un widget inexistente." };
+  }
+
+  if (action.type === "reorder_widgets") {
+    const missingWidget = action.widgetIds.find((widgetId) => !widgets.has(widgetId));
+    if (missingWidget) return { success: false, error: `La accion intenta reordenar un widget inexistente: ${missingWidget}.` };
+  }
+
+  if (action.type === "create_calculated_metric" && !/^[a-zA-Z0-9_\s+\-*/().]+$/.test(action.formula)) {
+    return { success: false, error: "La formula calculada contiene caracteres no permitidos." };
   }
 
   if (action.type === "add_widget" && widgets.has(action.widget.id)) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { createMockCopilotResponse, parseCopilotProviderOutput, type CopilotRequestContext, type CopilotResult } from "@/lib/ai/copilot-service";
+import { createMockCopilotResponse, type CopilotRequestContext, type CopilotResult } from "@/lib/ai/copilot-service";
 
 export async function requestCopilotResponse(context: CopilotRequestContext): Promise<CopilotResult> {
   try {
@@ -11,7 +11,7 @@ export async function requestCopilotResponse(context: CopilotRequestContext): Pr
     });
     if (!response.ok) return createMockCopilotResponse(context);
     const payload = await response.json();
-    return parseCopilotProviderOutput(payload, context);
+    return payload as CopilotResult;
   } catch {
     return createMockCopilotResponse(context);
   }

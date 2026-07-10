@@ -10,6 +10,7 @@ import { DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { useToast } from "@/components/shared/toast";
 import { persistPresentation } from "@/lib/data-access";
+import { applyPresentationPrompt } from "@/lib/presentation-spec/apply-presentation-prompt";
 import type { PresentationTheme } from "@/types/presentation";
 
 export function PresentationBuilder() {
@@ -153,7 +154,14 @@ export function PresentationBuilder() {
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!chat.trim()) return;
-                setResponses((current) => [...current, `Ajuste recibido: ${chat}. Actualice la narrativa mock para mantener foco ejecutivo.`]);
+                const state = useDashPilotStore.getState();
+                const result = applyPresentationPrompt(chat, state.presentation, state.dashboard);
+                useDashPilotStore.setState({
+                  presentation: result.presentation,
+                  presentationSpec: result.presentation,
+                  presentationOptions: result.options ? { ...state.presentationOptions, ...result.options, generated: true } : state.presentationOptions
+                });
+                setResponses((current) => [...current, result.reply]);
                 setChat("");
               }}
             >

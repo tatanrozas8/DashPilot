@@ -49,6 +49,19 @@ export function PresentationBuilder() {
     router.push(`/app/present/${result.presentationId}`);
   }
 
+  async function saveDraft() {
+    generatePresentation();
+    const state = useDashPilotStore.getState();
+    const nextPresentation = { ...state.presentation, dashboardId: state.activeDashboardId };
+    const result = await persistPresentation(nextPresentation);
+    setPersistenceState({
+      activePresentationId: result.presentationId,
+      persistenceMode: result.mode,
+      persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Borrador de presentacion guardado" : "Borrador local")
+    });
+    toast(result.warning ?? (result.mode === "supabase" ? "Borrador guardado correctamente." : "Borrador guardado localmente."));
+  }
+
   return (
     <AppShell>
       <div className="p-5 lg:p-8">
@@ -58,7 +71,7 @@ export function PresentationBuilder() {
             <p className="mt-2 text-[#617094]">Convierte tu dashboard en una presentacion profesional e interactiva en minutos.</p>
           </div>
           <div className="flex gap-3">
-            <Button onClick={() => toast("Borrador guardado.")} variant="secondary"><Save className="size-4" /> Guardar borrador</Button>
+            <Button onClick={() => hasDashboard ? void saveDraft() : toast("Sube un dataset para guardar una presentacion.")} variant="secondary"><Save className="size-4" /> Guardar borrador</Button>
             <Button onClick={() => hasDashboard ? void savePresentation() : toast("Sube un dataset para comenzar.")}><Sparkles className="size-4" /> Generar presentacion</Button>
             <Link href={`/app/present/${activePresentationId}`} className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#bfc7ff] bg-white px-5 text-sm font-semibold text-[#3d35ff]"><Play className="size-4" /> Presentar ahora</Link>
           </div>
@@ -102,7 +115,7 @@ export function PresentationBuilder() {
             <div className="soft-card rounded-xl p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-bold">2. Esquema propuesto por IA</h2>
-                <Button onClick={() => toast("Esquema listo para editar en el siguiente paso.")} variant="secondary" className="h-9 px-3"><Edit3 className="size-4" /> Editar esquema</Button>
+                <Button disabled title="La edicion granular de slides se realiza con el Copiloto de esta pantalla." variant="secondary" className="h-9 px-3"><Edit3 className="size-4" /> Editar esquema</Button>
               </div>
               <div className="divide-y divide-[#edf1fa] rounded-xl border border-[#edf1fa]">
                 {(hasDashboard ? presentation.slides : []).map((slide) => (
@@ -144,11 +157,15 @@ export function PresentationBuilder() {
               {hasDashboard ? `Iniciaremos con un resumen ejecutivo de ${dashboard.title}, destacando los KPIs y dimensiones detectadas en el dataset.` : "Aún no hay presentaciones. Sube un dataset para comenzar."}
             </p>
             <h3 className="mt-6 font-bold">Notas del presentador</h3>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-[#34405f]">
-              <li>Enfocar en crecimiento sostenido y expansion regional.</li>
-              <li>Destacar aumento de margen de 2.4 pp vs Q1.</li>
-              <li>Revisar plan de accion sobre riesgos de costos.</li>
-            </ul>
+            {hasDashboard && presentation.slides.length ? (
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-[#34405f]">
+                {presentation.slides.slice(0, 3).map((slide) => (
+                  <li key={slide.id}>{slide.speakerNotes ?? `Presentar ${slide.title} usando los widgets y filtros visibles.`}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-[#34405f]">Genera una presentacion para ver notas basadas en tus slides reales.</p>
+            )}
             <form
               className="mt-6 flex gap-2 rounded-xl border border-[#dfe5f0] p-2"
               onSubmit={(event) => {

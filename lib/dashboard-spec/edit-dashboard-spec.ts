@@ -26,6 +26,10 @@ export function updateDashboardTitle(spec: DashboardSpec, title: string): Dashbo
   return touch({ ...spec, title: trimmed || spec.title });
 }
 
+export function updateDashboardSubtitle(spec: DashboardSpec, subtitle: string): DashboardSpec {
+  return touch({ ...spec, subtitle: subtitle.trim() || undefined });
+}
+
 export function updateDashboardWidget(spec: DashboardSpec, widgetId: string, changes: Partial<DashboardWidget>): DashboardSpec {
   return touch({
     ...spec,

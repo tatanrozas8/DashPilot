@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BarChart3, CheckCircle2, Download, Eye, Filter, Plus, Search, Table2 } from "lucide-react";
+import { AlertTriangle, BarChart3, CheckCircle2, Download, Eye, Filter, Info, Plus, Search, Table2, X } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { queryTableRows } from "@/lib/query-engine/search";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatNumber } from "@/lib/utils";
-import type { DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
+import type { DataRow, DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
 import type { DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 
 const PAGE_SIZE = 50;
@@ -40,9 +40,9 @@ function groupColumns(columns: DatasetColumnProfile[]) {
   };
 }
 
-function FieldRow({ column, selected, onToggle, onFilter }: { column: DatasetColumnProfile; selected: boolean; onToggle: () => void; onFilter: () => void }) {
+function FieldRow({ column, selected, active, onToggle, onFilter, onInspect }: { column: DatasetColumnProfile; selected: boolean; active: boolean; onToggle: () => void; onFilter: () => void; onInspect: () => void }) {
   return (
-    <div className="rounded-lg border border-[#edf1fa] p-3">
+    <div className={cn("rounded-lg border p-3", active ? "border-[#9aa0ff] bg-[#fbfbff]" : "border-[#edf1fa]")}>
       <div className="flex items-start justify-between gap-2">
         <button onClick={onToggle} className="min-w-0 text-left">
           <p className="truncate text-sm font-bold text-[#071334]">{column.displayName}</p>
@@ -50,6 +50,9 @@ function FieldRow({ column, selected, onToggle, onFilter }: { column: DatasetCol
         </button>
         <button onClick={onFilter} className="grid size-8 shrink-0 place-items-center rounded-md text-[#3d35ff] hover:bg-[#f4f5ff]" aria-label={`Mostrar solo ${column.displayName}`}>
           <Filter className="size-4" />
+        </button>
+        <button onClick={onInspect} className="grid size-8 shrink-0 place-items-center rounded-md text-[#536088] hover:bg-[#f4f5ff]" aria-label={`Ver estadisticas de ${column.displayName}`}>
+          <Info className="size-4" />
         </button>
       </div>
       <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-semibold text-[#697597]">
@@ -60,6 +63,69 @@ function FieldRow({ column, selected, onToggle, onFilter }: { column: DatasetCol
         {selected && <span className="rounded-full bg-[#f0f1ff] px-2 py-1 text-[#3d35ff]">visible</span>}
       </div>
     </div>
+  );
+}
+
+function ColumnStatsPanel({
+  column,
+  onShowOnly,
+  onAskCopilot,
+  onCreateWidget,
+  onUseAsFilter
+}: {
+  column?: DatasetColumnProfile;
+  onShowOnly: () => void;
+  onAskCopilot: () => void;
+  onCreateWidget: () => void;
+  onUseAsFilter: () => void;
+}) {
+  if (!column) return null;
+
+  return (
+    <section className="soft-card rounded-xl p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate font-bold">{column.displayName}</h3>
+          <p className="mt-1 truncate text-xs font-semibold text-[#697597]">{column.originalName} · {column.normalizedName}</p>
+        </div>
+        <span className="rounded-lg bg-[#f0f1ff] px-2 py-1 text-xs font-bold text-[#3d35ff]">{column.semanticType}</span>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div className="rounded-lg bg-[#fbfcff] p-3"><p className="text-xs font-bold text-[#697597]">Tipo</p><p className="mt-1 font-semibold">{column.inferredType}</p></div>
+        <div className="rounded-lg bg-[#fbfcff] p-3"><p className="text-xs font-bold text-[#697597]">Unicos</p><p className="mt-1 font-semibold">{formatNumber(column.uniqueCount)}</p></div>
+        <div className="rounded-lg bg-[#fbfcff] p-3"><p className="text-xs font-bold text-[#697597]">Nulos</p><p className="mt-1 font-semibold">{formatNumber(column.nullCount)} ({column.nullPercentage}%)</p></div>
+        <div className="rounded-lg bg-[#fbfcff] p-3"><p className="text-xs font-bold text-[#697597]">Rango</p><p className="mt-1 truncate font-semibold">{column.min ?? "-"} - {column.max ?? "-"}</p></div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {column.sampleValues.slice(0, 5).map((value) => <span key={String(value)} className="rounded-full bg-[#f6f7ff] px-3 py-1 text-xs font-semibold text-[#697597]">{String(value)}</span>)}
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <button onClick={onShowOnly} className="rounded-lg border border-[#dfe5f0] px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]">Mostrar solo</button>
+        <button onClick={onUseAsFilter} className="rounded-lg border border-[#dfe5f0] px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]">Usar como filtro</button>
+        <button onClick={onCreateWidget} className="rounded-lg border border-[#dfe5f0] px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]">Crear grafico</button>
+        <button onClick={onAskCopilot} className="rounded-lg border border-[#dfe5f0] px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]">Preguntar a IA</button>
+      </div>
+    </section>
+  );
+}
+
+function RowDetailDrawer({ row, columns, onClose }: { row: DataRow | null; columns: string[]; onClose: () => void }) {
+  if (!row) return null;
+  return (
+    <aside className="fixed bottom-0 right-0 top-20 z-50 w-full overflow-y-auto border-l border-[#e3e8f5] bg-white p-5 shadow-2xl shadow-slate-900/15 sm:w-[420px]">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-lg font-bold">Detalle de fila</h3>
+        <button onClick={onClose} aria-label="Cerrar detalle de fila" className="grid size-9 place-items-center rounded-md text-[#697597] hover:bg-[#f3f5ff]"><X className="size-5" /></button>
+      </div>
+      <div className="mt-5 divide-y divide-[#edf1fa] rounded-xl border border-[#edf1fa]">
+        {columns.map((column) => (
+          <div key={column} className="grid gap-1 p-3">
+            <p className="text-xs font-bold text-[#697597]">{column}</p>
+            <p className="break-words text-sm font-semibold text-[#1c2748]">{String(row[column] ?? "-")}</p>
+          </div>
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -162,18 +228,32 @@ function ChartBuilder() {
 export function DataExplorerPanel() {
   const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
+  const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
   const setViewState = useDashPilotStore((state) => state.setViewState);
+  const addDashboardWidget = useDashPilotStore((state) => state.addDashboardWidget);
+  const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
   const [page, setPage] = useState(0);
+  const [columnSearchText, setColumnSearchText] = useState("");
+  const [selectedColumnName, setSelectedColumnName] = useState<string | undefined>();
+  const [selectedRow, setSelectedRow] = useState<DataRow | null>(null);
   const allColumns = useMemo(() => profile.columns.map((column) => column.normalizedName), [profile.columns]);
   const allColumnSet = useMemo(() => new Set(allColumns), [allColumns]);
   const persistedColumns = viewState.dataExplorer?.visibleColumns?.filter((column) => allColumnSet.has(column)) ?? [];
   const visibleColumns = persistedColumns.length ? persistedColumns : allColumns.slice(0, 8);
   const search = viewState.dataExplorer?.search ?? "";
   const sort = viewState.dataExplorer?.sort && allColumnSet.has(viewState.dataExplorer.sort.field) ? viewState.dataExplorer.sort : undefined;
-  const table = useMemo(() => queryTableRows(rows, { search, columns: visibleColumns, filters: viewState.filters, sort }), [rows, search, sort, viewState.filters, visibleColumns]);
+  const columnSearch = viewState.dataExplorer?.columnSearch && allColumnSet.has(viewState.dataExplorer.columnSearch.field) ? viewState.dataExplorer.columnSearch : undefined;
+  const table = useMemo(() => queryTableRows(rows, { search, columns: visibleColumns, filters: viewState.filters, sort, columnSearch }), [rows, search, sort, viewState.filters, visibleColumns, columnSearch]);
   const pageRows = table.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const columnGroups = useMemo(() => groupColumns(profile.columns), [profile.columns]);
+  const filteredProfileColumns = useMemo(() => {
+    const needle = columnSearchText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    if (!needle) return profile.columns;
+    return profile.columns.filter((column) => `${column.displayName} ${column.originalName} ${column.normalizedName}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(needle));
+  }, [columnSearchText, profile.columns]);
+  const columnGroups = useMemo(() => groupColumns(filteredProfileColumns), [filteredProfileColumns]);
+  const semantic = useMemo(() => inferSemanticLayer(profile, rows), [profile, rows]);
+  const selectedColumn = profile.columns.find((column) => column.normalizedName === selectedColumnName) ?? profile.columns[0];
   const pageCount = Math.max(1, Math.ceil(table.filteredRows / PAGE_SIZE));
 
   useEffect(() => {
@@ -187,7 +267,31 @@ export function DataExplorerPanel() {
   function toggleColumn(column: string) {
     const next = visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : [...visibleColumns, column];
     patchExplorer({ visibleColumns: next.length ? next : [column] });
+    setSelectedColumnName(column);
     setPage(0);
+  }
+
+  function createWidgetFromColumn(column: DatasetColumnProfile) {
+    const isMetric = ["metric", "measure"].includes(column.semanticType) || ["number", "currency", "percentage"].includes(column.inferredType);
+    const primaryMetric = semantic.primaryMetric?.field ?? profile.detectedMetricColumns[0];
+    const widget: DashboardWidget = isMetric
+      ? {
+          id: nextWidgetId(dashboard.widgets),
+          type: "kpi_card",
+          title: `Total ${column.displayName}`,
+          query: { metric: { field: column.normalizedName, aggregation: "sum" } },
+          config: { format: column.inferredType === "currency" ? "currency" : "number", compact: true, generatedBy: "column_panel" },
+          position: nextPosition(dashboard.widgets)
+        }
+      : {
+          id: nextWidgetId(dashboard.widgets),
+          type: "bar_chart",
+          title: `${profile.columns.find((item) => item.normalizedName === primaryMetric)?.displayName ?? "Registros"} por ${column.displayName}`,
+          query: { metric: primaryMetric ? { field: primaryMetric, aggregation: "sum" } : undefined, groupBy: [column.normalizedName], orderBy: { field: "value", direction: "desc" }, limit: 10 },
+          config: { format: "number", compact: true, generatedBy: "column_panel" },
+          position: nextPosition(dashboard.widgets)
+        };
+    addDashboardWidget(widget);
   }
 
   function exportCsv() {
@@ -211,6 +315,10 @@ export function DataExplorerPanel() {
         <aside className="soft-card max-h-[720px] overflow-y-auto rounded-xl p-4">
           <h3 className="flex items-center gap-2 font-bold"><Eye className="size-4 text-[#3d35ff]" /> Campos</h3>
           <p className="mt-2 text-xs text-[#697597]">{profile.columnCount} columnas detectadas desde {profile.fileName}</p>
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#dfe5f0] px-3">
+            <Search className="size-4 text-[#697597]" />
+            <input className="h-10 min-w-0 flex-1 text-sm outline-none" placeholder="Buscar columna..." value={columnSearchText} onChange={(event) => setColumnSearchText(event.target.value)} />
+          </div>
           <div className="mt-4 space-y-5">
             {Object.entries(columnGroups).map(([group, columns]) => columns.length ? (
               <div key={group}>
@@ -221,8 +329,14 @@ export function DataExplorerPanel() {
                       key={column.normalizedName}
                       column={column}
                       selected={visibleColumns.includes(column.normalizedName)}
+                      active={selectedColumnName === column.normalizedName}
                       onToggle={() => toggleColumn(column.normalizedName)}
-                      onFilter={() => patchExplorer({ visibleColumns: [column.normalizedName] })}
+                      onFilter={() => {
+                        patchExplorer({ visibleColumns: [column.normalizedName], columnSearch: { field: column.normalizedName, query: "" } });
+                        setSelectedColumnName(column.normalizedName);
+                        setPage(0);
+                      }}
+                      onInspect={() => setSelectedColumnName(column.normalizedName)}
                     />
                   ))}
                 </div>
@@ -244,6 +358,13 @@ export function DataExplorerPanel() {
                 <input className="h-10 min-w-0 flex-1 text-sm outline-none" placeholder="Buscar en toda la tabla..." value={search} onChange={(event) => { patchExplorer({ search: event.target.value }); setPage(0); }} />
               </div>
             </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto]">
+              <select className="h-10 rounded-lg border border-[#dfe5f0] bg-white px-3 text-sm" value={columnSearch?.field ?? selectedColumn?.normalizedName ?? ""} onChange={(event) => patchExplorer({ columnSearch: { field: event.target.value, query: columnSearch?.query ?? "" } })}>
+                {profile.columns.map((column) => <option key={column.normalizedName} value={column.normalizedName}>{column.displayName}</option>)}
+              </select>
+              <input className="h-10 rounded-lg border border-[#dfe5f0] px-3 text-sm" placeholder="Buscar dentro de una columna..." value={columnSearch?.query ?? ""} onChange={(event) => { patchExplorer({ columnSearch: { field: columnSearch?.field ?? selectedColumn?.normalizedName ?? allColumns[0] ?? "", query: event.target.value } }); setPage(0); }} />
+              <button className="rounded-lg border border-[#dfe5f0] px-3 text-sm font-semibold disabled:opacity-50" disabled={!columnSearch?.query} onClick={() => { patchExplorer({ columnSearch: undefined }); setPage(0); }}>Limpiar columna</button>
+            </div>
             <div className="mt-4 overflow-auto rounded-xl border border-[#edf1fa]">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="sticky top-0 bg-[#fbfcff] text-xs text-[#697597]">
@@ -259,7 +380,7 @@ export function DataExplorerPanel() {
                 </thead>
                 <tbody>
                   {pageRows.length ? pageRows.map((row, index) => (
-                    <tr key={`${page}-${index}`} className="border-b border-[#edf1fa] last:border-0 hover:bg-[#fbfcff]">
+                    <tr key={`${page}-${index}`} onClick={() => setSelectedRow(row)} className="cursor-pointer border-b border-[#edf1fa] last:border-0 hover:bg-[#fbfcff]">
                       {visibleColumns.map((column) => <td key={column} className="max-w-[240px] truncate px-3 py-3 text-[#1c2748]">{String(row[column] ?? "-")}</td>)}
                     </tr>
                   )) : (
@@ -278,9 +399,17 @@ export function DataExplorerPanel() {
               <button className="rounded-lg border border-[#dfe5f0] px-3 py-2 font-semibold disabled:opacity-50" disabled={page >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>Siguiente</button>
             </div>
           </section>
+          <ColumnStatsPanel
+            column={selectedColumn}
+            onShowOnly={() => selectedColumn && patchExplorer({ visibleColumns: [selectedColumn.normalizedName] })}
+            onAskCopilot={() => selectedColumn && void sendPrompt(`Explica la columna ${selectedColumn.displayName}`)}
+            onCreateWidget={() => selectedColumn && createWidgetFromColumn(selectedColumn)}
+            onUseAsFilter={() => selectedColumn && patchExplorer({ columnSearch: { field: selectedColumn.normalizedName, query: String(selectedColumn.sampleValues[0] ?? "") } })}
+          />
           <ChartBuilder />
         </div>
       </div>
+      <RowDetailDrawer row={selectedRow} columns={visibleColumns} onClose={() => setSelectedRow(null)} />
     </section>
   );
 }

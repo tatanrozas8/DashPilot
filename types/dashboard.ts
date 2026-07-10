@@ -90,6 +90,10 @@ export interface DashboardViewState {
       field: string;
       direction: "asc" | "desc";
     };
+    columnSearch?: {
+      field: string;
+      query: string;
+    };
     pageSize?: number;
   };
 }

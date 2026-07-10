@@ -105,6 +105,16 @@ describe("copilot service", () => {
     expect(result.updatedViewState?.filters).toEqual([{ field: "Pais", operator: "in", value: ["Chile"] }]);
   });
 
+  it("applies filters by finding a value in real column samples", () => {
+    const ctx = customContext("filtra Chile", [
+      { Pais: "Chile", Ventas: 1200, Fecha: "2024-01-01" },
+      { Pais: "Peru", Ventas: 900, Fecha: "2024-02-01" }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.updatedViewState?.filters).toEqual([{ field: "Pais", operator: "in", value: ["Chile"] }]);
+  });
+
   it("opens data explorer and searches the full table", () => {
     const ctx = context("busca Maria Lopez");
     const result = createMockCopilotResponse(ctx);

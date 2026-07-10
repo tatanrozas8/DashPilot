@@ -38,6 +38,28 @@ export function DashboardWorkspace() {
   const visibleDashboard = isDashboardEditing && dashboardEditDraft ? dashboardEditDraft : dashboard;
   const hasRows = rows.length > 0;
 
+  function downloadText(fileName: string, content: string, type: string) {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportDashboardJson() {
+    downloadText(`${activeDashboardId || "dashboard"}-spec.json`, JSON.stringify({ dashboard, viewState, profile }, null, 2), "application/json;charset=utf-8");
+    toast("DashboardSpec exportado.");
+  }
+
+  function exportDatasetCsv() {
+    const columns = profile.columns.map((column) => column.normalizedName);
+    const header = columns.map((column) => `"${column.replace(/"/g, '""')}"`).join(",");
+    const body = rows.map((row) => columns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    downloadText(`${profile.id || "dataset"}-completo.csv`, [header, body].filter(Boolean).join("\n"), "text/csv;charset=utf-8");
+    toast("Dataset completo exportado en CSV.");
+  }
+
   useEffect(() => {
     if (viewState.dataExplorer?.isOpen) setActiveView("data");
   }, [viewState.dataExplorer?.isOpen]);
@@ -112,9 +134,11 @@ export function DashboardWorkspace() {
                 <div className="absolute right-0 top-12 z-30 w-72 rounded-xl border border-[#dfe5f0] bg-white p-2 shadow-2xl shadow-slate-900/10">
                   <Link href={shareHref} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]"><Link2 className="size-4" /> Compartir enlace interactivo</Link>
                   <Link href="/app/presentaciones/crear" className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]"><MonitorPlay className="size-4" /> Crear presentacion interactiva</Link>
-                  <button onClick={() => toast("Exportacion PDF preparada.")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff]"><FileText className="size-4" /> Exportar PDF</button>
-                  <button onClick={() => toast("Exportacion PNG preparada.")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff]"><FileImage className="size-4" /> Exportar PNG</button>
-                  <button onClick={() => toast("Exportacion PowerPoint preparada.")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff]"><FileText className="size-4" /> Exportar PowerPoint</button>
+                  <button onClick={exportDatasetCsv} disabled={!hasRows} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="size-4" /> Exportar datos CSV</button>
+                  <button onClick={exportDashboardJson} disabled={!hasRows} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="size-4" /> Exportar DashboardSpec</button>
+                  <button disabled title="PDF requiere el motor de exportacion visual; usa compartir enlace o CSV por ahora." className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold opacity-50"><FileText className="size-4" /> Exportar PDF</button>
+                  <button disabled title="PNG requiere captura visual del dashboard; usa compartir enlace por ahora." className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold opacity-50"><FileImage className="size-4" /> Exportar PNG</button>
+                  <button disabled title="PowerPoint se genera desde Presentaciones interactivas." className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold opacity-50"><FileText className="size-4" /> Exportar PowerPoint</button>
                 </div>
               )}
             </div>

@@ -9,6 +9,15 @@ function toNumber(value: unknown) {
 type Aggregation = NonNullable<DashboardQuerySpec["metric"]>["aggregation"];
 type TimeGranularity = NonNullable<DashboardQuerySpec["x"]>["granularity"];
 
+export type ComparisonMode = "previous_period" | "previous_quarter" | "previous_year";
+
+export interface ComparisonResult {
+  current: number;
+  previous: number;
+  change: number;
+  changePercent: number | null;
+}
+
 function timeLabel(value: unknown, granularity: TimeGranularity) {
   const date = parseDateValue(value);
   if (!date) return String(value);
@@ -100,4 +109,94 @@ export function executeDashboardQuery(rows: DataRow[], query: DashboardQuerySpec
   }
 
   return result.slice(0, query.limit ?? result.length);
+}
+
+function rangeDates(range: NonNullable<DashboardViewState["selectedDateRange"]>) {
+  const from = parseDateValue(range.from);
+  const to = parseDateValue(range.to);
+  return from && to ? { from, to } : null;
+}
+
+function shiftRange(range: NonNullable<DashboardViewState["selectedDateRange"]>, mode: ComparisonMode) {
+  const parsed = rangeDates(range);
+  if (!parsed) return undefined;
+  const from = new Date(parsed.from);
+  const to = new Date(parsed.to);
+  if (mode === "previous_year") {
+    from.setUTCFullYear(from.getUTCFullYear() - 1);
+    to.setUTCFullYear(to.getUTCFullYear() - 1);
+  } else if (mode === "previous_quarter") {
+    from.setUTCMonth(from.getUTCMonth() - 3);
+    to.setUTCMonth(to.getUTCMonth() - 3);
+  } else {
+    const duration = to.getTime() - from.getTime();
+    to.setTime(from.getTime() - 86_400_000);
+    from.setTime(to.getTime() - duration);
+  }
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
+
+export function executeComparisonQuery(rows: DataRow[], query: DashboardQuerySpec, viewState: DashboardViewState, dateField: string, mode: ComparisonMode = "previous_period"): ComparisonResult {
+  if (!viewState.selectedDateRange) return { current: 0, previous: 0, change: 0, changePercent: null };
+  const previousRange = shiftRange(viewState.selectedDateRange, mode);
+  if (!previousRange) return { current: 0, previous: 0, change: 0, changePercent: null };
+  const current = executeDashboardQuery(rows, query, {
+    ...viewState,
+    filters: [...(viewState.filters ?? []), { field: dateField, operator: "between", value: [viewState.selectedDateRange.from, viewState.selectedDateRange.to] }]
+  })[0]?.value ?? 0;
+  const previous = executeDashboardQuery(rows, query, {
+    ...viewState,
+    selectedDateRange: undefined,
+    filters: [...(viewState.filters ?? []), { field: dateField, operator: "between", value: [previousRange.from, previousRange.to] }]
+  })[0]?.value ?? 0;
+  const change = current - previous;
+  return { current, previous, change, changePercent: previous === 0 ? null : change / previous };
+}
+
+function tokenizeFormula(formula: string) {
+  return formula.match(/[a-zA-Z_][a-zA-Z0-9_]*|\d+(?:\.\d+)?|[()+\-*/]/g) ?? [];
+}
+
+function toRpn(tokens: string[]) {
+  const precedence: Record<string, number> = { "+": 1, "-": 1, "*": 2, "/": 2 };
+  const output: string[] = [];
+  const operators: string[] = [];
+  for (const token of tokens) {
+    if (/^\d/.test(token) || /^[a-zA-Z_]/.test(token)) output.push(token);
+    else if (token === "(") operators.push(token);
+    else if (token === ")") {
+      while (operators.length && operators.at(-1) !== "(") output.push(operators.pop()!);
+      operators.pop();
+    } else {
+      while (operators.length && precedence[operators.at(-1)!] >= precedence[token]) output.push(operators.pop()!);
+      operators.push(token);
+    }
+  }
+  return [...output, ...operators.reverse()];
+}
+
+export function evaluateCalculatedMetric(row: DataRow, formula: string, operands: string[]) {
+  if (!/^[a-zA-Z0-9_\s+\-*/().]+$/.test(formula)) return null;
+  const aliasToOperand = new Map(operands.map((operand, index) => [`c${index}`, operand]));
+  const expression = [...aliasToOperand.entries()]
+    .sort((left, right) => right[1].length - left[1].length)
+    .reduce((current, [alias, operand]) => current.replaceAll(operand, alias), formula);
+  const allowed = new Set(aliasToOperand.keys());
+  const stack: number[] = [];
+  for (const token of toRpn(tokenizeFormula(expression))) {
+    if (/^\d/.test(token)) stack.push(Number(token));
+    else if (/^[a-zA-Z_]/.test(token)) {
+      if (!allowed.has(token)) return null;
+      stack.push(parseLocaleNumber(row[aliasToOperand.get(token)!]) ?? 0);
+    } else {
+      const right = stack.pop();
+      const left = stack.pop();
+      if (left === undefined || right === undefined) return null;
+      if (token === "+") stack.push(left + right);
+      if (token === "-") stack.push(left - right);
+      if (token === "*") stack.push(left * right);
+      if (token === "/") stack.push(right === 0 ? 0 : left / right);
+    }
+  }
+  return stack.length === 1 && Number.isFinite(stack[0]) ? stack[0] : null;
 }

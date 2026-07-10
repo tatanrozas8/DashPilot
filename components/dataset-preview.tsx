@@ -24,11 +24,39 @@ export function DatasetPreview() {
   const hydrateDataset = useDashPilotStore((state) => state.hydrateDataset);
   const toast = useToast();
   const [loading, setLoading] = useState(false);
+  const [showAllInsights, setShowAllInsights] = useState(false);
+  const [showAllKpis, setShowAllKpis] = useState(false);
+  const [selectedProfileDetail, setSelectedProfileDetail] = useState<string | null>(null);
   const visibleColumns = profile.columns.length ? profile.columns.map((column) => column.normalizedName) : Object.keys(rows[0] ?? {});
   const hasRows = rows.length > 0;
   const updatedAt = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" }) : "Sin actualizacion";
   const dateColumn = profile.columns.find((column) => profile.detectedDateColumns.includes(column.normalizedName));
   const detectedPeriod = dateColumn ? `Detectado desde ${dateColumn.displayName}` : "Sin periodo detectado";
+  const insightItems = [
+    profile.detectedMetricColumns.length ? `Metricas detectadas: ${profile.detectedMetricColumns.join(", ")}.` : "No se detectaron metricas numericas confiables.",
+    profile.detectedGeoColumns.length ? `Geografia detectada: ${profile.detectedGeoColumns.join(", ")}.` : "No se detectaron columnas geograficas confiables.",
+    `${profile.qualityWarnings.length || importWarnings.length || 1} advertencia de calidad detectada para revisar.`,
+    dateColumn ? `Periodo detectado desde la columna ${dateColumn.displayName}.` : "No se detecto una columna temporal confiable.",
+    profile.detectedDimensionColumns.length ? `Dimensiones disponibles: ${profile.detectedDimensionColumns.slice(0, 8).join(", ")}.` : "No se detectaron dimensiones suficientes."
+  ];
+  const recommendedKpis = [
+    ...profile.detectedMetricColumns.map((field) => `Total ${profile.columns.find((column) => column.normalizedName === field)?.displayName ?? field}`),
+    profile.detectedMetricColumns[0] ? `Promedio ${profile.columns.find((column) => column.normalizedName === profile.detectedMetricColumns[0])?.displayName ?? profile.detectedMetricColumns[0]}` : undefined,
+    profile.detectedDimensionColumns[0] ? `Conteo por ${profile.columns.find((column) => column.normalizedName === profile.detectedDimensionColumns[0])?.displayName ?? profile.detectedDimensionColumns[0]}` : undefined
+  ].filter((item): item is string => Boolean(item));
+
+  function exportPreviewCsv() {
+    const previewRows = rows.slice(0, 100);
+    const header = visibleColumns.map((column) => `"${column.replace(/"/g, '""')}"`).join(",");
+    const body = previewRows.map((row) => visibleColumns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([[header, body].filter(Boolean).join("\n")], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${profile.id || "dataset"}-preview.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast("Vista previa exportada en CSV.");
+  }
 
   useEffect(() => {
     if (!params.datasetId || params.datasetId === activeDatasetId) return;
@@ -133,7 +161,7 @@ export function DatasetPreview() {
           <section className="soft-card rounded-xl p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">Vista previa de datos</h2>
-              <button onClick={() => toast("Vista previa exportada.")} className="flex items-center gap-2 rounded-md border border-[#dfe5f0] px-3 py-2 text-sm font-semibold"><Download className="size-4" /> Exportar vista previa</button>
+              <button onClick={exportPreviewCsv} className="flex items-center gap-2 rounded-md border border-[#dfe5f0] px-3 py-2 text-sm font-semibold"><Download className="size-4" /> Exportar vista previa</button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-sm">
@@ -155,25 +183,20 @@ export function DatasetPreview() {
             <section className="soft-card rounded-xl p-5">
               <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-5 text-[#3d35ff]" /> Insights detectados por IA</h2>
               <div className="mt-4 space-y-3">
-                {[
-                  "Se detecto una columna de ventas como metrica principal.",
-                  "La columna Region parece geografica y permite analisis por ubicacion.",
-                  `${profile.qualityWarnings.length || importWarnings.length || 1} advertencia de calidad detectada para revisar.`,
-                  dateColumn ? `Periodo detectado desde la columna ${dateColumn.displayName}.` : "No se detecto una columna temporal confiable."
-                ].map((item) => (
+                {(showAllInsights ? insightItems : insightItems.slice(0, 4)).map((item) => (
                   <p key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm leading-6 text-[#34405f]"><CheckCircle2 className="mr-2 inline size-4 text-emerald-600" /> {item}</p>
                 ))}
               </div>
-              <button onClick={() => toast("Mostrando todos los insights detectados.")} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">Ver todos los insights</button>
+              <button onClick={() => setShowAllInsights((value) => !value)} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">{showAllInsights ? "Ver menos insights" : "Ver todos los insights"}</button>
             </section>
             <section className="soft-card rounded-xl p-5">
               <h2 className="text-lg font-bold">KPIs recomendados por IA</h2>
               <div className="mt-4 space-y-3">
-                {["Ventas Totales", "Numero de Pedidos", "Ticket Promedio", "Descuento Promedio (%)"].map((item) => (
+                {(showAllKpis ? recommendedKpis : recommendedKpis.slice(0, 4)).map((item) => (
                   <div key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm font-semibold">{item}</div>
                 ))}
               </div>
-              <button onClick={() => toast("Mostrando todos los KPIs recomendados.")} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">Ver todos los KPIs</button>
+              <button onClick={() => setShowAllKpis((value) => !value)} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">{showAllKpis ? "Ver menos KPIs" : "Ver todos los KPIs"}</button>
             </section>
           </aside>
         </div>}
@@ -191,7 +214,8 @@ export function DatasetPreview() {
               <article key={title} className="rounded-xl border border-[#e3e8f5] p-4">
                 <h3 className="font-bold">{title}</h3>
                 <p className="mt-3 text-sm leading-6 text-[#536088]">{copy}</p>
-                <button onClick={() => toast(`Detalle abierto: ${title}.`)} className="mt-4 text-sm font-semibold text-[#3d35ff]">Ver detalle</button>
+                <button onClick={() => setSelectedProfileDetail(selectedProfileDetail === title ? null : title)} className="mt-4 text-sm font-semibold text-[#3d35ff]">Ver detalle</button>
+                {selectedProfileDetail === title && <p className="mt-3 rounded-lg bg-[#fbfcff] p-3 text-xs leading-5 text-[#536088]">{copy || "Sin datos suficientes para este detalle."}</p>}
               </article>
             ))}
           </div>

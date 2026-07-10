@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Bell, Boxes, ChartNoAxesCombined, FileStack, Home, MonitorPlay, Search, Settings, Share2 } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { useAuth } from "@/components/shared/auth-provider";
@@ -27,15 +29,21 @@ function isActive(pathname: string, href: string) {
 
 export function AppShell({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const toast = useToast();
   const { configured, user, isLocalMode } = useAuth();
   const currentProject = useDashPilotStore((state) => state.currentProject);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const rows = useDashPilotStore((state) => state.rows);
+  const profile = useDashPilotStore((state) => state.profile);
   const persistenceStatus = useDashPilotStore((state) => state.persistenceStatus);
+  const setViewState = useDashPilotStore((state) => state.setViewState);
+  const [globalSearch, setGlobalSearch] = useState("");
   const hasProject = Boolean(activeDatasetId && rows.length);
   const projectName = hasProject ? currentProject.name : "Sin proyecto activo";
   const projectStatus = hasProject ? persistenceStatus || currentProject.updatedAt : "Sube un dataset para comenzar";
+  const notificationCount = profile.qualityWarnings.length + (hasProject && persistenceStatus ? 1 : 0);
 
   async function logout() {
     try {
@@ -44,6 +52,17 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
     } catch (error) {
       toast(error instanceof Error ? error.message : "No se pudo cerrar sesion.");
     }
+  }
+
+  function runGlobalSearch() {
+    const query = globalSearch.trim();
+    if (!query) return;
+    if (!hasProject) {
+      toast("Sube un dataset para buscar en DashPilot.");
+      return;
+    }
+    setViewState({ dataExplorer: { isOpen: true, search: query } });
+    router.push(`/app/dashboards/${activeDashboardId || "demo"}`);
   }
 
   return (
@@ -92,14 +111,17 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
               <span className="hidden text-xs text-[#6b7698] sm:inline">{projectStatus}</span>
             </div>
           </div>
-          <button
-            onClick={() => toast("Busqueda global lista para conectar.")}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              runGlobalSearch();
+            }}
             className="hidden h-11 w-[380px] items-center gap-3 rounded-lg border border-[#dfe5f0] bg-[#fbfcff] px-4 text-sm text-[#7a85a6] xl:flex"
           >
             <Search className="size-5" />
-            Buscar en DashPilot...
+            <input className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Buscar en DashPilot..." value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} />
             <span className="ml-auto rounded border border-[#dfe5f0] px-1.5 text-xs">⌘ K</span>
-          </button>
+          </form>
           <div className="flex items-center gap-4">
             {isLocalMode && (
               <span className="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 md:inline">
@@ -116,9 +138,9 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
                 Iniciar sesion
               </Link>
             )}
-            <button onClick={() => toast("Tienes 3 notificaciones pendientes.")} className="relative">
+            <button onClick={() => toast(notificationCount ? [...profile.qualityWarnings, persistenceStatus].filter(Boolean).slice(0, 3).join(" ") : "No hay notificaciones pendientes.")} className="relative" aria-label="Ver notificaciones">
               <Bell className="size-5 text-[#536088]" />
-              <span className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-red-500 text-[10px] font-bold text-white">3</span>
+              {notificationCount > 0 && <span className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-red-500 text-[10px] font-bold text-white">{Math.min(9, notificationCount)}</span>}
             </button>
             <Link href="/app/configuracion" className="flex items-center gap-3">
               <div className="grid size-10 place-items-center rounded-full bg-gradient-to-br from-slate-200 to-slate-400 text-sm font-bold">CM</div>

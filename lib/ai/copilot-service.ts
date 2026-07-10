@@ -175,7 +175,18 @@ function extractQuotedTitle(prompt: string) {
 
 function filterValue(prompt: string) {
   const match = prompt.match(/(?:filtra|filtrar|filtro|solo|por)\s+(?:por\s+)?(?:region|zona|territorio|cliente|vendedor|producto|categoria|estado|pais|país|ciudad|comuna)?\s*(?:=|:|a|en|por)?\s+([a-zA-Z0-9 áéíóúÁÉÍÓÚñÑ_-]+)/i);
-  return match?.[1]?.trim().split(/\s+/).slice(0, 4).join(" ");
+  const direct = match?.[1]?.trim().split(/\s+/).slice(0, 4).join(" ");
+  if (direct) return direct;
+  return prompt.replace(/filtra|filtrar|filtro|solo|por/gi, "").trim().split(/\s+/).slice(0, 4).join(" ");
+}
+
+function columnBySampleValue(value: string, context: CopilotRequestContext) {
+  const target = normalize(value);
+  return context.datasetProfile.columns.find((column) =>
+    column.sampleValues.some((sample) => normalize(String(sample ?? "")) === target)
+  ) ?? context.datasetProfile.columns.find((column) =>
+    column.sampleValues.some((sample) => normalize(String(sample ?? "")).includes(target))
+  );
 }
 
 function requestedColumns(prompt: string, context: CopilotRequestContext) {
@@ -367,11 +378,14 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
   if ((prompt.includes("filtra") || prompt.includes("filtro") || prompt.includes("solo ")) && context.datasetProfile.columns.length) {
     const resolved = resolveColumn(context.prompt, availableContext(context));
     const value = filterValue(context.prompt);
-    if (!resolved.matchedColumn || !value) {
+    const valueColumn = value ? columnBySampleValue(value, context) : undefined;
+    const matchedColumn = resolved.matchedColumn ?? valueColumn;
+    if (!matchedColumn || !value) {
       return { reply: "Puedo aplicar filtros, pero necesito una columna y un valor claros. Por ejemplo: filtra Pais Chile.", envelopes: [] };
     }
-    const action: DashboardAction = { type: "add_or_update_filter", filter: { field: resolved.matchedColumn.normalizedName, operator: "in", value: [value] } };
-    return { reply: `Aplique filtro sobre "${resolved.matchedColumn.originalName}" con valor "${value}".`, envelopes: [actionEnvelope(action, resolved.reason, resolved.confidence)] };
+    const action: DashboardAction = { type: "add_or_update_filter", filter: { field: matchedColumn.normalizedName, operator: "in", value: [value] } };
+    const reason = resolved.matchedColumn ? resolved.reason : `Detecte "${value}" en muestras reales de "${matchedColumn.displayName}".`;
+    return { reply: `Aplique filtro sobre "${matchedColumn.originalName}" con valor "${value}".`, envelopes: [actionEnvelope(action, reason, resolved.confidence || 0.68)] };
   }
 
   if (prompt.includes("region") || prompt.includes("regiones") || prompt.includes("zona") || prompt.includes("pais") || prompt.includes("ciudad") || prompt.includes("comuna")) {

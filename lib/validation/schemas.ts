@@ -112,6 +112,7 @@ export const presentationSpecSchema = z.object({
         search: z.string().optional(),
         visibleColumns: z.array(z.string()).optional(),
         sort: z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }).optional(),
+        columnSearch: z.object({ field: z.string(), query: z.string() }).optional(),
         pageSize: z.number().optional()
       }).optional()
     }).optional()

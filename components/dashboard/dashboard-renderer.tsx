@@ -17,10 +17,11 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { Filter, MoreVertical, Search, Send, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { Copy, Eye, Filter, Highlighter, MoreVertical, Pencil, Presentation, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
+import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
@@ -39,14 +40,67 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   return <section className={cn("soft-card rounded-xl p-5", className)}>{children}</section>;
 }
 
-function WidgetHeader({ title }: { title: string }) {
+function WidgetHeader({ widget }: { widget: DashboardWidget }) {
   const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const startDashboardEditing = useDashPilotStore((state) => state.startDashboardEditing);
+  const duplicateWidget = useDashPilotStore((state) => state.duplicateDashboardWidget);
+  const removeWidget = useDashPilotStore((state) => state.removeDashboardWidget);
+  const setHidden = useDashPilotStore((state) => state.setDashboardWidgetHidden);
+  const openWidgetData = useDashPilotStore((state) => state.openWidgetDataExplorer);
+  const updateWidget = useDashPilotStore((state) => state.updateDashboardWidget);
+  const setViewState = useDashPilotStore((state) => state.setViewState);
+  const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
+  const generatePresentation = useDashPilotStore((state) => state.generatePresentation);
+  const typeOptions = compatibleWidgetTypes(widget).filter((type) => type !== widget.type);
+
+  function editWidget() {
+    setViewState({ highlightedWidgetId: widget.id });
+    startDashboardEditing();
+    setOpen(false);
+  }
+
+  function changeType(type: DashboardWidget["type"]) {
+    updateWidget(widget.id, { type });
+    setOpen(false);
+    toast(`Cambie "${widget.title}" a ${type}.`);
+  }
+
   return (
-    <div className="mb-4 flex items-center justify-between">
-      <h3 className="font-bold tracking-[-0.02em]">{title}</h3>
-      <button onClick={() => toast(`Opciones abiertas para ${title}.`)} className="grid size-8 place-items-center rounded-md text-[#697597] hover:bg-[#f3f5ff]">
+    <div className="relative mb-4 flex items-center justify-between">
+      <h3 className="font-bold tracking-[-0.02em]">{widget.title}</h3>
+      <button aria-label={`Abrir opciones de ${widget.title}`} onClick={() => setOpen((value) => !value)} className="grid size-8 place-items-center rounded-md text-[#697597] hover:bg-[#f3f5ff]">
         <MoreVertical className="size-4" />
       </button>
+      {open && (
+        <div className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-[#dfe5f0] bg-white p-2 text-sm shadow-2xl shadow-slate-900/10">
+          <button onClick={editWidget} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Pencil className="size-4" /> Editar</button>
+          <button onClick={() => { duplicateWidget(widget.id); setOpen(false); toast(`Duplique "${widget.title}".`); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Copy className="size-4" /> Duplicar</button>
+          <button onClick={() => { setHidden(widget.id, true); setOpen(false); toast(`Oculte "${widget.title}".`); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Eye className="size-4" /> Ocultar</button>
+          <button onClick={() => { openWidgetData(widget.id); setOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Search className="size-4" /> Ver datos detras</button>
+          <button onClick={() => { void sendPrompt(`Explica el widget ${widget.title}`); setOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Sparkles className="size-4" /> Explicar con IA</button>
+          <button onClick={() => { generatePresentation(); setOpen(false); toast("Agregue el dashboard actualizado a la presentacion."); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Presentation className="size-4" /> Agregar a presentacion</button>
+          <button onClick={() => { setViewState({ highlightedWidgetId: widget.id }); setOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Highlighter className="size-4" /> Fijar o destacar</button>
+          {typeOptions.map((type) => (
+            <button key={type} onClick={() => changeType(type)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><SlidersHorizontal className="size-4" /> Cambiar a {type}</button>
+          ))}
+          <button
+            onClick={() => {
+              if (!confirmDelete) {
+                setConfirmDelete(true);
+                return;
+              }
+              removeWidget(widget.id);
+              setOpen(false);
+              toast(`Elimine "${widget.title}".`);
+            }}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="size-4" /> {confirmDelete ? "Confirmar eliminar" : "Eliminar"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -89,7 +143,7 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
 
   return (
     <Card className="min-h-[310px]">
-      <WidgetHeader title={widget.title} />
+      <WidgetHeader widget={widget} />
       {data.length === 0 ? (
         <EmptyWidget message={String(widget.config.emptyMessage ?? "No hay datos suficientes para esta serie.")} />
       ) : (
@@ -114,7 +168,7 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   const compact = Boolean(widget.config.compact);
   return (
     <Card className="min-h-[310px]">
-      <WidgetHeader title={widget.title} />
+      <WidgetHeader widget={widget} />
       {data.length === 0 ? (
         <EmptyWidget />
       ) : (
@@ -138,7 +192,7 @@ function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
   const colors = ["#3d35ff", "#16a34a", "#0ea5e9", "#f97316", "#8b5cf6", "#64748b"];
   return (
     <Card className="min-h-[310px]">
-      <WidgetHeader title={widget.title} />
+      <WidgetHeader widget={widget} />
       {data.length === 0 ? (
         <EmptyWidget />
       ) : (
@@ -160,7 +214,7 @@ function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRo
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState).map((row, index) => ({ ...row, index: index + 1 })) : [];
   return (
     <Card className="min-h-[310px]">
-      <WidgetHeader title={widget.title} />
+      <WidgetHeader widget={widget} />
       {data.length === 0 ? (
         <EmptyWidget />
       ) : (
@@ -185,12 +239,7 @@ function TableWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
   return (
     <Card className="min-h-[310px] overflow-hidden">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="font-bold tracking-[-0.02em]">{widget.title}</h3>
-        <div className="flex items-center gap-2 text-[#697597]">
-          <Search className="size-4" />
-          <SlidersHorizontal className="size-4" />
-          <MoreVertical className="size-4" />
-        </div>
+        <WidgetHeader widget={widget} />
       </div>
       {filtered.length === 0 ? (
         <EmptyWidget message="No hay filas para mostrar con los filtros actuales." />
@@ -279,7 +328,6 @@ export function DashboardFilters() {
   const viewState = useDashPilotStore((state) => state.viewState);
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const resetFilters = useDashPilotStore((state) => state.resetFilters);
-  const toast = useToast();
 
   const optionsFor = (field: string) => Array.from(new Set(rows.map((row) => row[field]).filter(Boolean))).slice(0, 12);
 
@@ -287,7 +335,7 @@ export function DashboardFilters() {
     <aside className="soft-card rounded-xl p-4">
       <div className="flex items-center justify-between border-b border-[#edf1fa] pb-4">
         <div className="flex items-center gap-2 font-bold"><Filter className="size-4" /> Filtros</div>
-        <button onClick={() => toast("Panel de filtros activo.")} className="text-[#697597]">⌃</button>
+        <button disabled title="Los filtros globales disponibles se listan debajo." className="cursor-not-allowed text-[#697597] opacity-60">⌃</button>
       </div>
       <button onClick={resetFilters} className="mt-5 text-sm font-semibold text-[#3d35ff]">Restablecer</button>
       <div className="mt-6 space-y-6">
@@ -360,7 +408,7 @@ export function DashboardFilters() {
           </span>
         ))}
       </div>
-      <Button onClick={() => toast("Opciones de filtro: canal, estado y producto.")} variant="secondary" className="mt-4 w-full">+ Agregar filtro</Button>
+      <Button disabled title="Agrega filtros desde el Copiloto o editando la especificacion del dashboard." variant="secondary" className="mt-4 w-full">+ Agregar filtro</Button>
     </aside>
   );
 }

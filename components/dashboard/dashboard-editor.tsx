@@ -6,7 +6,7 @@ import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
 import type { DashboardQuerySpec, DashboardWidget, WidgetType } from "@/types/dashboard";
 
-const aggregations: NonNullable<DashboardQuerySpec["metric"]>["aggregation"][] = ["sum", "avg", "count", "min", "max"];
+const aggregations: NonNullable<DashboardQuerySpec["metric"]>["aggregation"][] = ["sum", "avg", "count", "count_distinct", "min", "max"];
 
 function unique(items: string[]) {
   return Array.from(new Set(items.filter(Boolean)));
@@ -62,6 +62,7 @@ export function DashboardEditor() {
   const profile = useDashPilotStore((state) => state.profile);
   const draft = useDashPilotStore((state) => state.dashboardEditDraft);
   const updateTitle = useDashPilotStore((state) => state.updateDashboardDraftTitle);
+  const updateSubtitle = useDashPilotStore((state) => state.updateDashboardDraftSubtitle);
   const updateWidget = useDashPilotStore((state) => state.updateDashboardDraftWidget);
   const duplicateWidget = useDashPilotStore((state) => state.duplicateDashboardDraftWidget);
   const removeWidget = useDashPilotStore((state) => state.removeDashboardDraftWidget);
@@ -100,6 +101,16 @@ export function DashboardEditor() {
         className="focus-ring mt-2 h-10 w-full rounded-lg border border-[#dfe5f0] px-3 text-sm"
         value={draft.title}
         onChange={(event) => updateTitle(event.target.value)}
+      />
+
+      <label className="mt-4 block text-sm font-bold text-[#34405f]" htmlFor="dashboard-subtitle">
+        Subtitulo
+      </label>
+      <textarea
+        id="dashboard-subtitle"
+        className="focus-ring mt-2 min-h-20 w-full rounded-lg border border-[#dfe5f0] px-3 py-2 text-sm"
+        value={draft.subtitle ?? ""}
+        onChange={(event) => updateSubtitle(event.target.value)}
       />
 
       <div className="mt-7 space-y-4">

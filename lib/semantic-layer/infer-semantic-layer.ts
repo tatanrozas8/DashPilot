@@ -1,7 +1,7 @@
 import type { DataRow, DatasetColumnProfile, DatasetProfile, InferredColumnType } from "@/types/dataset";
 import { slugify } from "@/lib/utils";
 
-export type SemanticDomainName = "sales" | "finance" | "operations" | "hr" | "generic";
+export type SemanticDomainName = "sales" | "finance" | "operations" | "inventory" | "hr" | "marketing" | "generic";
 
 export type SemanticRole =
   | "metric"
@@ -77,7 +77,9 @@ const domainHints: Record<Exclude<SemanticDomainName, "generic">, string[]> = {
   sales: ["venta", "ventas", "sales", "revenue", "pedido", "cliente", "customer", "vendedor", "seller", "producto", "sku", "canal", "margen"],
   finance: ["finanza", "finance", "presupuesto", "budget", "balance", "cuenta", "accounting", "gasto", "expense", "egreso", "cash", "caja", "factura"],
   operations: ["operacion", "operation", "proceso", "process", "ticket", "sla", "stock", "inventario", "inventory", "produccion", "production", "lead_time"],
-  hr: ["rrhh", "hr", "empleado", "employee", "colaborador", "cargo", "puesto", "salario", "salary", "contratacion", "hiring", "ausencia", "turno"]
+  inventory: ["inventario", "inventory", "stock", "bodega", "almacen", "almacÃ©n", "sku", "rotacion", "rotaciÃ³n", "quiebre"],
+  hr: ["rrhh", "hr", "empleado", "employee", "colaborador", "cargo", "puesto", "salario", "salary", "contratacion", "hiring", "ausencia", "turno"],
+  marketing: ["marketing", "campana", "campaÃ±a", "campaign", "lead", "leads", "conversion", "ctr", "cpc", "roas", "canal"]
 };
 
 function clamp(value: number) {

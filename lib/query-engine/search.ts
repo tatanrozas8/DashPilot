@@ -12,6 +12,10 @@ export interface TableQueryState {
     field: string;
     direction: "asc" | "desc";
   };
+  columnSearch?: {
+    field: string;
+    query: string;
+  };
 }
 
 function valueText(value: unknown) {
@@ -44,7 +48,8 @@ export function sortRows(rows: DataRow[], sort?: TableQueryState["sort"]) {
 }
 
 export function queryTableRows(rows: DataRow[], state: TableQueryState) {
-  const filtered = searchRows(applyDashboardFilters(rows, state.filters ?? []), state.search);
+  const globallyFiltered = searchRows(applyDashboardFilters(rows, state.filters ?? []), state.search);
+  const filtered = state.columnSearch?.query ? searchRows(globallyFiltered, state.columnSearch.query, [state.columnSearch.field]) : globallyFiltered;
   const sorted = sortRows(filtered, state.sort);
   return {
     rows: selectColumns(sorted, state.columns ?? []),

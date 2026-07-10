@@ -9,7 +9,14 @@ import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { requestCopilotResponse } from "@/lib/ai/copilot-client";
 import { assistantMessage } from "@/lib/ai/copilot-service";
-import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import {
+  duplicateDashboardWidget as duplicateDashboardWidgetSpec,
+  removeDashboardWidget as removeDashboardWidgetSpec,
+  setDashboardWidgetHidden as setDashboardWidgetHiddenSpec,
+  updateDashboardSubtitle,
+  updateDashboardTitle,
+  updateDashboardWidget as updateDashboardWidgetSpec
+} from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { createDemoDataset } from "@/lib/data/demo-dataset";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
@@ -83,8 +90,14 @@ interface DashPilotState {
   startDashboardEditing: () => void;
   cancelDashboardEditing: () => void;
   updateDashboardDraftTitle: (title: string) => void;
+  updateDashboardDraftSubtitle: (subtitle: string) => void;
   updateDashboardDraftWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
+  updateDashboardWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
   addDashboardWidget: (widget: DashboardWidget) => void;
+  duplicateDashboardWidget: (widgetId: string) => void;
+  removeDashboardWidget: (widgetId: string) => void;
+  setDashboardWidgetHidden: (widgetId: string, hidden: boolean) => void;
+  openWidgetDataExplorer: (widgetId: string) => void;
   duplicateDashboardDraftWidget: (widgetId: string) => void;
   removeDashboardDraftWidget: (widgetId: string) => void;
   setDashboardDraftWidgetHidden: (widgetId: string, hidden: boolean) => void;
@@ -435,9 +448,25 @@ export const useDashPilotStore = create<DashPilotState>()(
         const draft = get().dashboardEditDraft ?? get().dashboard;
         set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardTitle(draft, title) });
       },
+      updateDashboardDraftSubtitle: (subtitle) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardSubtitle(draft, subtitle) });
+      },
       updateDashboardDraftWidget: (widgetId, changes) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;
-        set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardWidget(draft, widgetId, changes) });
+        set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardWidgetSpec(draft, widgetId, changes) });
+      },
+      updateDashboardWidget: (widgetId, changes) => {
+        const dashboard = updateDashboardWidgetSpec(get().dashboard, widgetId, changes);
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: dashboard === get().dashboard ? get().versions : [...get().versions, dashboard]
+        });
       },
       addDashboardWidget: (widget) => {
         const dashboard = { ...get().dashboard, widgets: [...get().dashboard.widgets, widget], updatedAt: new Date().toISOString() };
@@ -451,17 +480,75 @@ export const useDashPilotStore = create<DashPilotState>()(
           versions: [...get().versions, dashboard]
         });
       },
+      duplicateDashboardWidget: (widgetId) => {
+        const dashboard = duplicateDashboardWidgetSpec(get().dashboard, widgetId);
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: dashboard === get().dashboard ? get().versions : [...get().versions, dashboard]
+        });
+      },
+      removeDashboardWidget: (widgetId) => {
+        const dashboard = removeDashboardWidgetSpec(get().dashboard, widgetId);
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: dashboard === get().dashboard ? get().versions : [...get().versions, dashboard],
+          viewState: { ...get().viewState, highlightedWidgetId: get().viewState.highlightedWidgetId === widgetId ? undefined : get().viewState.highlightedWidgetId }
+        });
+      },
+      setDashboardWidgetHidden: (widgetId, hidden) => {
+        const dashboard = setDashboardWidgetHiddenSpec(get().dashboard, widgetId, hidden);
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: dashboard === get().dashboard ? get().versions : [...get().versions, dashboard]
+        });
+      },
+      openWidgetDataExplorer: (widgetId) => {
+        const widget = get().dashboard.widgets.find((item) => item.id === widgetId);
+        if (!widget) return;
+        const columns = [
+          widget.query?.x?.field,
+          ...(widget.query?.groupBy ?? []),
+          widget.query?.metric?.field,
+          ...((widget.config.columns as string[] | undefined) ?? [])
+        ].filter((field): field is string => Boolean(field));
+        const visibleColumns = Array.from(new Set(columns)).filter((field) => get().profile.columns.some((column) => column.normalizedName === field));
+        const viewState = {
+          ...get().viewState,
+          highlightedWidgetId: widgetId,
+          dataExplorer: {
+            ...get().viewState.dataExplorer,
+            isOpen: true,
+            visibleColumns: visibleColumns.length ? visibleColumns : get().profile.columns.map((column) => column.normalizedName).slice(0, 8)
+          }
+        };
+        set({ viewState, filters: viewState });
+      },
       duplicateDashboardDraftWidget: (widgetId) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;
-        set({ isDashboardEditing: true, dashboardEditDraft: duplicateDashboardWidget(draft, widgetId) });
+        set({ isDashboardEditing: true, dashboardEditDraft: duplicateDashboardWidgetSpec(draft, widgetId) });
       },
       removeDashboardDraftWidget: (widgetId) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;
-        set({ isDashboardEditing: true, dashboardEditDraft: removeDashboardWidget(draft, widgetId) });
+        set({ isDashboardEditing: true, dashboardEditDraft: removeDashboardWidgetSpec(draft, widgetId) });
       },
       setDashboardDraftWidgetHidden: (widgetId, hidden) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;
-        set({ isDashboardEditing: true, dashboardEditDraft: setDashboardWidgetHidden(draft, widgetId, hidden) });
+        set({ isDashboardEditing: true, dashboardEditDraft: setDashboardWidgetHiddenSpec(draft, widgetId, hidden) });
       },
       commitDashboardEditing: () => {
         const draft = get().dashboardEditDraft;

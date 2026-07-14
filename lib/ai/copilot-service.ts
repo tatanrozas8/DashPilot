@@ -3,13 +3,13 @@ import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
-import { applyAction } from "@/lib/ai/apply-action";
+import { executeCopilotActions } from "@/lib/ai/action-execution-engine";
 import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { buildDatasetCatalog, missingColumnMessage, resolveColumn } from "@/lib/semantic-layer";
-import { copilotOutputSchema, validateCopilotAction } from "@/lib/validation/copilot-actions";
+import { copilotOutputSchema } from "@/lib/validation/copilot-actions";
 
 export interface CopilotRequestContext {
   prompt: string;
@@ -62,13 +62,19 @@ export const copilotOutputJsonSchema = {
                 "update_dashboard_title",
                 "update_dashboard_design",
                 "update_widget_title",
+                "update_dashboard_subtitle",
                 "add_widget",
                 "update_widget",
                 "remove_widget",
                 "duplicate_widget",
                 "change_chart_type",
+                "resize_widget",
+                "move_widget",
+                "show_widget_data",
                 "add_filter",
                 "add_or_update_filter",
+                "update_filter",
+                "remove_filter",
                 "clear_filters",
                 "show_data_explorer",
                 "search_table",
@@ -83,6 +89,11 @@ export const copilotOutputJsonSchema = {
                 "create_calculated_metric",
                 "generate_insight",
                 "update_view_state",
+                "create_presentation",
+                "add_slide",
+                "generate_speaker_notes",
+                "ask_clarification",
+                "explain_limitation",
                 "generate_presentation"
               ]
             }
@@ -469,6 +480,31 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     };
   }
 
+  if (prompt.includes("notas") && (prompt.includes("presentador") || prompt.includes("speaker") || prompt.includes("slide"))) {
+    const action: DashboardAction = { type: "generate_speaker_notes" };
+    return { reply: "Genere notas del presentador para la presentacion activa.", envelopes: [actionEnvelope(action, "Notas del presentador solicitadas.", 0.84)] };
+  }
+
+  if (prompt.includes("slide") && (prompt.includes("riesgo") || prompt.includes("riesgos"))) {
+    const riskWidgets = context.dashboardSpec.widgets
+      .filter((widget) => normalize(`${widget.title} ${widget.query?.metric?.field ?? ""}`).includes("margen") || normalize(`${widget.title} ${widget.query?.metric?.field ?? ""}`).includes("costo"))
+      .map((widget) => widget.id)
+      .slice(0, 2);
+    const action: DashboardAction = {
+      type: "add_slide",
+      slide: {
+        id: `risks_${Date.now()}`,
+        title: "Riesgos y mitigaciones",
+        subtitle: "Puntos a monitorear antes de ejecutar el plan",
+        narrative: "Priorizar riesgos de concentracion, calidad de datos y variaciones de costo antes de tomar decisiones.",
+        speakerNotes: "Cerrar con acciones concretas y responsables por cada riesgo.",
+        layout: "insights",
+        widgetIds: riskWidgets
+      }
+    };
+    return { reply: "Agregue una slide de riesgos a la presentacion activa.", envelopes: [actionEnvelope(action, "Slide de riesgos solicitada.", 0.82)] };
+  }
+
   if (prompt.includes("ejecutivo")) {
     const kpis = context.dashboardSpec.widgets.filter((widget) => widget.type === "kpi_card").map((widget) => widget.id);
     const summary = firstWidgetByType(context.dashboardSpec, "insight_text") ?? context.dashboardSpec.widgets.find((widget) => widget.title.toLowerCase().includes("resumen"));
@@ -606,7 +642,7 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
   if (prompt.includes("presentacion") || prompt.includes("presentación")) {
     return {
       reply: "Prepare la presentacion desde el dashboard vivo con foco ejecutivo.",
-      envelopes: [actionEnvelope({ type: "generate_presentation", options: { theme: "executive", durationMinutes: 5, detailLevel: "summary" } }, "Presentacion solicitada.", 0.78)]
+      envelopes: [actionEnvelope({ type: "create_presentation", options: { theme: "executive", durationMinutes: 5, detailLevel: "summary" } }, "Presentacion solicitada.", 0.78)]
     };
   }
 
@@ -617,51 +653,32 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
 }
 
 function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotActionEnvelope[], source: "mock" | "provider", baseReply: string, warnings: string[] = []): CopilotResult {
-  let nextDashboard = input.dashboardSpec;
-  let nextViewState = input.viewState;
-  let nextPresentation = input.presentationSpec;
-  const appliedActions: DashboardAction[] = [];
-  const appliedEnvelopes: CopilotActionEnvelope[] = [];
-  let pendingConfirmation: CopilotActionEnvelope | undefined;
-  const messages: string[] = [];
-
-  for (const envelope of envelopes) {
-    const validation = validateCopilotAction(envelope.action, { datasetProfile: input.datasetProfile, semanticModel: input.semanticModel, dashboardSpec: nextDashboard, viewState: nextViewState });
-    if (!validation.success) {
-      warnings.push(validation.error);
-      continue;
-    }
-    if (envelope.requiresConfirmation) {
-      pendingConfirmation = { ...envelope, action: validation.action };
-      messages.push(`La accion ${envelope.type} requiere confirmacion antes de aplicarse.`);
-      continue;
-    }
-    if (validation.action.type === "generate_presentation") {
-      nextPresentation = input.presentationSpec;
-      appliedActions.push(validation.action);
-      appliedEnvelopes.push(envelope);
-      messages.push("La presentacion se puede regenerar desde el constructor interactivo.");
-      continue;
-    }
-    const applied = applyAction(nextDashboard, nextViewState, validation.action);
-    nextDashboard = applied.spec;
-    nextViewState = applied.viewState;
-    appliedActions.push(validation.action);
-    appliedEnvelopes.push(envelope);
-    messages.push(applied.message);
-  }
+  const execution = executeCopilotActions({
+    userMessage: input.prompt,
+    datasetProfile: input.datasetProfile,
+    semanticModel: input.semanticModel,
+    dashboardSpec: input.dashboardSpec,
+    viewState: input.viewState,
+    dataExplorerState: input.viewState.dataExplorer,
+    presentationSpec: input.presentationSpec,
+    focusedWidgetId: input.viewState.highlightedWidgetId,
+    rows: input.rows,
+    envelopes,
+    assistantMessage: baseReply,
+    source
+  });
 
   return {
-    reply: [baseReply, ...messages].filter(Boolean).join(" "),
-    action: appliedActions[0],
-    actions: appliedActions,
-    actionEnvelopes: pendingConfirmation ? [...appliedEnvelopes, pendingConfirmation] : appliedEnvelopes,
-    pendingConfirmation,
-    warnings,
-    rejectedActionReason: warnings[0],
-    updatedDashboardSpec: nextDashboard,
-    updatedViewState: nextViewState,
-    updatedPresentationSpec: nextPresentation,
+    reply: execution.assistantMessage,
+    action: execution.actions[0],
+    actions: execution.actions,
+    actionEnvelopes: execution.actionEnvelopes,
+    pendingConfirmation: execution.pendingConfirmation,
+    warnings: [...warnings, ...execution.warnings, ...execution.errors],
+    rejectedActionReason: [...warnings, ...execution.warnings, ...execution.errors][0],
+    updatedDashboardSpec: execution.updatedDashboardSpec,
+    updatedViewState: execution.updatedViewState,
+    updatedPresentationSpec: execution.updatedPresentationSpec,
     source
   };
 }
@@ -695,7 +712,7 @@ export function parseCopilotProviderOutput(raw: unknown, context: CopilotRequest
     return { reply: "La respuesta del proveedor no paso la validacion estructurada.", rejectedActionReason: "output_schema", warnings: ["output_schema"], source: "provider" };
   }
   if (!parsed.data.action) return { reply: parsed.data.reply, actions: [], updatedDashboardSpec: context.dashboardSpec, updatedViewState: context.viewState, updatedPresentationSpec: context.presentationSpec, source: "provider" };
-  return handleCopilotMessage({ ...context, source: "provider", providerReply: parsed.data.reply, proposedActions: [parsed.data.action] });
+  return handleCopilotMessage({ ...context, source: "provider", providerReply: parsed.data.reply, proposedActions: [parsed.data.action as DashboardAction] });
 }
 
 export function buildCopilotPrompt(context: CopilotRequestContext) {

@@ -226,6 +226,7 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   const viewState = useDashPilotStore((state) => state.viewState);
   const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
   const compact = Boolean(widget.config.compact);
   return (
     <Card className="min-h-[310px]">
@@ -239,7 +240,13 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
             <XAxis type="number" hide />
             <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={82} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            <Bar dataKey="value" radius={[0, 8, 8, 0]} fill={colors.primary} barSize={compact ? 16 : 24} />
+            {seriesKeys.length ? (
+              seriesKeys.map((key, index) => (
+                <Bar key={key} dataKey={key} radius={[0, 8, 8, 0]} fill={colors.palette[index % colors.palette.length]} barSize={compact ? 12 : 18} />
+              ))
+            ) : (
+              <Bar dataKey="value" radius={[0, 8, 8, 0]} fill={colors.primary} barSize={compact ? 16 : 24} />
+            )}
           </BarChart>
         </ResponsiveContainer>
       )}
@@ -656,6 +663,11 @@ export function CopilotPanel() {
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>
             <p className="mb-1 text-xs font-bold text-[#697597]">{message.role === "user" ? "Tu" : "Copiloto IA"}</p>
             {message.content}
+            {message.role === "assistant" && message.structuredAction && (
+              <p className="mt-3 inline-flex rounded-full border border-[#dfe5fb] bg-[#f6f7ff] px-3 py-1 text-xs font-bold text-[#3d35ff]">
+                Accion aplicada: {message.structuredAction.type}
+              </p>
+            )}
           </div>
         ))}
         {isCopilotThinking && (

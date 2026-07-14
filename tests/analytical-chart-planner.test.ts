@@ -28,6 +28,16 @@ describe("analytical intent parser and chart planner", () => {
     expect(intent.chartIntent).toBe("time_series_by_dimension");
   });
 
+  it("detects explicit bar chart axes and color series", () => {
+    const intent = parseAnalyticalIntent("Hazme un grafico de barras con regiones en el eje X, ventas en el eje Y y anos con distintos colores");
+
+    expect(intent.chartTypeIntent).toBe("bar_chart");
+    expect(intent.xAxisIntent).toBe("region");
+    expect(intent.yAxisIntent).toBe("ventas");
+    expect(intent.seriesIntent).toBe("fecha");
+    expect(intent.seriesGranularityIntent).toBe("year");
+  });
+
   it("detects margin by channel by month as a temporal dimension chart", () => {
     const intent = parseAnalyticalIntent("margen por canal por mes");
 
@@ -76,6 +86,25 @@ describe("analytical intent parser and chart planner", () => {
     expect(changes?.query?.groupBy).toEqual(["region"]);
     expect(changes?.query?.seriesBy).toBe("region");
     expect(changes?.query?.metric?.field).toBe("venta_neta_clp");
+  });
+
+  it("respects explicit bar chart type for region X, sales Y and years as colors", () => {
+    const rows: DataRow[] = [
+      { fecha: "2023-01-01", region: "RM", ventas: 100 },
+      { fecha: "2023-02-01", region: "Biobio", ventas: 120 },
+      { fecha: "2024-01-01", region: "RM", ventas: 150 },
+      { fecha: "2024-02-01", region: "Biobio", ventas: 180 }
+    ];
+    const result = planAnalyticalChart(planningContext("Hazme un grafico de barras con regiones en el eje X, ventas en el eje Y y anos con distintos colores", rows));
+    const action = result.actions[0];
+    const changes = action?.type === "update_widget" ? action.changes : action?.type === "add_widget" ? action.widget : undefined;
+
+    expect(changes?.type).toBe("bar_chart");
+    expect(changes?.type).not.toBe("line_chart");
+    expect(changes?.query?.x?.field).toBe("region");
+    expect(changes?.query?.metric?.field).toBe("ventas");
+    expect(changes?.query?.seriesBy).toBe("fecha");
+    expect(changes?.query?.seriesGranularity).toBe("year");
   });
 
   it("returns a clear limitation when no date column exists", () => {

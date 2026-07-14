@@ -1,6 +1,6 @@
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import { copilotActionSchema } from "@/lib/validation/copilot-actions";
-import { duplicateDashboardWidget, reorderDashboardWidgets, updateDashboardDesign, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { duplicateDashboardWidget, moveDashboardWidget, reorderDashboardWidgets, updateDashboardDesign, updateDashboardSubtitle, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 
 export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardViewState, action: DashboardAction): { spec: DashboardSpec; viewState: DashboardViewState; message: string } {
   const parsed = copilotActionSchema.safeParse(action);
@@ -25,6 +25,14 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
       spec: updateDashboardTitle(spec, action.title),
       viewState,
       message: `Actualice el titulo del dashboard a "${action.title}".`
+    };
+  }
+
+  if (action.type === "update_dashboard_subtitle") {
+    return {
+      spec: updateDashboardSubtitle(spec, action.subtitle),
+      viewState,
+      message: "Actualice el subtitulo del dashboard."
     };
   }
 
@@ -56,7 +64,33 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
     };
   }
 
-  if (action.type === "add_filter" || action.type === "add_or_update_filter") {
+  if (action.type === "resize_widget") {
+    return {
+      spec: updateDashboardWidget(spec, action.widgetId, { position: action.position }),
+      viewState,
+      message: "Redimensione el widget solicitado."
+    };
+  }
+
+  if (action.type === "move_widget") {
+    return {
+      spec: moveDashboardWidget(spec, action.sourceWidgetId, action.targetWidgetId),
+      viewState,
+      message: "Movi el widget solicitado."
+    };
+  }
+
+  if (action.type === "show_widget_data") {
+    const widget = spec.widgets.find((item) => item.id === action.widgetId);
+    const columns = [...new Set([widget?.query?.x?.field, ...(widget?.query?.groupBy ?? []), widget?.query?.seriesBy, widget?.query?.metric?.field].filter((field): field is string => Boolean(field)))];
+    return {
+      spec,
+      viewState: { ...viewState, highlightedWidgetId: action.widgetId, dataExplorer: { ...viewState.dataExplorer, isOpen: true, visibleColumns: columns.length ? columns : viewState.dataExplorer?.visibleColumns } },
+      message: "Abri la vista Datos enfocada en el widget solicitado."
+    };
+  }
+
+  if (action.type === "add_filter" || action.type === "add_or_update_filter" || action.type === "update_filter") {
     return {
       spec,
       viewState: {
@@ -64,6 +98,17 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
         filters: [...(viewState.filters ?? []).filter((filter) => filter.field !== action.filter.field), action.filter]
       },
       message: "Aplique el filtro solicitado al estado de vista."
+    };
+  }
+
+  if (action.type === "remove_filter") {
+    return {
+      spec,
+      viewState: {
+        ...viewState,
+        filters: (viewState.filters ?? []).filter((filter) => filter.field !== action.field)
+      },
+      message: "Quite el filtro solicitado."
     };
   }
 

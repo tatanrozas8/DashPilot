@@ -97,6 +97,14 @@ function timeLabel(granularity: TimeIntent) {
   return "Mes";
 }
 
+function chartTypeLabel(type: NonNullable<AnalyticalIntent["chartTypeIntent"]>) {
+  if (type === "bar_chart") return "barras";
+  if (type === "line_chart") return "lineas";
+  if (type === "donut_chart") return "dona";
+  if (type === "table") return "tabla";
+  return "KPI";
+}
+
 function targetWidget(spec: DashboardSpec, viewState: DashboardViewState, dimension?: string) {
   const highlighted = viewState.highlightedWidgetId ? spec.widgets.find((widget) => widget.id === viewState.highlightedWidgetId) : undefined;
   const grouped = dimension ? spec.widgets.find((widget) => widget.query?.groupBy?.includes(dimension)) : undefined;
@@ -129,7 +137,11 @@ function compatibleUpdateTarget(widget: DashboardWidget | undefined): widget is 
 
 export function planAnalyticalChart(context: ChartPlanningContext): PlannedChartResult {
   const intent = parseAnalyticalIntent(context.prompt);
-  if (!["time_series_by_dimension", "time_series", "breakdown_by_dimension"].includes(intent.chartIntent)) {
+  const hasAnalyticalRequest = Boolean(intent.metricIntent || intent.yAxisIntent || (intent.chartTypeIntent && (intent.xAxisIntent || intent.seriesIntent)));
+  if (!hasAnalyticalRequest) {
+    return { handled: false, reply: "", actions: [], confidence: 0 };
+  }
+  if (!intent.chartTypeIntent && !["time_series_by_dimension", "time_series", "breakdown_by_dimension"].includes(intent.chartIntent)) {
     return { handled: false, reply: "", actions: [], confidence: 0 };
   }
 
@@ -139,14 +151,62 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
   if (!metric.matchedColumn || (intent.chartIntent !== "time_series" && !dimension.matchedColumn)) {
     return { handled: false, reply: "", actions: [], confidence: 0 };
   }
+  const metricColumn = metric.matchedColumn;
+  const dimensionColumn = dimension.matchedColumn;
+
+  if (intent.chartTypeIntent === "bar_chart" && intent.xAxisIntent && intent.yAxisIntent && intent.seriesIntent && dimensionColumn) {
+    const date = intent.seriesIntent === "fecha" ? resolveTimeColumn(intent, context) : undefined;
+    if (intent.seriesIntent === "fecha" && !date?.matchedColumn) {
+      return {
+        handled: true,
+        reply: `Puedo crear barras por ${fieldLabel(context.datasetProfile, dimensionColumn.normalizedName)}, pero no encontre una columna temporal confiable para usar anos como colores. Las columnas temporales detectadas son: ${detectedDateColumns(context.datasetProfile)}.`,
+        actions: [],
+        confidence: 0.86
+      };
+    }
+    const seriesField = date?.matchedColumn?.normalizedName ?? dimensionColumn.normalizedName;
+    const seriesGranularity = date?.matchedColumn ? intent.seriesGranularityIntent ?? "year" : undefined;
+    const title = `${fieldLabel(context.datasetProfile, metricColumn.normalizedName)} por ${fieldLabel(context.datasetProfile, dimensionColumn.normalizedName)}${seriesGranularity ? ` por ${timeLabel(seriesGranularity)}` : ""}`;
+    const query = {
+      metric: { field: metricColumn.normalizedName, aggregation: "sum" as const },
+      x: { field: dimensionColumn.normalizedName },
+      groupBy: [dimensionColumn.normalizedName],
+      seriesBy: seriesField,
+      ...(seriesGranularity ? { seriesGranularity } : {}),
+      orderBy: { field: "value" as const, direction: intent.sortIntent ?? "desc" as const },
+      limit: intent.limitIntent ?? 10
+    };
+    const target = targetWidget(context.dashboardSpec, context.viewState, dimensionColumn.normalizedName);
+    let chartAction: DashboardAction;
+    if (compatibleUpdateTarget(target)) {
+      chartAction = { type: "update_widget", widgetId: target.id, changes: { type: "bar_chart", title, query, config: { generatedBy: "copilot", seriesBy: seriesField, horizontal: true } } };
+    } else {
+      chartAction = {
+        type: "add_widget",
+        widget: {
+          id: nextWidgetId(context.dashboardSpec),
+          type: "bar_chart",
+          title,
+          query,
+          config: { generatedBy: "copilot", seriesBy: seriesField, horizontal: true },
+          position: nextWidgetPosition(context.dashboardSpec)
+        }
+      };
+    }
+    const widgetId = chartAction.type === "update_widget" ? chartAction.widgetId : chartAction.widget.id;
+    return {
+      handled: true,
+      reply: `Listo. Cree un grafico de ${chartTypeLabel(intent.chartTypeIntent)} con ${dimensionColumn.normalizedName} en X, ${metricColumn.normalizedName} en Y y ${seriesField}${seriesGranularity ? ` agrupada por ${timeLabel(seriesGranularity).toLowerCase()}` : ""} como serie/color.`,
+      actions: [chartAction, { type: "focus_widget", widgetId }],
+      confidence: Math.min(metric.confidence || 0.82, dimension.confidence || 0.82, date?.confidence ?? 0.86)
+    };
+  }
 
   if (intent.chartIntent === "breakdown_by_dimension") {
     return { handled: false, reply: "", actions: [], confidence: 0 };
   }
 
   const date = resolveTimeColumn(intent, context);
-  const dimensionColumn = dimension.matchedColumn;
-  const metricColumn = metric.matchedColumn;
   if (!date.matchedColumn) {
     const dimensionText = dimensionColumn ? ` por ${fieldLabel(context.datasetProfile, dimensionColumn.normalizedName)}` : "";
     return {

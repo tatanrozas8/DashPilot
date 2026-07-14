@@ -8,6 +8,11 @@ export interface AnalyticalIntent {
   dimensionIntent: string | null;
   timeIntent: TimeIntent | null;
   chartIntent: ChartIntent;
+  chartTypeIntent: "bar_chart" | "line_chart" | "donut_chart" | "table" | "kpi_card" | null;
+  xAxisIntent: string | null;
+  yAxisIntent: string | null;
+  seriesIntent: string | null;
+  seriesGranularityIntent: TimeIntent | null;
   filterIntent: string | null;
   comparisonIntent: string | null;
   sortIntent: "asc" | "desc" | null;
@@ -72,6 +77,41 @@ function chartIntent(text: string, metric: string | null, dimension: string | nu
   return "unknown";
 }
 
+function chartTypeIntent(text: string): AnalyticalIntent["chartTypeIntent"] {
+  if (containsAny(text, ["barra", "barras", "bar chart", "bar"])) return "bar_chart";
+  if (containsAny(text, ["linea", "lineas", "line chart", "tendencia", "evolucion"])) return "line_chart";
+  if (containsAny(text, ["dona", "donut", "torta", "pie"])) return "donut_chart";
+  if (containsAny(text, ["tabla", "table"])) return "table";
+  if (containsAny(text, ["kpi", "indicador", "tarjeta"])) return "kpi_card";
+  return null;
+}
+
+function canonicalAxisIntent(value: string | undefined) {
+  if (!value) return null;
+  const normalized = value.replace(/\b(regiones|region)\b/, "region")
+    .replace(/\b(paises|pais)\b/, "pais")
+    .replace(/\b(anos|ano|anios|anio|years|year)\b/, "fecha")
+    .replace(/\b(meses|mes|months|month)\b/, "fecha")
+    .replace(/\b(ventas|venta)\b/, "ventas")
+    .trim();
+  return normalized || null;
+}
+
+function axisIntent(text: string, axis: "x" | "y") {
+  const axisPattern = axis === "x" ? "x" : "y";
+  const direct = text.match(new RegExp(`\\b([a-z0-9]+)\\s+(?:en|como)\\s+(?:el\\s+)?(?:eje\\s+)?${axisPattern}\\b`))?.[1];
+  if (direct) return canonicalAxisIntent(direct);
+  const reverse = text.match(new RegExp(`\\b(?:eje\\s+)?${axisPattern}\\s+(?:con|de|=|:)\\s+([a-z0-9]+)\\b`))?.[1];
+  return canonicalAxisIntent(reverse);
+}
+
+function seriesIntent(text: string) {
+  const color = text.match(/\b([a-z0-9]+)\s+(?:con|en|por)\s+(?:distintos\s+)?colores\b/)?.[1];
+  if (color) return canonicalAxisIntent(color);
+  const series = text.match(/\b(?:serie|series|color|colores)\s+(?:por|de|=|:)?\s+([a-z0-9]+)\b/)?.[1];
+  return canonicalAxisIntent(series);
+}
+
 function comparisonIntent(text: string) {
   if (containsAny(text, ["ano a ano", "yoy", "anual"])) return "year_over_year";
   if (containsAny(text, ["mes a mes", "mom", "mensual"])) return "month_over_month";
@@ -100,11 +140,20 @@ export function parseAnalyticalIntent(prompt: string): AnalyticalIntent {
   const metric = metricIntent(text);
   const dimension = dimensionIntent(text);
   const time = timeIntent(text) ?? (containsAny(text, ["linea", "lineas"]) && metric && dimension ? "month" : null);
+  const xAxis = axisIntent(text, "x");
+  const yAxis = axisIntent(text, "y");
+  const series = seriesIntent(text);
+  const seriesGranularity = series === "fecha" ? timeIntent(text) ?? (containsAny(text, ["ano", "anos", "anual"]) ? "year" : null) : null;
   return {
-    metricIntent: metric,
-    dimensionIntent: dimension,
+    metricIntent: yAxis ?? metric,
+    dimensionIntent: xAxis && xAxis !== "fecha" && xAxis !== yAxis ? xAxis : dimension,
     timeIntent: time,
-    chartIntent: chartIntent(text, metric, dimension, time),
+    chartIntent: chartIntent(text, yAxis ?? metric, xAxis ?? dimension, time ?? seriesGranularity),
+    chartTypeIntent: chartTypeIntent(text),
+    xAxisIntent: xAxis,
+    yAxisIntent: yAxis,
+    seriesIntent: series,
+    seriesGranularityIntent: seriesGranularity,
     filterIntent: filterIntent(text),
     comparisonIntent: comparisonIntent(text),
     sortIntent: sortIntent(text),

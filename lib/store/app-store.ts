@@ -754,7 +754,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           let nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
           let nextViewState = result.updatedViewState ?? get().viewState;
           let nextPresentation = result.updatedPresentationSpec ?? get().presentation;
-          if (result.actions?.some((action) => action.type === "generate_presentation")) {
+          if (!result.updatedPresentationSpec && result.actions?.some((action) => action.type === "generate_presentation" || action.type === "create_presentation")) {
             nextPresentation = generatePresentationSpec(nextDashboard, get().presentationOptions.theme);
           }
           const warningText = result.warnings?.length ? ` Advertencias: ${result.warnings.join(" ")}` : "";

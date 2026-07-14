@@ -29,6 +29,24 @@ const dashboardWidgetSchema = z.object({
   })
 });
 
+const widgetPositionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number()
+});
+
+const presentationSlideSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  subtitle: z.string().optional(),
+  narrative: z.string().optional(),
+  speakerNotes: z.string().optional(),
+  layout: z.enum(["cover", "executive_summary", "kpi_grid", "chart_focus", "comparison", "ranking", "table_detail", "insights"]),
+  widgetIds: z.array(z.string()),
+  viewState: z.record(z.string(), z.unknown()).optional()
+});
+
 const widgetChangesSchema = z.object({
   type: widgetTypeSchema.optional(),
   title: z.string().optional(),
@@ -46,14 +64,20 @@ const widgetChangesSchema = z.object({
 export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_widget"), widget: dashboardWidgetSchema }),
   z.object({ type: z.literal("update_dashboard_title"), title: z.string().min(1).max(120) }),
+  z.object({ type: z.literal("update_dashboard_subtitle"), subtitle: z.string().max(240) }),
   z.object({ type: z.literal("update_dashboard_design"), design: dashboardDesignSchema }),
   z.object({ type: z.literal("update_widget_title"), widgetId: z.string(), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_widget"), widgetId: z.string(), changes: widgetChangesSchema }),
   z.object({ type: z.literal("remove_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("duplicate_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("change_chart_type"), widgetId: z.string(), chartType: widgetTypeSchema }),
+  z.object({ type: z.literal("resize_widget"), widgetId: z.string(), position: widgetPositionSchema }),
+  z.object({ type: z.literal("move_widget"), sourceWidgetId: z.string(), targetWidgetId: z.string() }),
+  z.object({ type: z.literal("show_widget_data"), widgetId: z.string() }),
   z.object({ type: z.literal("add_filter"), filter: dashboardFilterSchema }),
   z.object({ type: z.literal("add_or_update_filter"), filter: dashboardFilterSchema }),
+  z.object({ type: z.literal("update_filter"), filter: dashboardFilterSchema }),
+  z.object({ type: z.literal("remove_filter"), field: z.string() }),
   z.object({ type: z.literal("clear_filters") }),
   z.object({ type: z.literal("show_data_explorer") }),
   z.object({ type: z.literal("search_table"), query: z.string() }),
@@ -68,6 +92,15 @@ export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_calculated_metric"), id: z.string().min(1), title: z.string().min(1), formula: z.string().min(1), operands: z.array(z.string()).min(1) }),
   z.object({ type: z.literal("generate_insight"), widgetId: z.string().optional(), content: z.string().min(1) }),
   z.object({ type: z.literal("update_view_state"), viewState: z.record(z.string(), z.unknown()) }),
+  z.object({ type: z.literal("create_presentation"), options: z.object({
+    theme: z.enum(["executive", "commercial", "financial", "operations"]).optional(),
+    durationMinutes: z.union([z.literal(3), z.literal(5), z.literal(10)]).optional(),
+    detailLevel: z.enum(["summary", "intermediate", "deep"]).optional()
+  }).optional() }),
+  z.object({ type: z.literal("add_slide"), slide: presentationSlideSchema }),
+  z.object({ type: z.literal("generate_speaker_notes") }),
+  z.object({ type: z.literal("ask_clarification"), question: z.string().min(1) }),
+  z.object({ type: z.literal("explain_limitation"), message: z.string().min(1) }),
   z.object({
     type: z.literal("generate_presentation"),
     options: z.object({
@@ -108,7 +141,8 @@ function configFields(config: Record<string, unknown> | undefined) {
 }
 
 function fieldsForAction(action: DashboardAction) {
-  if (action.type === "add_filter" || action.type === "add_or_update_filter") return [action.filter.field];
+  if (action.type === "add_filter" || action.type === "add_or_update_filter" || action.type === "update_filter") return [action.filter.field];
+  if (action.type === "remove_filter") return [action.field];
   if (action.type === "select_visible_columns") return action.columns;
   if (action.type === "sort_table") return [action.field];
   if (action.type === "group_by") return action.fields;
@@ -134,7 +168,7 @@ export function validateCopilotAction(rawAction: unknown, context: CopilotValida
   const missingField = fieldsForAction(action).find((field) => field && !columns.has(field));
   if (missingField) return { success: false, error: `La accion referencia una columna inexistente: ${missingField}.` };
 
-  if (["update_widget", "update_widget_title", "remove_widget", "duplicate_widget", "change_chart_type", "explain_widget", "focus_widget"].includes(action.type)) {
+  if (["update_widget", "update_widget_title", "remove_widget", "duplicate_widget", "change_chart_type", "explain_widget", "focus_widget", "resize_widget", "show_widget_data"].includes(action.type)) {
     const widgetId = "widgetId" in action ? action.widgetId : undefined;
     if (!widgetId || !widgets.has(widgetId)) return { success: false, error: "La accion referencia un widget inexistente." };
   }
@@ -142,6 +176,15 @@ export function validateCopilotAction(rawAction: unknown, context: CopilotValida
   if (action.type === "reorder_widgets") {
     const missingWidget = action.widgetIds.find((widgetId) => !widgets.has(widgetId));
     if (missingWidget) return { success: false, error: `La accion intenta reordenar un widget inexistente: ${missingWidget}.` };
+  }
+
+  if (action.type === "move_widget") {
+    if (!widgets.has(action.sourceWidgetId) || !widgets.has(action.targetWidgetId)) return { success: false, error: "La accion intenta mover un widget inexistente." };
+  }
+
+  if (action.type === "add_slide") {
+    const missingWidget = action.slide.widgetIds.find((widgetId) => !widgets.has(widgetId));
+    if (missingWidget) return { success: false, error: `La slide referencia un widget inexistente: ${missingWidget}.` };
   }
 
   if (action.type === "create_calculated_metric" && !/^[a-zA-Z0-9_\s+\-*/().]+$/.test(action.formula)) {

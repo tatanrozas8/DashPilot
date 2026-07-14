@@ -97,17 +97,18 @@ export function executeDashboardQuery(rows: DataRow[], query: DashboardQuerySpec
     return [{ label: query.metric?.aggregation ?? "count", value: aggregate(values, query.metric?.aggregation ?? "count") }];
   }
 
-  const seriesField = query.x?.field ? query.seriesBy ?? query.groupBy?.[0] : undefined;
+  const seriesField = query.x?.field ? query.seriesBy ?? query.groupBy?.find((field) => field !== query.x?.field) : undefined;
   if (query.x?.field && seriesField) {
     const metricField = query.metric?.field;
-    const granularity = query.x.granularity ?? "month";
+    const xGranularity = query.x.granularity;
+    const seriesGranularity = query.seriesGranularity;
     const seriesTotals = new Map<string, number>();
     const grouped = new Map<string, { label: string; sortKey: number; series: Map<string, unknown[]> }>();
 
     for (const row of filtered) {
-      const seriesLabel = String(row[seriesField] ?? "Sin valor");
-      const periodLabel = timeLabel(row[query.x.field], granularity);
-      const periodSortKey = timeSortKey(row[query.x.field], granularity);
+      const seriesLabel = seriesGranularity ? timeLabel(row[seriesField], seriesGranularity) : String(row[seriesField] ?? "Sin valor");
+      const periodLabel = xGranularity ? timeLabel(row[query.x.field], xGranularity) : String(row[query.x.field] ?? "Sin valor");
+      const periodSortKey = xGranularity ? timeSortKey(row[query.x.field], xGranularity) : 0;
       const values = metricField ? [row[metricField]] : [1];
       seriesTotals.set(seriesLabel, (seriesTotals.get(seriesLabel) ?? 0) + aggregate(values, query.metric?.aggregation ?? "sum"));
       const period = grouped.get(periodLabel) ?? { label: periodLabel, sortKey: periodSortKey, series: new Map<string, unknown[]>() };

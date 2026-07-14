@@ -1,4 +1,5 @@
 import type { DataRow } from "./dataset";
+import type { PresentationSlide, PresentationTheme } from "./presentation";
 
 export type WidgetType =
   | "kpi_card"
@@ -67,6 +68,7 @@ export interface DashboardQuerySpec {
   };
   groupBy?: string[];
   seriesBy?: string;
+  seriesGranularity?: "day" | "week" | "month" | "quarter" | "year";
   filters?: DashboardFilter[];
   orderBy?: {
     field: string;
@@ -124,14 +126,20 @@ export type QueryResultRow = DataRow & {
 export type DashboardAction =
   | { type: "add_widget"; widget: DashboardWidget }
   | { type: "update_dashboard_title"; title: string }
+  | { type: "update_dashboard_subtitle"; subtitle: string }
   | { type: "update_dashboard_design"; design: DashboardDesignSettings }
   | { type: "update_widget_title"; widgetId: string; title: string }
   | { type: "update_widget"; widgetId: string; changes: Partial<DashboardWidget> }
   | { type: "remove_widget"; widgetId: string }
   | { type: "duplicate_widget"; widgetId: string }
   | { type: "change_chart_type"; widgetId: string; chartType: WidgetType }
+  | { type: "resize_widget"; widgetId: string; position: DashboardWidget["position"] }
+  | { type: "move_widget"; sourceWidgetId: string; targetWidgetId: string }
+  | { type: "show_widget_data"; widgetId: string }
   | { type: "add_filter"; filter: DashboardFilter }
   | { type: "add_or_update_filter"; filter: DashboardFilter }
+  | { type: "update_filter"; filter: DashboardFilter }
+  | { type: "remove_filter"; field: string }
   | { type: "clear_filters" }
   | { type: "show_data_explorer" }
   | { type: "search_table"; query: string }
@@ -146,10 +154,15 @@ export type DashboardAction =
   | { type: "create_calculated_metric"; id: string; title: string; formula: string; operands: string[] }
   | { type: "generate_insight"; widgetId?: string; content: string }
   | { type: "update_view_state"; viewState: Partial<DashboardViewState> }
+  | { type: "create_presentation"; options?: PresentationGenerationOptions }
+  | { type: "add_slide"; slide: PresentationSlide }
+  | { type: "generate_speaker_notes" }
+  | { type: "ask_clarification"; question: string }
+  | { type: "explain_limitation"; message: string }
   | { type: "generate_presentation"; options: PresentationGenerationOptions };
 
 export interface PresentationGenerationOptions {
-  theme?: "executive" | "commercial" | "financial" | "operations";
+  theme?: PresentationTheme;
   durationMinutes?: 3 | 5 | 10;
   detailLevel?: "summary" | "intermediate" | "deep";
 }

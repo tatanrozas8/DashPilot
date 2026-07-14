@@ -17,7 +17,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { Check, Copy, Eye, Filter, GripVertical, Highlighter, MoreVertical, Pencil, Presentation, RotateCcw, RotateCw, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, Eye, Filter, GripVertical, Highlighter, MoreVertical, Pencil, Presentation, RotateCcw, RotateCw, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
@@ -597,19 +597,24 @@ export function CopilotPanel() {
   const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
+  const [recommendationsOpen, setRecommendationsOpen] = useState(false);
   const quickPrompts = useMemo(() => {
     const semantic = inferSemanticLayer(profile, rows);
-    const prompts = ["Hazlo mas ejecutivo"];
+    const prompts: string[] = [];
     const geo = semantic.primaryGeography;
     const seller = semantic.primarySeller;
     const margin = semantic.marginMetrics[0];
     const date = semantic.primaryDate;
     const productOrCategory = semantic.primaryProduct ?? semantic.primaryCategory;
-    if (geo) prompts.push(`Analizar por ${geo.displayName}`);
-    if (seller) prompts.push("Agregar ranking por vendedor");
-    if (margin) prompts.push("Analizar margen");
-    if (date) prompts.push("Comparar con periodo anterior");
-    if (productOrCategory) prompts.push(`Top ${productOrCategory.displayName}`);
+    const metric = semantic.primaryMetric;
+    const metricName = metric?.displayName ?? "ventas";
+    if (geo && date) prompts.push(`Crear barras de ${metricName} por ${geo.displayName}, con ${date.displayName} por ano como colores`);
+    if (geo && date) prompts.push(`Crear lineas de ${metricName} por ${geo.displayName} a traves del tiempo`);
+    if (seller) prompts.push(`Agregar ranking de ${metricName} por ${seller.displayName} con top 10`);
+    if (margin) prompts.push(`Crear KPI y grafico de margen usando ${margin.displayName}`);
+    if (date) prompts.push(`Comparar ${metricName} contra el periodo anterior`);
+    if (productOrCategory) prompts.push(`Mostrar top productos por ${metricName} usando ${productOrCategory.displayName}`);
+    prompts.push("Hacer el dashboard mas ejecutivo y ordenar widgets por prioridad");
     return prompts.slice(0, 5);
   }, [profile, rows]);
 
@@ -679,20 +684,39 @@ export function CopilotPanel() {
         <div ref={messagesEndRef} />
       </div>
       <div className="shrink-0 border-t border-[#edf1fa] px-5 pb-5 pt-4">
-        <div className="space-y-2">
-          {quickPrompts.map((quick) => (
-            <button
-              key={quick}
-              disabled={isCopilotThinking}
-              onClick={() => submitPrompt(quick)}
-              className="w-full rounded-full border border-[#dfe5fb] px-4 py-2 text-left text-xs font-semibold text-[#3d35ff] transition hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Sparkles className="mr-2 inline size-3" /> {quick}
-            </button>
-          ))}
+        <div className="mb-3 rounded-xl border border-[#e2e7f6] bg-[#fbfcff]">
+          <button
+            type="button"
+            onClick={() => setRecommendationsOpen((value) => !value)}
+            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs font-bold text-[#34405f] transition hover:bg-[#f6f7ff]"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Sparkles className="size-3.5 text-[#3d35ff]" />
+              Recomendaciones inteligentes
+              <span className="rounded-full bg-[#eef0ff] px-2 py-0.5 text-[11px] text-[#3d35ff]">{quickPrompts.length}</span>
+            </span>
+            {recommendationsOpen ? <ChevronUp className="size-4 text-[#697597]" /> : <ChevronDown className="size-4 text-[#697597]" />}
+          </button>
+          {recommendationsOpen && (
+            <div className="space-y-2 border-t border-[#edf1fa] p-2">
+              {quickPrompts.map((quick) => (
+                <button
+                  key={quick}
+                  disabled={isCopilotThinking}
+                  onClick={() => {
+                    submitPrompt(quick);
+                    setRecommendationsOpen(false);
+                  }}
+                  className="w-full rounded-lg border border-[#dfe5fb] bg-white px-3 py-2 text-left text-xs font-semibold leading-5 text-[#3d35ff] transition hover:border-[#bfc7ff] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {quick}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <form
-          className="mt-4 flex items-center gap-2 rounded-xl border border-[#dfe5f0] bg-white p-2 focus-within:border-[#3d35ff] focus-within:ring-2 focus-within:ring-[#d8dcff]"
+          className="flex items-center gap-2 rounded-xl border border-[#dfe5f0] bg-white p-2 focus-within:border-[#3d35ff] focus-within:ring-2 focus-within:ring-[#d8dcff]"
           onSubmit={(event) => {
             event.preventDefault();
             submitPrompt(prompt);

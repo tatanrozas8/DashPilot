@@ -24,11 +24,17 @@ describe("DashboardRenderer", () => {
     render(<CopilotPanel />);
 
     const input = screen.getByPlaceholderText("Escribe tu mensaje...");
+    expect(screen.getByRole("button", { name: /Recomendaciones inteligentes/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Crear barras de/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Recomendaciones inteligentes/ }));
+    expect(screen.getByText(/Crear barras de/)).toBeInTheDocument();
+
     fireEvent.change(input, { target: { value: "Hazlo mas ejecutivo" } });
     fireEvent.click(screen.getByRole("button", { name: "Enviar mensaje" }));
 
     await waitFor(() => expect(input).toHaveValue(""));
-    expect(screen.getAllByText("Hazlo mas ejecutivo").length).toBeGreaterThan(1);
+    expect(screen.getByText("Hazlo mas ejecutivo")).toBeInTheDocument();
     expect(await screen.findByText(/Simplifique la vista ejecutiva/)).toBeInTheDocument();
   });
 });

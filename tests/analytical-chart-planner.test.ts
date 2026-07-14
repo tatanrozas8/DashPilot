@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parseAnalyticalIntent } from "@/lib/ai/intent-parser";
-import { planAnalyticalChart, resolveDimension, resolveMetric, resolveTimeColumn } from "@/lib/dashboard-spec/chart-planner";
+import { buildAnalysisPlan, planAnalyticalChart, resolveDimension, resolveMetric, resolveTimeColumn, validateAnalysisPlan, validateWidgetMatchesPlan } from "@/lib/dashboard-spec/chart-planner";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
-import { inferSemanticLayer } from "@/lib/semantic-layer";
+import { buildDatasetCatalog, inferSemanticLayer } from "@/lib/semantic-layer";
 import type { DataRow } from "@/types/dataset";
+import type { DashboardWidget } from "@/types/dashboard";
 
 function planningContext(prompt: string, rows: DataRow[]) {
   const datasetProfile = profileDataset(rows, "ventas_region_tiempo.csv");
@@ -18,6 +19,8 @@ function planningContext(prompt: string, rows: DataRow[]) {
   };
 }
 
+const explicitRegionYearBarPrompt = "Necesito que me hagas un grafico de ventas por region a traves de los anos. Necesito que sea con grafico de barras, donde en el eje X se muestren las regiones, en el eje Y se mantengan las ventas y que los anos se vean reflejados con distintos colores.";
+
 describe("analytical intent parser and chart planner", () => {
   it("detects sales by region through years as a temporal dimension chart", () => {
     const intent = parseAnalyticalIntent("grafico de ventas por region a traves de los anos");
@@ -30,6 +33,16 @@ describe("analytical intent parser and chart planner", () => {
 
   it("detects explicit bar chart axes and color series", () => {
     const intent = parseAnalyticalIntent("Hazme un grafico de barras con regiones en el eje X, ventas en el eje Y y anos con distintos colores");
+
+    expect(intent.chartTypeIntent).toBe("bar_chart");
+    expect(intent.xAxisIntent).toBe("region");
+    expect(intent.yAxisIntent).toBe("ventas");
+    expect(intent.seriesIntent).toBe("fecha");
+    expect(intent.seriesGranularityIntent).toBe("year");
+  });
+
+  it("detects the exact explicit region-year bar chart prompt", () => {
+    const intent = parseAnalyticalIntent(explicitRegionYearBarPrompt);
 
     expect(intent.chartTypeIntent).toBe("bar_chart");
     expect(intent.xAxisIntent).toBe("region");
@@ -105,6 +118,74 @@ describe("analytical intent parser and chart planner", () => {
     expect(changes?.query?.metric?.field).toBe("ventas");
     expect(changes?.query?.seriesBy).toBe("fecha");
     expect(changes?.query?.seriesGranularity).toBe("year");
+  });
+
+  it("builds and validates an explicit analysis plan without substituting channel for region", () => {
+    const rows: DataRow[] = [
+      { fecha: "2023-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2023-02-01", region: "Biobio", canal: "Mayoristas", ventas: 120 },
+      { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 150 },
+      { fecha: "2024-02-01", region: "Biobio", canal: "Mayoristas", ventas: 180 }
+    ];
+    const ctx = planningContext(explicitRegionYearBarPrompt, rows);
+    const plan = buildAnalysisPlan(ctx);
+    const validation = validateAnalysisPlan(plan, buildDatasetCatalog(ctx.datasetProfile));
+
+    expect(validation.success).toBe(true);
+    expect(plan.chartType).toBe("bar_chart");
+    expect(plan.metric?.normalizedName).toBe("ventas");
+    expect(plan.aggregation).toBe("sum");
+    expect(plan.xAxis?.normalizedName).toBe("region");
+    expect(plan.yAxis?.normalizedName).toBe("ventas");
+    expect(plan.dimension?.normalizedName).toBe("region");
+    expect(plan.seriesBy?.normalizedName).toBe("fecha");
+    expect(plan.colorBy?.normalizedName).toBe("fecha");
+    expect(plan.timeGranularity).toBe("year");
+    expect(plan.xAxis?.normalizedName).not.toBe("canal");
+  });
+
+  it("rejects an analysis plan that replaces requested region with channel", () => {
+    const rows: DataRow[] = [
+      { fecha: "2023-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2024-01-01", region: "RM", canal: "Mayoristas", ventas: 150 }
+    ];
+    const ctx = planningContext(explicitRegionYearBarPrompt, rows);
+    const plan = buildAnalysisPlan(ctx);
+    const channel = ctx.datasetProfile.columns.find((column) => column.normalizedName === "canal");
+    const validation = validateAnalysisPlan({ ...plan, xAxis: channel ?? null, dimension: channel ?? null }, buildDatasetCatalog(ctx.datasetProfile));
+
+    expect(validation.success).toBe(false);
+    expect(validation.errors.join(" ")).toContain("region");
+  });
+
+  it("validates the final widget against the explicit analysis plan", () => {
+    const rows: DataRow[] = [
+      { fecha: "2023-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2024-01-01", region: "RM", canal: "Mayoristas", ventas: 150 }
+    ];
+    const plan = buildAnalysisPlan(planningContext(explicitRegionYearBarPrompt, rows));
+    const widget: DashboardWidget = {
+      id: "region_year_sales",
+      type: "bar_chart",
+      title: "Ventas por region por Ano",
+      query: {
+        metric: { field: "ventas", aggregation: "sum" },
+        x: { field: "region" },
+        groupBy: ["region"],
+        seriesBy: "fecha",
+        seriesGranularity: "year"
+      },
+      config: { generatedBy: "test" },
+      position: { x: 0, y: 0, w: 6, h: 3 }
+    };
+    const wrongWidget: DashboardWidget = {
+      ...widget,
+      title: "region por canal",
+      query: { ...widget.query, x: { field: "canal" }, groupBy: ["canal"] }
+    };
+
+    expect(validateWidgetMatchesPlan(widget, plan).success).toBe(true);
+    expect(validateWidgetMatchesPlan(wrongWidget, plan).success).toBe(false);
   });
 
   it("returns a clear limitation when no date column exists", () => {

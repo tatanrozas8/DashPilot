@@ -88,7 +88,8 @@ function chartTypeIntent(text: string): AnalyticalIntent["chartTypeIntent"] {
 
 function canonicalAxisIntent(value: string | undefined) {
   if (!value) return null;
-  const normalized = value.replace(/\b(regiones|region)\b/, "region")
+  const normalized = value.replace(/\b(donde|que|las|los|la|el|se|vean|vea|reflejados|reflejado|muestren|mostrar|mantengan|mantener|mantenga|usen|usar|muestre)\b/g, " ")
+    .replace(/\b(regiones|region)\b/, "region")
     .replace(/\b(paises|pais)\b/, "pais")
     .replace(/\b(anos|ano|anios|anio|years|year)\b/, "fecha")
     .replace(/\b(meses|mes|months|month)\b/, "fecha")
@@ -99,15 +100,23 @@ function canonicalAxisIntent(value: string | undefined) {
 
 function axisIntent(text: string, axis: "x" | "y") {
   const axisPattern = axis === "x" ? "x" : "y";
-  const direct = text.match(new RegExp(`\\b([a-z0-9]+)\\s+(?:en|como)\\s+(?:el\\s+)?(?:eje\\s+)?${axisPattern}\\b`))?.[1];
-  if (direct) return canonicalAxisIntent(direct);
   const reverse = text.match(new RegExp(`\\b(?:eje\\s+)?${axisPattern}\\s+(?:con|de|=|:)\\s+([a-z0-9]+)\\b`))?.[1];
-  return canonicalAxisIntent(reverse);
+  const reverseIntent = canonicalAxisIntent(reverse);
+  if (reverseIntent) return reverseIntent;
+  const phrase = text.match(new RegExp(`\\b(?:eje\\s+)?${axisPattern}\\s+(?:se\\s+)?(?:muestren|muestre|mantengan|mantenga|usen|use|mostrar|mantener)?\\s*(?:las|los|la|el)?\\s+([a-z0-9]+)\\b`))?.[1];
+  const phraseIntent = canonicalAxisIntent(phrase);
+  if (phraseIntent) return phraseIntent;
+  const direct = text.match(new RegExp(`\\b([a-z0-9]+)\\s+(?:en|como)\\s+(?:el\\s+)?(?:eje\\s+)?${axisPattern}\\b`))?.[1];
+  return canonicalAxisIntent(direct);
 }
 
 function seriesIntent(text: string) {
+  const reflected = text.match(/\b([a-z0-9]+)\s+(?:se\s+)?(?:vean|vea|ven|ver|reflejen|refleje|muestren|muestre)\s+(?:reflejados?|representados?)?\s*(?:con|en|por)\s+(?:distintos\s+)?colores\b/)?.[1];
+  const reflectedIntent = canonicalAxisIntent(reflected);
+  if (reflectedIntent) return reflectedIntent;
   const color = text.match(/\b([a-z0-9]+)\s+(?:con|en|por)\s+(?:distintos\s+)?colores\b/)?.[1];
-  if (color) return canonicalAxisIntent(color);
+  const colorIntent = canonicalAxisIntent(color);
+  if (colorIntent) return colorIntent;
   const series = text.match(/\b(?:serie|series|color|colores)\s+(?:por|de|=|:)?\s+([a-z0-9]+)\b/)?.[1];
   return canonicalAxisIntent(series);
 }

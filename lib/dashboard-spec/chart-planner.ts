@@ -1,9 +1,9 @@
-import type { DataRow, DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
-import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
+import type { DataRow, DatasetCatalog, DatasetCatalogColumn, DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
+import type { DashboardAction, DashboardQuerySpec, DashboardSpec, DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { parseAnalyticalIntent, type AnalyticalIntent, type TimeIntent } from "@/lib/ai/intent-parser";
 import { parseDateValue } from "@/lib/data/parse-values";
-import { resolveColumn, type ColumnIntent, type ColumnResolveResult } from "@/lib/semantic-layer";
+import { buildDatasetCatalog, resolveColumn, type ColumnIntent, type ColumnResolveResult } from "@/lib/semantic-layer";
 import { slugify } from "@/lib/utils";
 
 export interface ChartPlanningContext {
@@ -21,6 +21,33 @@ export interface PlannedChartResult {
   actions: DashboardAction[];
   confidence: number;
   warnings?: string[];
+}
+
+export interface AnalysisPlan {
+  userIntent: AnalyticalIntent;
+  chartType: WidgetType | null;
+  metric: DatasetColumnProfile | null;
+  aggregation: NonNullable<DashboardQuerySpec["metric"]>["aggregation"];
+  xAxis: DatasetColumnProfile | null;
+  yAxis: DatasetColumnProfile | null;
+  dimension: DatasetColumnProfile | null;
+  seriesBy: DatasetColumnProfile | null;
+  colorBy: DatasetColumnProfile | null;
+  timeField: DatasetColumnProfile | null;
+  timeGranularity: TimeIntent | null;
+  filters: DashboardQuerySpec["filters"];
+  targetWidgetId?: string;
+  shouldUpdateExistingWidget: boolean;
+  shouldCreateNewWidget: boolean;
+  confidence: number;
+  missingRequirements: string[];
+  warnings: string[];
+}
+
+export interface AnalysisPlanValidationResult {
+  success: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 function normalize(value: string) {
@@ -105,6 +132,108 @@ function chartTypeLabel(type: NonNullable<AnalyticalIntent["chartTypeIntent"]>) 
   return "KPI";
 }
 
+function catalogColumn(catalog: DatasetCatalog, field?: string | null) {
+  return catalog.columns.find((column) => column.normalizedName === field);
+}
+
+function isRequestedRegion(intent: AnalyticalIntent) {
+  return intent.xAxisIntent === "region" || intent.dimensionIntent === "region";
+}
+
+function isRequestedCountry(intent: AnalyticalIntent) {
+  return intent.xAxisIntent === "pais" || intent.dimensionIntent === "pais";
+}
+
+function roleMatchesExplicitIntent(column: DatasetCatalogColumn | undefined, requested: string | null) {
+  if (!requested || !column) return true;
+  if (requested === "region") return column.normalizedName === "region" || column.geoRole === "region";
+  if (requested === "pais") return ["pais", "country"].includes(column.normalizedName) || column.geoRole === "country";
+  if (requested === "canal") return column.normalizedName === "canal" || column.dimensionRole === "channel";
+  return column.normalizedName.includes(requested) || column.aliases.some((alias) => normalize(alias) === normalize(requested));
+}
+
+function resolveSeriesColumn(intent: AnalyticalIntent, context: ChartPlanningContext) {
+  if (intent.seriesIntent === "fecha") return resolveTimeColumn(intent, context).matchedColumn ?? null;
+  if (!intent.seriesIntent) return null;
+  return resolveColumn(intent.seriesIntent, { datasetProfile: context.datasetProfile, semanticModel: context.semanticModel }, dimensionIntentFor(intent.seriesIntent)).matchedColumn ?? null;
+}
+
+export function buildAnalysisPlan(context: ChartPlanningContext): AnalysisPlan {
+  const intent = parseAnalyticalIntent(context.prompt);
+  const metric = resolveMetric(intent, context).matchedColumn ?? null;
+  const dimension = resolveDimension(intent, context).matchedColumn ?? null;
+  const time = resolveTimeColumn(intent, context).matchedColumn ?? null;
+  const series = resolveSeriesColumn(intent, context);
+  const target = targetWidget(context.dashboardSpec, context.viewState, dimension?.normalizedName);
+  const missingRequirements = [
+    !metric ? "metric" : "",
+    !dimension && intent.chartIntent !== "time_series" ? "dimension" : "",
+    intent.seriesIntent === "fecha" && !time ? "timeField" : ""
+  ].filter(Boolean);
+
+  return {
+    userIntent: intent,
+    chartType: intent.chartTypeIntent ?? (intent.chartIntent === "time_series_by_dimension" || intent.chartIntent === "time_series" ? "line_chart" : "bar_chart"),
+    metric,
+    aggregation: "sum",
+    xAxis: intent.xAxisIntent === "fecha" ? time : dimension,
+    yAxis: metric,
+    dimension,
+    seriesBy: series,
+    colorBy: series,
+    timeField: time,
+    timeGranularity: intent.seriesGranularityIntent ?? intent.timeIntent,
+    filters: [],
+    targetWidgetId: target?.id,
+    shouldUpdateExistingWidget: Boolean(target),
+    shouldCreateNewWidget: !target,
+    confidence: Math.min(metric ? 0.86 : 0.2, dimension || intent.chartIntent === "time_series" ? 0.86 : 0.2, intent.seriesIntent === "fecha" && time ? 0.86 : 0.86),
+    missingRequirements,
+    warnings: []
+  };
+}
+
+export function validateAnalysisPlan(plan: AnalysisPlan, catalog: DatasetCatalog): AnalysisPlanValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [...plan.warnings];
+  const metric = catalogColumn(catalog, plan.metric?.normalizedName);
+  const xAxis = catalogColumn(catalog, plan.xAxis?.normalizedName);
+  const seriesBy = catalogColumn(catalog, plan.seriesBy?.normalizedName);
+  const allowedCharts: WidgetType[] = ["bar_chart", "line_chart", "area_chart", "donut_chart", "scatter_plot", "kpi_card", "table"];
+
+  if (!plan.chartType || !allowedCharts.includes(plan.chartType)) errors.push("El tipo de grafico solicitado no esta soportado.");
+  if (plan.userIntent.chartTypeIntent && plan.chartType !== plan.userIntent.chartTypeIntent) errors.push(`El usuario pidio ${plan.userIntent.chartTypeIntent}, pero el plan usa ${plan.chartType}.`);
+  if (!metric || !metric.usableAsMetric) errors.push("La metrica solicitada no existe o no es agregable.");
+  if (!xAxis || (!xAxis.usableAsBreakdown && !xAxis.usableAsDimension)) errors.push("El eje X solicitado no existe o no puede usarse como dimension.");
+  if (plan.userIntent.xAxisIntent && !roleMatchesExplicitIntent(xAxis, plan.userIntent.xAxisIntent)) errors.push(`El usuario pidio ${plan.userIntent.xAxisIntent} en X, pero el plan usa ${xAxis?.normalizedName ?? "ninguna"}.`);
+  if (isRequestedRegion(plan.userIntent) && xAxis?.geoRole !== "region" && xAxis?.normalizedName !== "region") errors.push("El usuario pidio region; no se permite sustituirla por otra dimension.");
+  if (isRequestedCountry(plan.userIntent) && xAxis?.geoRole !== "country" && !["pais", "country"].includes(xAxis?.normalizedName ?? "")) errors.push("El usuario pidio pais; no se permite sustituirlo por otra dimension.");
+  if (plan.userIntent.seriesIntent === "fecha") {
+    if (!seriesBy || !seriesBy.usableAsDate) errors.push("El usuario pidio anos como colores, pero no hay una fecha valida como serie.");
+    if (plan.timeGranularity !== "year") errors.push("El usuario pidio anos como colores; la granularidad debe ser year.");
+  }
+  if (plan.missingRequirements.length) errors.push(`Faltan requisitos del plan: ${plan.missingRequirements.join(", ")}.`);
+  return { success: errors.length === 0, errors, warnings };
+}
+
+export function validateWidgetMatchesPlan(widget: DashboardWidget | undefined, plan: AnalysisPlan): AnalysisPlanValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!widget) return { success: false, errors: ["No encontre el widget final para validar."], warnings };
+  if (plan.chartType && widget.type !== plan.chartType) errors.push(`El widget final es ${widget.type}, pero el plan exigia ${plan.chartType}.`);
+  if (plan.metric && widget.query?.metric?.field !== plan.metric.normalizedName) errors.push(`La metrica final es ${widget.query?.metric?.field ?? "ninguna"}, pero el plan exigia ${plan.metric.normalizedName}.`);
+  if (plan.xAxis && widget.query?.x?.field !== plan.xAxis.normalizedName) errors.push(`El eje X final es ${widget.query?.x?.field ?? "ninguno"}, pero el plan exigia ${plan.xAxis.normalizedName}.`);
+  if (plan.seriesBy && widget.query?.seriesBy !== plan.seriesBy.normalizedName) errors.push(`La serie final es ${widget.query?.seriesBy ?? "ninguna"}, pero el plan exigia ${plan.seriesBy.normalizedName}.`);
+  if (plan.seriesBy && plan.timeGranularity && widget.query?.seriesGranularity !== plan.timeGranularity) errors.push(`La granularidad final es ${widget.query?.seriesGranularity ?? "ninguna"}, pero el plan exigia ${plan.timeGranularity}.`);
+  if (plan.metric && plan.dimension && plan.timeGranularity === "year") {
+    const title = normalize(widget.title);
+    if (!title.includes(normalize(plan.metric.displayName)) || !title.includes(normalize(plan.dimension.displayName)) || !title.includes("ano")) {
+      warnings.push("El titulo no refleja claramente metrica, dimension y tiempo.");
+    }
+  }
+  return { success: errors.length === 0, errors, warnings };
+}
+
 function targetWidget(spec: DashboardSpec, viewState: DashboardViewState, dimension?: string) {
   const highlighted = viewState.highlightedWidgetId ? spec.widgets.find((widget) => widget.id === viewState.highlightedWidgetId) : undefined;
   const grouped = dimension ? spec.widgets.find((widget) => widget.query?.groupBy?.includes(dimension)) : undefined;
@@ -144,6 +273,18 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
   if (!intent.chartTypeIntent && !["time_series_by_dimension", "time_series", "breakdown_by_dimension"].includes(intent.chartIntent)) {
     return { handled: false, reply: "", actions: [], confidence: 0 };
   }
+  const explicitPlanRequested = Boolean(intent.chartTypeIntent || intent.xAxisIntent || intent.yAxisIntent || intent.seriesIntent);
+  const analysisPlan = buildAnalysisPlan(context);
+  const planValidation = validateAnalysisPlan(analysisPlan, buildDatasetCatalog(context.datasetProfile));
+  if (explicitPlanRequested && !planValidation.success) {
+    return {
+      handled: true,
+      reply: `No aplique cambios porque el plan no coincide con la instruccion: ${planValidation.errors.join(" ")}`,
+      actions: [],
+      confidence: 0,
+      warnings: planValidation.warnings
+    };
+  }
 
   const metric = resolveMetric(intent, context);
   const dimension = resolveDimension(intent, context);
@@ -154,29 +295,28 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
   const metricColumn = metric.matchedColumn;
   const dimensionColumn = dimension.matchedColumn;
 
-  if (intent.chartTypeIntent === "bar_chart" && intent.xAxisIntent && intent.yAxisIntent && intent.seriesIntent && dimensionColumn) {
-    const date = intent.seriesIntent === "fecha" ? resolveTimeColumn(intent, context) : undefined;
-    if (intent.seriesIntent === "fecha" && !date?.matchedColumn) {
+  if (intent.chartTypeIntent === "bar_chart" && intent.xAxisIntent && intent.yAxisIntent && intent.seriesIntent && analysisPlan.metric && analysisPlan.xAxis && analysisPlan.seriesBy) {
+    if (intent.seriesIntent === "fecha" && !analysisPlan.timeField) {
       return {
         handled: true,
-        reply: `Puedo crear barras por ${fieldLabel(context.datasetProfile, dimensionColumn.normalizedName)}, pero no encontre una columna temporal confiable para usar anos como colores. Las columnas temporales detectadas son: ${detectedDateColumns(context.datasetProfile)}.`,
+        reply: `Puedo crear barras por ${fieldLabel(context.datasetProfile, analysisPlan.xAxis.normalizedName)}, pero no encontre una columna temporal confiable para usar anos como colores. Las columnas temporales detectadas son: ${detectedDateColumns(context.datasetProfile)}.`,
         actions: [],
         confidence: 0.86
       };
     }
-    const seriesField = date?.matchedColumn?.normalizedName ?? dimensionColumn.normalizedName;
-    const seriesGranularity = date?.matchedColumn ? intent.seriesGranularityIntent ?? "year" : undefined;
-    const title = `${fieldLabel(context.datasetProfile, metricColumn.normalizedName)} por ${fieldLabel(context.datasetProfile, dimensionColumn.normalizedName)}${seriesGranularity ? ` por ${timeLabel(seriesGranularity)}` : ""}`;
+    const seriesField = analysisPlan.seriesBy.normalizedName;
+    const seriesGranularity = analysisPlan.seriesBy.semanticType === "time" || analysisPlan.seriesBy.inferredType === "date" ? analysisPlan.timeGranularity ?? "year" : undefined;
+    const title = `${fieldLabel(context.datasetProfile, analysisPlan.metric.normalizedName)} por ${fieldLabel(context.datasetProfile, analysisPlan.xAxis.normalizedName)}${seriesGranularity ? ` por ${timeLabel(seriesGranularity)}` : ""}`;
     const query = {
-      metric: { field: metricColumn.normalizedName, aggregation: "sum" as const },
-      x: { field: dimensionColumn.normalizedName },
-      groupBy: [dimensionColumn.normalizedName],
+      metric: { field: analysisPlan.metric.normalizedName, aggregation: analysisPlan.aggregation },
+      x: { field: analysisPlan.xAxis.normalizedName },
+      groupBy: [analysisPlan.xAxis.normalizedName],
       seriesBy: seriesField,
       ...(seriesGranularity ? { seriesGranularity } : {}),
       orderBy: { field: "value" as const, direction: intent.sortIntent ?? "desc" as const },
       limit: intent.limitIntent ?? 10
     };
-    const target = targetWidget(context.dashboardSpec, context.viewState, dimensionColumn.normalizedName);
+    const target = targetWidget(context.dashboardSpec, context.viewState, analysisPlan.xAxis.normalizedName);
     let chartAction: DashboardAction;
     if (compatibleUpdateTarget(target)) {
       chartAction = { type: "update_widget", widgetId: target.id, changes: { type: "bar_chart", title, query, config: { generatedBy: "copilot", seriesBy: seriesField, horizontal: true } } };
@@ -196,9 +336,10 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
     const widgetId = chartAction.type === "update_widget" ? chartAction.widgetId : chartAction.widget.id;
     return {
       handled: true,
-      reply: `Listo. Cree un grafico de ${chartTypeLabel(intent.chartTypeIntent)} con ${dimensionColumn.normalizedName} en X, ${metricColumn.normalizedName} en Y y ${seriesField}${seriesGranularity ? ` agrupada por ${timeLabel(seriesGranularity).toLowerCase()}` : ""} como serie/color.`,
+      reply: `Listo. Actualice el widget a un grafico de ${chartTypeLabel(intent.chartTypeIntent)}. En el eje X use ${analysisPlan.xAxis.normalizedName}, en el eje Y use ${analysisPlan.metric.normalizedName} y coloree las barras por ${seriesField}${seriesGranularity ? ` agrupada por ${timeLabel(seriesGranularity).toLowerCase()}` : ""}.`,
       actions: [chartAction, { type: "focus_widget", widgetId }],
-      confidence: Math.min(metric.confidence || 0.82, dimension.confidence || 0.82, date?.confidence ?? 0.86)
+      confidence: analysisPlan.confidence,
+      warnings: planValidation.warnings
     };
   }
 

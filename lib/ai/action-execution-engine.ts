@@ -5,7 +5,7 @@ import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { applyAction } from "@/lib/ai/apply-action";
-import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
+import { buildAnalysisPlan, planAnalyticalChart, validateAnalysisPlan, validateWidgetMatchesPlan } from "@/lib/dashboard-spec/chart-planner";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { buildDatasetCatalog } from "@/lib/semantic-layer";
 import { validateCopilotAction } from "@/lib/validation/copilot-actions";
@@ -100,7 +100,16 @@ function envelopesFromInput(input: ActionExecutionInput) {
 
 export function executeCopilotActions(input: ActionExecutionInput): ActionExecutionResult {
   const catalog = input.datasetCatalog ?? buildDatasetCatalog(input.datasetProfile);
-  void catalog;
+  const analysisPlan = buildAnalysisPlan({
+    prompt: input.userMessage,
+    rows: input.rows,
+    datasetProfile: input.datasetProfile,
+    semanticModel: input.semanticModel,
+    dashboardSpec: input.dashboardSpec,
+    viewState: input.viewState
+  });
+  const requiresPlanValidation = Boolean(analysisPlan.userIntent.xAxisIntent || analysisPlan.userIntent.yAxisIntent || analysisPlan.userIntent.seriesIntent);
+  const planValidation = requiresPlanValidation ? validateAnalysisPlan(analysisPlan, catalog) : { success: true, errors: [], warnings: [] };
   const { envelopes, baseReply } = envelopesFromInput(input);
   let nextDashboard = input.dashboardSpec;
   let nextViewState = input.focusedWidgetId ? { ...input.viewState, highlightedWidgetId: input.focusedWidgetId } : input.viewState;
@@ -108,9 +117,23 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
   const appliedActions: DashboardAction[] = [];
   const appliedEnvelopes: CopilotActionEnvelope[] = [];
   const messages: string[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...planValidation.warnings];
   const errors: string[] = [];
   let pendingConfirmation: CopilotActionEnvelope | undefined;
+
+  if (!planValidation.success) {
+    return {
+      assistantMessage: `No aplique cambios porque el plan no coincide con la instruccion: ${planValidation.errors.join(" ")}`,
+      actions: [],
+      actionEnvelopes: [],
+      updatedDashboardSpec: nextDashboard,
+      updatedViewState: nextViewState,
+      updatedDataExplorerState: nextViewState.dataExplorer,
+      updatedPresentationSpec: nextPresentation,
+      warnings: planValidation.warnings,
+      errors: planValidation.errors
+    };
+  }
 
   for (const envelope of envelopes) {
     const withConfirmation = destructiveAction(envelope.action) ? { ...envelope, requiresConfirmation: true } : envelope;
@@ -141,22 +164,38 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
       messages.push(validation.action.type === "ask_clarification" ? validation.action.question : validation.action.message);
       continue;
     }
+    const previousDashboard = nextDashboard;
+    const previousViewState = nextViewState;
     const applied = applyAction(nextDashboard, nextViewState, validation.action);
     nextDashboard = applied.spec;
     nextViewState = applied.viewState;
+    if (requiresPlanValidation && (validation.action.type === "add_widget" || validation.action.type === "update_widget")) {
+      const widgetId = validation.action.type === "add_widget" ? validation.action.widget.id : validation.action.widgetId;
+      const widget = nextDashboard.widgets.find((item) => item.id === widgetId);
+      const widgetValidation = validateWidgetMatchesPlan(widget, analysisPlan);
+      if (!widgetValidation.success) {
+        nextDashboard = previousDashboard;
+        nextViewState = previousViewState;
+        errors.push(`El widget final no coincide con la instruccion: ${widgetValidation.errors.join(" ")}`);
+        warnings.push(...widgetValidation.warnings);
+        continue;
+      }
+      warnings.push(...widgetValidation.warnings);
+    }
     appliedActions.push(validation.action);
     appliedEnvelopes.push(withConfirmation);
     messages.push(applied.message);
   }
 
-  const actionSummary = appliedActions.length
+  const actionSummary = messages.length
     ? messages
     : errors.length
       ? "No aplique cambios porque las acciones no pasaron la validacion."
       : pendingConfirmation
         ? "Necesito confirmacion antes de ejecutar la accion solicitada."
         : "";
-  const assistantContent = [baseReply, actionSummary].filter(Boolean).join(" ");
+  const shouldKeepBaseReply = appliedActions.length > 0 || Boolean(pendingConfirmation) || (!errors.length && !messages.length);
+  const assistantContent = [shouldKeepBaseReply ? baseReply : "", actionSummary].filter(Boolean).join(" ");
 
   return {
     assistantMessage: assistantContent,

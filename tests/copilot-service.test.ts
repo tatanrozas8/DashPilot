@@ -189,6 +189,27 @@ describe("copilot service", () => {
     expect(updated?.type).not.toBe("bar_chart");
   });
 
+  it("creates the requested explicit bar chart with regions on X and years as colors", () => {
+    const ctx = customContext("Necesito que me hagas un grafico de ventas por region a traves de los anos. Necesito que sea con grafico de barras, donde en el eje X se muestren las regiones, en el eje Y se mantengan las ventas y que los anos se vean reflejados con distintos colores.", [
+      { fecha: "2023-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2023-02-01", region: "Biobio", canal: "Mayoristas", ventas: 120 },
+      { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 180 },
+      { fecha: "2024-02-01", region: "Biobio", canal: "Mayoristas", ventas: 160 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+    const updated = result.updatedDashboardSpec?.widgets.find((widget) => widget.id === result.updatedViewState?.highlightedWidgetId);
+
+    expect(updated?.type).toBe("bar_chart");
+    expect(updated?.query?.x?.field).toBe("region");
+    expect(updated?.query?.metric?.field).toBe("ventas");
+    expect(updated?.query?.metric?.aggregation).toBe("sum");
+    expect(updated?.query?.seriesBy).toBe("fecha");
+    expect(updated?.query?.seriesGranularity).toBe("year");
+    expect(updated?.query?.groupBy).toEqual(["region"]);
+    expect(updated?.query?.x?.field).not.toBe("canal");
+    expect(updated?.title.toLowerCase()).not.toContain("canal");
+  });
+
   it("does not create a static region bar chart when the prompt asks through years", () => {
     const ctx = customContext("ventas por region a traves de los anos", [
       { fecha: "2023-01-01", region: "RM", ventas: 100 },

@@ -5,6 +5,7 @@ import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-s
 import { demoRows } from "@/lib/data/demo-dataset";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
+import type { DataRow } from "@/types/dataset";
 import type { DashboardAction } from "@/types/dashboard";
 
 function context(userMessage = "ejecuta accion") {
@@ -17,6 +18,19 @@ function context(userMessage = "ejecuta accion") {
     dashboardSpec,
     viewState: { filters: [] },
     rows: demoRows
+  };
+}
+
+function customContext(userMessage: string, rows: DataRow[]) {
+  const datasetProfile = profileDataset(rows, "ventas_custom.csv");
+  const dashboardSpec = generateDashboardSpec(datasetProfile, rows);
+  return {
+    userMessage,
+    datasetProfile,
+    semanticModel: inferSemanticLayer(datasetProfile, rows),
+    dashboardSpec,
+    viewState: { filters: [], highlightedWidgetId: "sales_by_region" },
+    rows
   };
 }
 
@@ -90,6 +104,47 @@ describe("copilot action execution engine", () => {
     expect(result.errors[0]).toContain("columna_inventada");
     expect(result.assistantMessage).toContain("No aplique cambios");
     expect(result.assistantMessage).not.toContain("Listo");
+  });
+
+  it("rejects provider actions that replace requested region with channel", () => {
+    const prompt = "Necesito que me hagas un grafico de ventas por region a traves de los anos. Necesito que sea con grafico de barras, donde en el eje X se muestren las regiones, en el eje Y se mantengan las ventas y que los anos se vean reflejados con distintos colores.";
+    const ctx = customContext(prompt, [
+      { fecha: "2023-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2023-02-01", region: "Biobio", canal: "Mayoristas", ventas: 120 },
+      { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 150 },
+      { fecha: "2024-02-01", region: "Biobio", canal: "Mayoristas", ventas: 180 }
+    ]);
+    const originalWidget = ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+    const result = executeCopilotActions({
+      ...ctx,
+      assistantMessage: "Listo. Actualice el widget solicitado.",
+      actions: [
+        {
+          type: "update_widget",
+          widgetId: "sales_by_region",
+          changes: {
+            type: "bar_chart",
+            title: "region por canal",
+            query: {
+              metric: { field: "ventas", aggregation: "sum" },
+              x: { field: "canal" },
+              groupBy: ["canal"],
+              seriesBy: "fecha",
+              seriesGranularity: "year"
+            },
+            config: { generatedBy: "provider" }
+          }
+        }
+      ]
+    });
+    const finalWidget = result.updatedDashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.errors.join(" ")).toContain("El widget final no coincide");
+    expect(result.assistantMessage).toContain("No aplique cambios");
+    expect(result.assistantMessage).not.toContain("Listo");
+    expect(finalWidget?.title).toBe(originalWidget?.title);
+    expect(finalWidget?.query?.groupBy).not.toEqual(["canal"]);
   });
 
   it("creates and edits presentations through structured actions", () => {

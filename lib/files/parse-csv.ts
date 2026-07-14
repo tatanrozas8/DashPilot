@@ -1,7 +1,7 @@
 "use client";
 
 import type { FileParseResult, ParsedSheet } from "@/types/dataset";
-import { normalizeColumns, normalizeRows } from "@/lib/files/normalize-columns";
+import { detectTableRange, normalizeColumns, normalizeRows } from "@/lib/files/normalize-columns";
 
 export async function parseCsvFile(file: File): Promise<FileParseResult> {
   const Papa = await import("papaparse");
@@ -15,12 +15,14 @@ export async function parseCsvFile(file: File): Promise<FileParseResult> {
   if (parsed.errors.length) throw new Error(parsed.errors[0]?.message ?? "No se pudo leer el CSV.");
 
   const raw = parsed.data.filter((row) => row.some((cell) => String(cell ?? "").trim().length > 0));
-  const headers = raw[0] ?? [];
+  const detected = detectTableRange(raw);
+  const headers = detected.headers;
   if (!headers.length) throw new Error("No se detectaron columnas en el CSV.");
 
   const columns = normalizeColumns(headers);
-  const body = raw.slice(1);
+  const body = detected.bodyRows;
   const { rows, warnings } = normalizeRows(body, columns);
+  warnings.unshift(...detected.warnings);
   if (!rows.length) warnings.push("El archivo no contiene filas de datos despues de los encabezados.");
 
   const sheet: ParsedSheet = {

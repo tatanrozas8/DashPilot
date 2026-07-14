@@ -1,8 +1,15 @@
 import type { DataRow, NormalizedColumn } from "@/types/dataset";
 import { slugify } from "@/lib/utils";
 
+export interface DetectedTableRange {
+  headerRowIndex: number;
+  headers: unknown[];
+  bodyRows: unknown[][];
+  warnings: string[];
+}
+
 function cleanHeader(value: unknown, position: number) {
-  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  const text = String(value ?? "").replace(/^\uFEFF/, "").replace(/\s+/g, " ").trim();
   return text.length ? text : `Columna ${position + 1}`;
 }
 
@@ -33,6 +40,53 @@ export function normalizeColumns(headers: unknown[]): NormalizedColumn[] {
       position
     };
   });
+}
+
+function isFilledCell(value: unknown) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function rowDensity(row: unknown[]) {
+  return row.filter(isFilledCell).length;
+}
+
+function textCellScore(value: unknown) {
+  if (!isFilledCell(value)) return 0;
+  if (value instanceof Date) return 0;
+  if (typeof value === "number" || typeof value === "boolean") return 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+  return /[a-zA-ZÀ-ÿ_]/.test(text) ? 1 : 0;
+}
+
+export function detectTableRange(rawRows: unknown[][]): DetectedTableRange {
+  const rows = rawRows.filter((row) => row.some(isFilledCell));
+  if (!rows.length) return { headerRowIndex: -1, headers: [], bodyRows: [], warnings: ["No se detectaron filas con datos."] };
+
+  const maxScan = Math.min(rows.length, 30);
+  let bestIndex = 0;
+  let bestScore = -Infinity;
+
+  for (let index = 0; index < maxScan; index += 1) {
+    const row = rows[index] ?? [];
+    const filled = rowDensity(row);
+    if (filled < 2) continue;
+    const textCells = row.filter((cell) => textCellScore(cell) > 0).length;
+    const nextRows = rows.slice(index + 1, index + 6);
+    const strongestNext = Math.max(0, ...nextRows.map(rowDensity));
+    const hasBody = strongestNext >= Math.max(2, Math.min(filled, Math.ceil(filled * 0.5)));
+    const mostlyText = textCells >= Math.ceil(filled * 0.5);
+    const score = filled * 4 + textCells * 3 + (hasBody ? 8 : -8) + (mostlyText ? 6 : -4) - index * 0.2;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+
+  const headers = rows[bestIndex] ?? [];
+  const bodyRows = rows.slice(bestIndex + 1);
+  const warnings = bestIndex > 0 ? [`Se omitieron ${bestIndex} fila(s) antes del encabezado detectado.`] : [];
+  return { headerRowIndex: bestIndex, headers, bodyRows, warnings };
 }
 
 export function normalizeRows(rawRows: unknown[][], columns: NormalizedColumn[], limit = 50_000): { rows: DataRow[]; warnings: string[] } {

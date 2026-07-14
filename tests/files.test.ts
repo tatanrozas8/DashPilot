@@ -30,6 +30,32 @@ describe("file parsing", () => {
     expect(parsed.sheets[0]?.previewRows).toHaveLength(2);
   });
 
+  it("strips csv byte order marks from headers", async () => {
+    const file = new File(["\uFEFFfecha,region,ventas\n2024-01-01,RM,1000"], "ventas_bom.csv", { type: "text/csv" });
+    const parsed = await parseCsvFile(file);
+
+    expect(parsed.sheets[0]?.columns[0]?.normalizedName).toBe("fecha");
+    expect(parsed.sheets[0]?.rows[0]?.fecha).toBe("2024-01-01");
+  });
+
+  it("detects csv headers after title or metadata rows", async () => {
+    const file = new File([
+      [
+        "Reporte de ventas exportado desde ERP",
+        "Generado,2026-07-14",
+        "Fecha Venta,Region,Ventas",
+        "2024-04-01,Norte,1200",
+        "2024-04-02,Sur,800"
+      ].join("\n")
+    ], "ventas_con_titulo.csv", { type: "text/csv" });
+    const parsed = await parseCsvFile(file);
+
+    expect(parsed.sheets[0]?.columns.map((column) => column.normalizedName)).toEqual(["fecha_venta", "region", "ventas"]);
+    expect(parsed.sheets[0]?.rows).toHaveLength(2);
+    expect(parsed.sheets[0]?.rows[0]?.region).toBe("Norte");
+    expect(parsed.warnings.join(" ")).toContain("omitieron");
+  });
+
   it("parses excel sheets and exposes sheet metadata", async () => {
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.aoa_to_sheet([
@@ -44,5 +70,23 @@ describe("file parsing", () => {
     expect(parsed.fileType).toBe("xlsx");
     expect(parsed.sheets[0]?.name).toBe("Ventas");
     expect(parsed.sheets[0]?.rows[0]?.ventas).toBe(1200);
+  });
+
+  it("selects the first excel sheet with real tabular data", async () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Resumen del archivo"]]), "Portada");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ["Reporte mensual"],
+      ["Fecha Venta", "Region", "Ventas"],
+      ["2024-04-01", "Norte", 1200],
+      ["2024-04-02", "Sur", 800]
+    ]), "Ventas");
+    const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const file = new File([buffer], "ventas_multihoja.xlsx");
+    const parsed = await parseExcelFile(file);
+
+    expect(parsed.selectedSheetName).toBe("Ventas");
+    expect(parsed.sheets.find((sheet) => sheet.name === "Ventas")?.isSelected).toBe(true);
+    expect(parsed.sheets.find((sheet) => sheet.name === "Ventas")?.rows[0]?.ventas).toBe(1200);
   });
 });

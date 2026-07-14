@@ -35,6 +35,18 @@ function localDatasetKey(datasetId: string) {
   return `dashpilot:dataset:${datasetId}`;
 }
 
+function readLocalDataset(datasetId: string) {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(localDatasetKey(datasetId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as { profile: DatasetProfile; rows: DataRow[]; parsed: FileParseResult };
+  } catch {
+    window.localStorage.removeItem(localDatasetKey(datasetId));
+    return null;
+  }
+}
+
 export async function createProjectIfNeeded(name = "DashPilot Workspace") {
   const supabase = getSupabaseBrowserClient();
   const auth = await getCurrentAuthState();
@@ -178,23 +190,33 @@ export async function saveDatasetProfile(datasetId: string, profile: DatasetProf
 
 export async function getDatasetById(datasetId: string) {
   const supabase = getSupabaseBrowserClient();
+  const local = readLocalDataset(datasetId);
+  if (local) return local;
   if (!supabase) {
-    const raw = window.localStorage.getItem(localDatasetKey(datasetId));
-    return raw ? JSON.parse(raw) as { profile: DatasetProfile; rows: DataRow[]; parsed: FileParseResult } : null;
+    return null;
   }
   const { data, error } = await supabase.from("datasets").select("*").eq("id", datasetId).maybeSingle();
-  if (error) throw new Error(`No se pudo cargar el dataset: ${error.message}`);
+  if (error) {
+    const fallback = readLocalDataset(datasetId);
+    if (fallback) return fallback;
+    throw new Error(`No se pudo cargar el dataset: ${error.message}`);
+  }
   return data;
 }
 
 export async function getDatasetRows(datasetId: string) {
   const supabase = getSupabaseBrowserClient();
+  const local = readLocalDataset(datasetId);
+  if (local) return local.rows;
   if (!supabase) {
-    const raw = window.localStorage.getItem(localDatasetKey(datasetId));
-    return raw ? (JSON.parse(raw) as { rows: DataRow[] }).rows : [];
+    return [];
   }
   const { data, error } = await supabase.from("dataset_rows").select("row_json").eq("dataset_id", datasetId).order("row_index", { ascending: true });
-  if (error) throw new Error(`No se pudieron cargar las filas: ${error.message}`);
+  if (error) {
+    const fallback = readLocalDataset(datasetId);
+    if (fallback) return fallback.rows;
+    throw new Error(`No se pudieron cargar las filas: ${error.message}`);
+  }
   return (data ?? []).map((row) => row.row_json as DataRow);
 }
 
@@ -208,12 +230,17 @@ export async function getDatasetColumns(datasetId: string) {
 
 export async function getDatasetProfile(datasetId: string) {
   const supabase = getSupabaseBrowserClient();
+  const local = readLocalDataset(datasetId);
+  if (local) return local.profile;
   if (!supabase) {
-    const raw = window.localStorage.getItem(localDatasetKey(datasetId));
-    return raw ? (JSON.parse(raw) as { profile: DatasetProfile }).profile : null;
+    return null;
   }
   const { data, error } = await supabase.from("datasets").select("profile_json").eq("id", datasetId).maybeSingle();
-  if (error) throw new Error(`No se pudo cargar el perfil: ${error.message}`);
+  if (error) {
+    const fallback = readLocalDataset(datasetId);
+    if (fallback) return fallback.profile;
+    throw new Error(`No se pudo cargar el perfil: ${error.message}`);
+  }
   return data?.profile_json as DatasetProfile | null;
 }
 

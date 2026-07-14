@@ -1,7 +1,7 @@
 "use client";
 
 import type { FileParseResult, ParsedSheet } from "@/types/dataset";
-import { normalizeColumns, normalizeRows } from "@/lib/files/normalize-columns";
+import { detectTableRange, normalizeColumns, normalizeRows } from "@/lib/files/normalize-columns";
 
 export async function parseExcelFile(file: File): Promise<FileParseResult> {
   const XLSX = await import("xlsx");
@@ -15,10 +15,11 @@ export async function parseExcelFile(file: File): Promise<FileParseResult> {
   const sheets: ParsedSheet[] = workbook.SheetNames.map((sheetName, index) => {
     const sheet = workbook.Sheets[sheetName];
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, blankrows: false });
-    const nonEmptyRows = matrix.filter((row) => row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== ""));
-    const headers = nonEmptyRows[0] ?? [];
+    const detected = detectTableRange(matrix);
+    const headers = detected.headers;
     const columns = normalizeColumns(headers);
-    const { rows, warnings: rowWarnings } = normalizeRows(nonEmptyRows.slice(1), columns);
+    const { rows, warnings: rowWarnings } = normalizeRows(detected.bodyRows, columns);
+    warnings.push(...detected.warnings.map((warning) => `${sheetName}: ${warning}`));
     warnings.push(...rowWarnings.map((warning) => `${sheetName}: ${warning}`));
     if (!rows.length) warnings.push(`${sheetName}: La hoja no contiene filas de datos despues de los encabezados.`);
 
@@ -33,14 +34,15 @@ export async function parseExcelFile(file: File): Promise<FileParseResult> {
     };
   });
 
-  const selected = sheets[0];
-  if (!selected?.columns.length) throw new Error("No se detectaron columnas validas en la primera hoja.");
+  const selected = sheets.find((sheet) => sheet.rows.length > 0 && sheet.columns.length > 0) ?? sheets.find((sheet) => sheet.columns.length > 0);
+  if (!selected?.columns.length) throw new Error("No se detectaron columnas validas en el archivo Excel.");
+  const selectedSheets = sheets.map((sheet) => ({ ...sheet, isSelected: sheet.name === selected.name }));
 
   return {
     fileName: file.name,
     fileType: file.name.toLowerCase().endsWith(".xls") ? "xls" : "xlsx",
     fileSize: file.size,
-    sheets,
+    sheets: selectedSheets,
     selectedSheetName: selected.name,
     warnings
   };

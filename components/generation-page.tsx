@@ -47,7 +47,10 @@ export function GenerationPage() {
       window.setTimeout(() => router.push(`/app/dashboards/${result.dashboardId}`), 700);
     }
 
-    void runGeneration();
+    void runGeneration().catch((error) => {
+      if (!active) return;
+      setStatus(error instanceof Error ? error.message : "No se pudo generar el dashboard.");
+    });
     const timer = window.setInterval(() => setProgress((value) => Math.min(100, value + 18)), 420);
     return () => {
       active = false;

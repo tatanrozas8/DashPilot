@@ -36,30 +36,38 @@ export function PresentationBuilder() {
   ];
 
   async function savePresentation() {
-    generatePresentation();
-    const state = useDashPilotStore.getState();
-    const nextPresentation = { ...state.presentation, dashboardId: state.activeDashboardId };
-    const result = await persistPresentation(nextPresentation);
-    setPersistenceState({
-      activePresentationId: result.presentationId,
-      persistenceMode: result.mode,
-      persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Presentacion guardada" : "Presentacion local")
-    });
-    toast(result.warning ?? (result.mode === "supabase" ? "Presentacion guardada correctamente." : "Presentacion guardada localmente."));
-    router.push(`/app/present/${result.presentationId}`);
+    try {
+      generatePresentation();
+      const state = useDashPilotStore.getState();
+      const nextPresentation = { ...state.presentation, dashboardId: state.activeDashboardId };
+      const result = await persistPresentation(nextPresentation);
+      setPersistenceState({
+        activePresentationId: result.presentationId,
+        persistenceMode: result.mode,
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Presentacion guardada" : "Presentacion local")
+      });
+      toast(result.warning ?? (result.mode === "supabase" ? "Presentacion guardada correctamente." : "Presentacion guardada localmente."));
+      router.push(`/app/present/${result.presentationId}`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "No se pudo guardar la presentacion.");
+    }
   }
 
   async function saveDraft() {
-    generatePresentation();
-    const state = useDashPilotStore.getState();
-    const nextPresentation = { ...state.presentation, dashboardId: state.activeDashboardId };
-    const result = await persistPresentation(nextPresentation);
-    setPersistenceState({
-      activePresentationId: result.presentationId,
-      persistenceMode: result.mode,
-      persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Borrador de presentacion guardado" : "Borrador local")
-    });
-    toast(result.warning ?? (result.mode === "supabase" ? "Borrador guardado correctamente." : "Borrador guardado localmente."));
+    try {
+      generatePresentation();
+      const state = useDashPilotStore.getState();
+      const nextPresentation = { ...state.presentation, dashboardId: state.activeDashboardId };
+      const result = await persistPresentation(nextPresentation);
+      setPersistenceState({
+        activePresentationId: result.presentationId,
+        persistenceMode: result.mode,
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Borrador de presentacion guardado" : "Borrador local")
+      });
+      toast(result.warning ?? (result.mode === "supabase" ? "Borrador guardado correctamente." : "Borrador guardado localmente."));
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "No se pudo guardar el borrador.");
+    }
   }
 
   return (

@@ -111,6 +111,11 @@ function WidgetHeader({ widget }: { widget: DashboardWidget }) {
     toast(`Cambie "${widget.title}" a ${type}.`);
   }
 
+  function explainWidget() {
+    void sendPrompt(`Explica el widget ${widget.title}`).catch(() => undefined);
+    setOpen(false);
+  }
+
   return (
     <div className="relative mb-4 flex items-center justify-between">
       <h3 className="font-bold tracking-[-0.02em]">{widget.title}</h3>
@@ -123,7 +128,7 @@ function WidgetHeader({ widget }: { widget: DashboardWidget }) {
           <button onClick={() => { duplicateWidget(widget.id); setOpen(false); toast(`Duplique "${widget.title}".`); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Copy className="size-4" /> Duplicar</button>
           <button onClick={() => { setHidden(widget.id, true); setOpen(false); toast(`Oculte "${widget.title}".`); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Eye className="size-4" /> Ocultar</button>
           <button onClick={() => { openWidgetData(widget.id); setOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Search className="size-4" /> Ver datos detras</button>
-          <button onClick={() => { void sendPrompt(`Explica el widget ${widget.title}`); setOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Sparkles className="size-4" /> Explicar con IA</button>
+          <button onClick={explainWidget} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Sparkles className="size-4" /> Explicar con IA</button>
           <button onClick={() => { generatePresentation(); setOpen(false); toast("Agregue el dashboard actualizado a la presentacion."); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Presentation className="size-4" /> Agregar a presentacion</button>
           <button onClick={() => { setViewState({ highlightedWidgetId: widget.id }); setOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left font-semibold hover:bg-[#f6f7ff]"><Highlighter className="size-4" /> Fijar o destacar</button>
           {typeOptions.map((type) => (
@@ -599,7 +604,7 @@ export function CopilotPanel() {
   function submitPrompt(value: string) {
     const trimmed = value.trim();
     if (!trimmed || isCopilotThinking) return;
-    void sendPrompt(trimmed);
+    void sendPrompt(trimmed).catch(() => undefined);
     setPrompt("");
   }
 

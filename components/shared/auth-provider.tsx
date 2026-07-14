@@ -32,10 +32,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    void supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
+    void supabase.auth.getSession()
+      .then(({ data }) => {
+        setSession(data.session);
+      })
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);

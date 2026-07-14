@@ -226,6 +226,14 @@ function withLimitedHistory(items: DashboardSnapshot[]) {
   return items.slice(-20);
 }
 
+function runBackgroundTask(task: () => Promise<unknown>) {
+  try {
+    void task().catch(() => undefined);
+  } catch {
+    // Background sync must never break the active dashboard flow.
+  }
+}
+
 function withColumnDictionary(profile: DatasetProfile, field: string, changes: ColumnDictionaryChanges): DatasetProfile {
   const columns = profile.columns.map((column) => {
     if (column.normalizedName !== field) return column;
@@ -778,9 +786,9 @@ export const useDashPilotStore = create<DashPilotState>()(
             presentationOptions: presentationChanged ? { ...get().presentationOptions, generated: true } : get().presentationOptions,
             isCopilotThinking: false
           });
-          void saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage);
-          void saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage);
-          if (dashboardChanged) void createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot");
+          runBackgroundTask(() => saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage));
+          runBackgroundTask(() => saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage));
+          if (dashboardChanged) runBackgroundTask(() => createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot"));
         } catch (error) {
           const botMessage = assistantMessage(error instanceof Error ? `No pude completar la accion: ${error.message}` : "No pude completar la accion. Revisa la conexion o intenta con una instruccion mas simple.");
           set({

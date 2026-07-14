@@ -1,4 +1,5 @@
 import type { CopilotContext } from "@/lib/ai/context-builder";
+import { buildDatasetCatalog } from "@/lib/semantic-layer/dataset-catalog";
 import type { DatasetProfile, FileParseResult } from "@/types/dataset";
 import type { DashboardSpec } from "@/types/dashboard";
 
@@ -19,6 +20,11 @@ export interface DatasetDiagnostics {
     confidence?: number;
     uniqueCount: number;
     sampleValues: unknown[];
+    usableAsFilter?: boolean;
+    usableAsMetric?: boolean;
+    usableAsDimension?: boolean;
+    usableAsBreakdown?: boolean;
+    aliases?: string[];
   }>;
   geographicColumns: string[];
   locationColumns: string[];
@@ -53,6 +59,16 @@ export function createDatasetDiagnostics(input: {
 }): DatasetDiagnostics {
   const selectedSheet = input.parsedDataset?.sheets.find((sheet) => sheet.name === input.parsedDataset?.selectedSheetName);
   const columns = input.profile.columns.map((column) => ({
+    ...(() => {
+      const catalogColumn = buildDatasetCatalog(input.profile).columns.find((item) => item.normalizedName === column.normalizedName);
+      return {
+        usableAsFilter: catalogColumn?.usableAsFilter,
+        usableAsMetric: catalogColumn?.usableAsMetric,
+        usableAsDimension: catalogColumn?.usableAsDimension,
+        usableAsBreakdown: catalogColumn?.usableAsBreakdown,
+        aliases: catalogColumn?.aliases
+      };
+    })(),
     original: column.originalName,
     normalized: column.normalizedName,
     display: column.displayName,

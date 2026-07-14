@@ -8,7 +8,8 @@ import { createDatasetDiagnostics } from "@/lib/debug/dataset-diagnostics";
 import { normalizeColumnName } from "@/lib/files/normalize-columns";
 import { parseCsvFile } from "@/lib/files/parse-csv";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
-import { inferSemanticLayer, resolveColumn } from "@/lib/semantic-layer";
+import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
+import { buildDatasetCatalog, inferSemanticLayer, resolveColumn } from "@/lib/semantic-layer";
 import type { DataRow } from "@/types/dataset";
 
 async function loadRegionCountryFixture() {
@@ -28,6 +29,31 @@ describe("full dataset column understanding", () => {
     expect(sheet.columns.map((column) => column.normalizedName)).toContain("region");
     expect(sheet.rows[0]).toHaveProperty("region", "Norte");
     expect(sheet.previewRows.length).toBe(sheet.rows.length);
+  });
+
+  it("builds a complete catalog for every fixture column", async () => {
+    const { profile } = await loadRegionCountryFixture();
+    const catalog = buildDatasetCatalog(profile);
+
+    expect(catalog.columns.map((column) => column.normalizedName)).toEqual(profile.columns.map((column) => column.normalizedName));
+    expect(catalog.metrics.map((column) => column.normalizedName)).toContain("ventas");
+    expect(catalog.filters.map((column) => column.normalizedName)).toEqual(expect.arrayContaining(["pais", "region", "canal", "cliente_id", "sku_id"]));
+    expect(catalog.breakdowns.map((column) => column.normalizedName)).toContain("canal");
+  });
+
+  it("keeps preview at 100 rows while profiling and queries use all available rows", async () => {
+    const csv = [
+      "fecha,pais,region,canal,cliente_id,sku_id,ventas",
+      ...Array.from({ length: 150 }, (_, index) => `2024-01-${String((index % 28) + 1).padStart(2, "0")},Chile,${index % 2 ? "Norte" : "Sur"},Online,C${index},SKU${index},1`)
+    ].join("\n");
+    const parsed = await parseCsvFile(new File([csv], "ventas_150.csv", { type: "text/csv" }));
+    const sheet = parsed.sheets[0]!;
+    const profile = profileDataset(sheet.rows, parsed.fileName, sheet.columns);
+    const query = executeDashboardQuery(sheet.rows, { metric: { field: "ventas", aggregation: "sum" } });
+
+    expect(sheet.previewRows).toHaveLength(100);
+    expect(profile.rowCount).toBe(150);
+    expect(query[0]?.value).toBe(150);
   });
 
   it("normalizes accented region names without losing display intent", () => {
@@ -58,6 +84,14 @@ describe("full dataset column understanding", () => {
     expect(pais.matchedColumn?.normalizedName).toBe("pais");
   });
 
+  it("resolves country, channel and client according to the requested text", async () => {
+    const { profile, semanticModel } = await loadRegionCountryFixture();
+
+    expect(resolveColumn("analiza por paÃ­s", { datasetProfile: profile, semanticModel }, "geography").matchedColumn?.normalizedName).toBe("pais");
+    expect(resolveColumn("ventas por canal", { datasetProfile: profile, semanticModel }, "dimension").matchedColumn?.normalizedName).toBe("canal");
+    expect(resolveColumn("analiza por cliente", { datasetProfile: profile, semanticModel }, "client").matchedColumn?.normalizedName).toBe("cliente_id");
+  });
+
   it("uses region in automatic dashboard geographic breakdowns and filters", async () => {
     const { dashboardSpec } = await loadRegionCountryFixture();
     const regionWidget = dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
@@ -83,6 +117,51 @@ describe("full dataset column understanding", () => {
     expect(result.reply).toContain("region");
     expect(regionWidget?.query?.groupBy).toEqual(["region"]);
     expect(sheet.rows.some((row) => row.region === "Norte")).toBe(true);
+  });
+
+  it.each([
+    ["ventas por canal", "canal"],
+    ["ventas por paÃ­s", "pais"],
+    ["ventas por regiÃ³n", "region"]
+  ])("updates an existing widget for %s", async (prompt, expectedGroupBy) => {
+    const { profile, semanticModel, dashboardSpec } = await loadRegionCountryFixture();
+    const result = createMockCopilotResponse({
+      prompt,
+      datasetProfile: profile,
+      semanticModel,
+      dashboardSpec,
+      viewState: { filters: [], highlightedWidgetId: "sales_by_region" }
+    });
+    const widget = result.updatedDashboardSpec?.widgets.find((item) => item.id === "sales_by_region");
+
+    expect(widget?.query?.groupBy).toEqual([expectedGroupBy]);
+    expect(result.updatedViewState?.highlightedWidgetId).toBe("sales_by_region");
+  });
+
+  it("updates visible table columns from a natural language column list", async () => {
+    const { profile, semanticModel, dashboardSpec } = await loadRegionCountryFixture();
+    const result = createMockCopilotResponse({
+      prompt: "muestra columnas fecha, pais, region y ventas",
+      datasetProfile: profile,
+      semanticModel,
+      dashboardSpec,
+      viewState: { filters: [] }
+    });
+
+    expect(result.updatedViewState?.dataExplorer?.visibleColumns).toEqual(["fecha", "pais", "region", "ventas"]);
+  });
+
+  it("adds filters by any filterable catalog column", async () => {
+    const { profile, semanticModel, dashboardSpec } = await loadRegionCountryFixture();
+    const result = createMockCopilotResponse({
+      prompt: "filtra canal Mayoristas",
+      datasetProfile: profile,
+      semanticModel,
+      dashboardSpec,
+      viewState: { filters: [] }
+    });
+
+    expect(result.updatedViewState?.filters).toEqual([{ field: "canal", operator: "in", value: ["Mayoristas"] }]);
   });
 
   it("sends all profiled columns and geographic metadata to Copilot context", async () => {

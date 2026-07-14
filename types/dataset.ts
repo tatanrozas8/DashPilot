@@ -21,6 +21,54 @@ export type SemanticColumnType =
   | "unknown";
 
 export type GeoRole = "region" | "country" | "city" | "zone" | "commune" | "territory" | "unknown";
+export type MetricRole = "revenue" | "margin" | "cost" | "quantity" | "percentage" | "measure" | "unknown";
+export type DimensionRole = "geography" | "client" | "seller" | "product" | "category" | "channel" | "identifier" | "time" | "breakdown" | "unknown";
+
+export interface DatasetCatalogColumn {
+  originalName: string;
+  normalizedName: string;
+  displayName: string;
+  inferredType: InferredColumnType;
+  semanticType: SemanticColumnType;
+  role: SemanticColumnType | DimensionRole | MetricRole;
+  geoRole?: GeoRole;
+  metricRole?: MetricRole;
+  dimensionRole?: DimensionRole;
+  uniqueCount: number;
+  nullCount: number;
+  nullPercentage: number;
+  sampleValues: unknown[];
+  min?: number | string;
+  max?: number | string;
+  usableAsFilter: boolean;
+  usableAsMetric: boolean;
+  usableAsDimension: boolean;
+  usableAsDate: boolean;
+  usableAsBreakdown: boolean;
+  confidence: number;
+  aliases: string[];
+  synonyms: string[];
+  isHidden?: boolean;
+}
+
+export interface DatasetCatalog {
+  datasetId: string;
+  fileName: string;
+  rowCount: number;
+  columnCount: number;
+  columns: DatasetCatalogColumn[];
+  metrics: DatasetCatalogColumn[];
+  dimensions: DatasetCatalogColumn[];
+  dates: DatasetCatalogColumn[];
+  filters: DatasetCatalogColumn[];
+  breakdowns: DatasetCatalogColumn[];
+  geographies: DatasetCatalogColumn[];
+  clients: DatasetCatalogColumn[];
+  sellers: DatasetCatalogColumn[];
+  products: DatasetCatalogColumn[];
+  categories: DatasetCatalogColumn[];
+  channels: DatasetCatalogColumn[];
+}
 
 export interface DatasetColumnProfile {
   originalName: string;

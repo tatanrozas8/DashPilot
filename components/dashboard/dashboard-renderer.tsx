@@ -23,7 +23,7 @@ import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
 import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
-import { inferSemanticLayer } from "@/lib/semantic-layer";
+import { buildDatasetCatalog, inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
@@ -282,12 +282,17 @@ function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRo
 
 function TableWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
+  const setViewState = useDashPilotStore((state) => state.setViewState);
   const filtered = useMemo(() => applyDashboardFilters(rows, viewState.filters), [rows, viewState.filters]);
   const columns = (widget.config.columns as string[] | undefined)?.filter(Boolean) ?? Object.keys(rows[0] ?? {}).slice(0, 5);
   return (
     <Card className="min-h-[310px] overflow-hidden">
       <div className="mb-4 flex items-center justify-between">
         <WidgetHeader widget={widget} />
+        <div className="flex gap-2">
+          <button className="rounded-md border border-[#dfe5f0] px-3 py-1.5 text-xs font-semibold text-[#3d35ff]" onClick={() => setViewState({ dataExplorer: { ...viewState.dataExplorer, isOpen: true, visibleColumns: columns } })}>Elegir columnas</button>
+          <button className="rounded-md border border-[#dfe5f0] px-3 py-1.5 text-xs font-semibold text-[#3d35ff]" onClick={() => setViewState({ dataExplorer: { ...viewState.dataExplorer, isOpen: true } })}>Ver tabla completa</button>
+        </div>
       </div>
       {filtered.length === 0 ? (
         <EmptyWidget message="No hay filas para mostrar con los filtros actuales." />
@@ -411,12 +416,25 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
 
 export function DashboardFilters() {
   const rows = useDashPilotStore((state) => state.rows);
+  const profile = useDashPilotStore((state) => state.profile);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const resetFilters = useDashPilotStore((state) => state.resetFilters);
+  const [isAddingFilter, setIsAddingFilter] = useState(false);
+  const catalog = useMemo(() => buildDatasetCatalog(profile), [profile]);
+  const [filterField, setFilterField] = useState(catalog.filters[0]?.normalizedName ?? "");
+  const selectedFilterColumn = catalog.columns.find((column) => column.normalizedName === filterField) ?? catalog.filters[0];
 
   const optionsFor = (field: string) => Array.from(new Set(rows.map((row) => row[field]).filter(Boolean))).slice(0, 12);
+  const setFilter = (field: string, value: unknown, operator: "in" | "between" = "in") => {
+    setViewState({
+      filters: [
+        ...viewState.filters.filter((item) => item.field !== field),
+        { field, operator, value }
+      ]
+    });
+  };
 
   return (
     <aside className="soft-card rounded-xl p-4">
@@ -495,7 +513,49 @@ export function DashboardFilters() {
           </span>
         ))}
       </div>
-      <Button disabled title="Agrega filtros desde el Copiloto o editando la especificacion del dashboard." variant="secondary" className="mt-4 w-full">+ Agregar filtro</Button>
+      {isAddingFilter && selectedFilterColumn && (
+        <div className="mt-4 rounded-lg border border-[#dfe5f0] bg-[#fbfcff] p-3">
+          <label className="block text-xs font-bold text-[#34405f]">
+            Columna
+            <select className="mt-1 h-10 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" value={selectedFilterColumn.normalizedName} onChange={(event) => setFilterField(event.target.value)}>
+              {catalog.filters.map((column) => <option key={column.normalizedName} value={column.normalizedName}>{column.displayName}</option>)}
+            </select>
+          </label>
+          {selectedFilterColumn.usableAsDate ? (
+            <div className="mt-3 grid gap-2">
+              <input className="h-10 rounded-md border border-[#dfe5f0] px-3 text-sm" type="date" onChange={(event) => {
+                const current = viewState.filters.find((filter) => filter.field === selectedFilterColumn.normalizedName)?.value;
+                const to = Array.isArray(current) ? String(current[1] ?? event.target.value) : event.target.value;
+                setFilter(selectedFilterColumn.normalizedName, [event.target.value, to], "between");
+              }} />
+              <input className="h-10 rounded-md border border-[#dfe5f0] px-3 text-sm" type="date" onChange={(event) => {
+                const current = viewState.filters.find((filter) => filter.field === selectedFilterColumn.normalizedName)?.value;
+                const from = Array.isArray(current) ? String(current[0] ?? event.target.value) : event.target.value;
+                setFilter(selectedFilterColumn.normalizedName, [from, event.target.value], "between");
+              }} />
+            </div>
+          ) : selectedFilterColumn.usableAsMetric ? (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <input className="h-10 rounded-md border border-[#dfe5f0] px-3 text-sm" placeholder="Min" type="number" onChange={(event) => {
+                const current = viewState.filters.find((filter) => filter.field === selectedFilterColumn.normalizedName)?.value;
+                const max = Array.isArray(current) ? current[1] : selectedFilterColumn.max ?? event.target.value;
+                setFilter(selectedFilterColumn.normalizedName, [event.target.value, max], "between");
+              }} />
+              <input className="h-10 rounded-md border border-[#dfe5f0] px-3 text-sm" placeholder="Max" type="number" onChange={(event) => {
+                const current = viewState.filters.find((filter) => filter.field === selectedFilterColumn.normalizedName)?.value;
+                const min = Array.isArray(current) ? current[0] : selectedFilterColumn.min ?? event.target.value;
+                setFilter(selectedFilterColumn.normalizedName, [min, event.target.value], "between");
+              }} />
+            </div>
+          ) : (
+            <select className="mt-3 h-10 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" defaultValue="" onChange={(event) => event.target.value && setFilter(selectedFilterColumn.normalizedName, [event.target.value])}>
+              <option value="">Selecciona valor</option>
+              {optionsFor(selectedFilterColumn.normalizedName).map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+      <Button onClick={() => setIsAddingFilter((value) => !value)} title="Agrega filtros desde columnas reales del dataset." variant="secondary" className="mt-4 w-full">+ Agregar filtro</Button>
     </aside>
   );
 }

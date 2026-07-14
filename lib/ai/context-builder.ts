@@ -1,8 +1,8 @@
 import type { ChatMessage } from "@/types/ai";
-import type { DataRow, DatasetProfile } from "@/types/dataset";
+import type { DataRow, DatasetCatalog, DatasetProfile } from "@/types/dataset";
 import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { PresentationSpec } from "@/types/presentation";
-import { inferSemanticLayer, type SemanticLayer } from "@/lib/semantic-layer";
+import { buildDatasetCatalog, inferSemanticLayer, type SemanticLayer } from "@/lib/semantic-layer";
 
 const MAX_SAMPLE_ROWS = 5;
 const MAX_SAMPLE_COLUMNS = 12;
@@ -23,6 +23,7 @@ interface CopilotDatasetChunk {
 export interface CopilotContext {
   datasetProfile: DatasetProfile;
   semanticModel: SemanticLayer;
+  datasetCatalog: DatasetCatalog;
   columns: Array<{
     originalName: string;
     normalizedName: string;
@@ -56,6 +57,8 @@ export interface CopilotContext {
   datasetChunks: CopilotDatasetChunk[];
   availableMetrics: string[];
   availableDimensions: string[];
+  availableFilters: string[];
+  availableBreakdowns: string[];
   dateColumns: string[];
   geoColumns: string[];
   geographicColumns: Array<{
@@ -152,6 +155,7 @@ function buildDatasetChunks(rows: DataRow[], columns: string[], metricColumns: s
 
 export function buildCopilotContext(input: BuildCopilotContextInput): CopilotContext {
   const semanticModel = inferSemanticLayer(input.datasetProfile, input.rows);
+  const datasetCatalog = buildDatasetCatalog(input.datasetProfile);
   const columns = input.datasetProfile.columns.map((column) => ({
     originalName: column.originalName,
     normalizedName: column.normalizedName,
@@ -181,6 +185,7 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
   return {
     datasetProfile: input.datasetProfile,
     semanticModel,
+    datasetCatalog,
     columns,
     dataCoverage: {
       rowCount: input.rows.length,
@@ -193,6 +198,7 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     datasetChunks,
     availableMetrics: [
       ...new Set([
+        ...datasetCatalog.metrics.map((column) => column.normalizedName),
         ...input.datasetProfile.detectedMetricColumns.filter((field) => activeColumnNames.includes(field)),
         ...semanticModel.metrics.map((field) => field.field),
         ...semanticModel.revenueMetrics.map((field) => field.field),
@@ -201,6 +207,7 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     ],
     availableDimensions: [
       ...new Set([
+        ...datasetCatalog.dimensions.map((column) => column.normalizedName),
         ...input.datasetProfile.detectedDimensionColumns.filter((field) => activeColumnNames.includes(field)),
         ...semanticModel.dimensions.map((field) => field.field),
         ...semanticModel.geographies.map((field) => field.field),
@@ -210,6 +217,8 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
         ...semanticModel.categories.map((field) => field.field)
       ])
     ],
+    availableFilters: datasetCatalog.filters.map((column) => column.normalizedName),
+    availableBreakdowns: datasetCatalog.breakdowns.map((column) => column.normalizedName),
     dateColumns: [...new Set([...input.datasetProfile.detectedDateColumns, ...semanticModel.dates.map((field) => field.field)])],
     geoColumns: [...new Set([...input.datasetProfile.detectedGeoColumns, ...semanticModel.geographies.map((field) => field.field)])],
     geographicColumns: columns
@@ -276,10 +285,30 @@ export function toProviderContext(context: CopilotContext) {
       qualityScore: context.datasetProfile.qualityScore
     },
     semanticModel: context.semanticModel,
+    datasetCatalog: {
+      datasetId: context.datasetCatalog.datasetId,
+      fileName: context.datasetCatalog.fileName,
+      rowCount: context.datasetCatalog.rowCount,
+      columnCount: context.datasetCatalog.columnCount,
+      columns: context.datasetCatalog.columns,
+      metrics: context.datasetCatalog.metrics.map((column) => column.normalizedName),
+      dimensions: context.datasetCatalog.dimensions.map((column) => column.normalizedName),
+      dates: context.datasetCatalog.dates.map((column) => column.normalizedName),
+      filters: context.datasetCatalog.filters.map((column) => column.normalizedName),
+      breakdowns: context.datasetCatalog.breakdowns.map((column) => column.normalizedName),
+      geographies: context.datasetCatalog.geographies.map((column) => column.normalizedName),
+      clients: context.datasetCatalog.clients.map((column) => column.normalizedName),
+      sellers: context.datasetCatalog.sellers.map((column) => column.normalizedName),
+      products: context.datasetCatalog.products.map((column) => column.normalizedName),
+      categories: context.datasetCatalog.categories.map((column) => column.normalizedName),
+      channels: context.datasetCatalog.channels.map((column) => column.normalizedName)
+    },
     dataCoverage: context.dataCoverage,
     datasetChunks: context.datasetChunks,
     availableMetrics: context.availableMetrics,
     availableDimensions: context.availableDimensions,
+    availableFilters: context.availableFilters,
+    availableBreakdowns: context.availableBreakdowns,
     dateColumns: context.dateColumns,
     geoColumns: context.geoColumns,
     geographicColumns: context.geographicColumns,

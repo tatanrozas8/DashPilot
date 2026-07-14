@@ -1,5 +1,6 @@
-import type { DatasetColumnProfile, DatasetProfile, GeoRole } from "@/types/dataset";
+import type { DatasetCatalogColumn, DatasetColumnProfile, DatasetProfile, GeoRole } from "@/types/dataset";
 import type { SemanticLayer } from "@/lib/semantic-layer/infer-semantic-layer";
+import { buildDatasetCatalog } from "@/lib/semantic-layer/dataset-catalog";
 import { slugify } from "@/lib/utils";
 
 export type ColumnIntent =
@@ -24,6 +25,7 @@ export interface ColumnMatch {
   confidence: number;
   reason: string;
   matchType?: ColumnMatchType;
+  matchedAlias?: string;
 }
 
 export type ColumnMatchType = "exact" | "contains" | "semantic" | "fallback" | "not_found";
@@ -31,14 +33,19 @@ export type RequestedColumnConcept = ColumnIntent | "region" | "country" | "city
 
 export interface ColumnResolveResult {
   intent: ColumnIntent;
+  requestedText: string;
   requestedConcept: RequestedColumnConcept;
+  candidates: ColumnMatch[];
   matchedColumn?: DatasetColumnProfile;
+  selectedColumn?: DatasetColumnProfile;
   originalName?: string;
   normalizedName?: string;
   matchType: ColumnMatchType;
   confidence: number;
   reason: string;
   alternatives: ColumnMatch[];
+  ambiguity: boolean;
+  needsClarification: boolean;
   uniqueCount?: number;
   sampleValues?: unknown[];
 }
@@ -57,7 +64,14 @@ const hints: Record<ColumnIntent, string[]> = {
 };
 
 function normalize(value: string) {
-  return slugify(value);
+  return slugify(value
+    .replace(/paÃ­s/gi, "pais")
+    .replace(/regiÃ³n/gi, "region")
+    .replace(/categorÃ­a/gi, "categoria")
+    .replace(/artÃ­culo/gi, "articulo")
+    .replace(/lÃ­nea/gi, "linea")
+    .replace(/perÃ­odo/gi, "periodo")
+    .replace(/aÃ±o/gi, "ano"));
 }
 
 function columnText(column: DatasetColumnProfile) {
@@ -70,6 +84,10 @@ function normalizedHints(intent: ColumnIntent) {
 
 function containsAny(text: string, words: string[]) {
   return words.some((word) => text.includes(word));
+}
+
+function profileColumnByName(profile: DatasetProfile, normalizedName: string) {
+  return profile.columns.find((column) => column.normalizedName === normalizedName);
 }
 
 function hasToken(text: string, token: string) {
@@ -168,6 +186,125 @@ function geographyMatches(prompt: string, context: ColumnResolverContext): Colum
     .sort((left, right) => right.confidence - left.confidence || geoPriorityForConcept(concept, right.column.geoRole) - geoPriorityForConcept(concept, left.column.geoRole));
 }
 
+function conceptForIntent(prompt: string, intent: ColumnIntent): RequestedColumnConcept {
+  if (intent === "geography") return geoConcept(prompt);
+  return intent;
+}
+
+function roleScore(catalogColumn: DatasetCatalogColumn, intent: ColumnIntent, concept: RequestedColumnConcept) {
+  if (intent === "geography") return geoPriorityForConcept(concept, catalogColumn.geoRole) / 100;
+  if (intent === "revenue") return catalogColumn.metricRole === "revenue" ? 0.9 : catalogColumn.usableAsMetric ? 0.45 : 0;
+  if (intent === "margin") return catalogColumn.metricRole === "margin" ? 0.9 : catalogColumn.usableAsMetric ? 0.35 : 0;
+  if (intent === "metric") return catalogColumn.usableAsMetric ? 0.76 : 0;
+  if (intent === "date") return catalogColumn.usableAsDate ? 0.86 : 0;
+  if (intent === "dimension") return catalogColumn.usableAsDimension || catalogColumn.usableAsBreakdown ? 0.64 : 0;
+  if (intent === "client") return catalogColumn.dimensionRole === "client" ? 0.86 : 0;
+  if (intent === "seller") return catalogColumn.dimensionRole === "seller" ? 0.86 : 0;
+  if (intent === "product") return catalogColumn.dimensionRole === "product" ? 0.86 : 0;
+  if (intent === "category") return catalogColumn.dimensionRole === "category" ? 0.82 : 0;
+  return 0;
+}
+
+function directMatchScore(requestedText: string, catalogColumn: DatasetCatalogColumn) {
+  const requested = normalize(requestedText);
+  const names = [
+    catalogColumn.normalizedName,
+    catalogColumn.originalName,
+    catalogColumn.displayName,
+    ...catalogColumn.aliases,
+    ...catalogColumn.synonyms
+  ].map(normalize).filter(Boolean);
+
+  if (names.some((name) => requested === name)) return { score: 1, matchType: "exact" as const, alias: names.find((name) => requested === name) };
+  const tokenMatches = names.filter((name) => hasToken(requested, name) || hasToken(name, requested));
+  if (tokenMatches.length) return { score: 0.88, matchType: "contains" as const, alias: tokenMatches[0] };
+  const containsMatches = names.filter((name) => requested.includes(name) || name.includes(requested));
+  if (containsMatches.length) return { score: 0.76, matchType: "contains" as const, alias: containsMatches[0] };
+  const requestedTokens = requested.split("_").filter((token) => token.length > 1);
+  const bestOverlap = names.reduce((best, name) => {
+    const nameTokens = new Set(name.split("_").filter((token) => token.length > 1));
+    const overlap = requestedTokens.filter((token) => nameTokens.has(token) || name.includes(token)).length / Math.max(1, requestedTokens.length);
+    return Math.max(best, overlap);
+  }, 0);
+  return { score: bestOverlap >= 0.5 ? bestOverlap * 0.58 : 0, matchType: bestOverlap >= 0.75 ? "contains" as const : "semantic" as const, alias: undefined };
+}
+
+function catalogMatches(prompt: string, context: ColumnResolverContext, intent: ColumnIntent): ColumnMatch[] {
+  const catalog = buildDatasetCatalog(context.datasetProfile);
+  const concept = conceptForIntent(prompt, intent);
+  return catalog.columns
+    .flatMap((catalogColumn) => {
+      const profileColumn = profileColumnByName(context.datasetProfile, catalogColumn.normalizedName);
+      if (!profileColumn) return [];
+      const direct = directMatchScore(prompt, catalogColumn);
+      const semantic = roleScore(catalogColumn, intent, concept);
+      const usability =
+        intent === "metric" || intent === "revenue" || intent === "margin"
+          ? catalogColumn.usableAsMetric ? 0.1 : 0
+          : intent === "date"
+            ? catalogColumn.usableAsDate ? 0.1 : 0
+            : catalogColumn.usableAsBreakdown || catalogColumn.usableAsDimension ? 0.1 : 0;
+      const confidence = Math.min(0.99, Number((direct.score * 0.6 + semantic * 0.38 + usability + catalogColumn.confidence * 0.08).toFixed(2)));
+      const matchType: ColumnMatchType = direct.score >= 1 ? "exact" : direct.score >= 0.7 ? "contains" : semantic >= 0.75 ? "semantic" : "fallback";
+      return [{
+        column: profileColumn,
+        confidence,
+        matchType,
+        matchedAlias: direct.alias,
+        reason:
+          matchType === "exact"
+            ? `Coincide exactamente con "${profileColumn.displayName}".`
+            : matchType === "contains"
+              ? `Coincide por nombre o alias de "${profileColumn.displayName}".`
+              : matchType === "semantic"
+              ? `Coincide por rol ${catalogColumn.role}.`
+                : `Candidato posible por utilidad como ${intent}.`
+      }];
+    })
+    .filter((match) => match.confidence >= 0.18)
+    .sort((left, right) => right.confidence - left.confidence || left.column.normalizedName.localeCompare(right.column.normalizedName));
+}
+
+function resultFromMatches(prompt: string, intent: ColumnIntent, requestedConcept: RequestedColumnConcept, matches: ColumnMatch[]): ColumnResolveResult {
+  const best = matches[0];
+  const ambiguity = Boolean(best && matches[1] && best.confidence - matches[1].confidence < 0.08 && matches[1].confidence >= 0.55);
+  if (!best || best.confidence < 0.42) {
+    return {
+      intent,
+      requestedText: prompt,
+      requestedConcept,
+      candidates: matches.slice(0, 8),
+      matchType: "not_found",
+      confidence: 0,
+      reason: `No encontre una columna compatible con "${prompt}".`,
+      alternatives: matches.slice(0, 4),
+      ambiguity: false,
+      needsClarification: false
+    };
+  }
+
+  return {
+    intent,
+    requestedText: prompt,
+    requestedConcept,
+    candidates: matches.slice(0, 8),
+    matchedColumn: best.column,
+    selectedColumn: best.column,
+    originalName: best.column.originalName,
+    normalizedName: best.column.normalizedName,
+    matchType: best.matchType ?? "semantic",
+    confidence: best.confidence,
+    reason: ambiguity
+      ? `Encontre varias columnas posibles; seleccione "${best.column.displayName}" por mayor confianza.`
+      : best.reason,
+    alternatives: matches.slice(1, 5),
+    ambiguity,
+    needsClarification: ambiguity && best.confidence < 0.72,
+    uniqueCount: best.column.uniqueCount,
+    sampleValues: best.column.sampleValues
+  };
+}
+
 function semanticFields(context: ColumnResolverContext, intent: ColumnIntent) {
   const model = context.semanticModel;
   if (!model) return [];
@@ -208,87 +345,13 @@ export function inferColumnIntent(prompt: string, fallback: ColumnIntent = "dime
 }
 
 export function resolveColumn(prompt: string, context: ColumnResolverContext, intent = inferColumnIntent(prompt)): ColumnResolveResult {
-  if (intent === "geography") {
-    const requestedConcept = geoConcept(prompt);
-    const matches = geographyMatches(prompt, context);
-    const best = matches[0];
-    if (!best || best.confidence < 0.45) {
-      return {
-        intent,
-        requestedConcept,
-        matchType: "not_found",
-        confidence: 0,
-        reason: `No encontre una columna compatible con "${prompt}".`,
-        alternatives: matches.slice(0, 4)
-      };
-    }
-    return {
-      intent,
-      requestedConcept,
-      matchedColumn: best.column,
-      originalName: best.column.originalName,
-      normalizedName: best.column.normalizedName,
-      matchType: best.matchType ?? "semantic",
-      confidence: best.confidence,
-      reason: best.reason,
-      alternatives: matches.slice(1, 5),
-      uniqueCount: best.column.uniqueCount,
-      sampleValues: best.column.sampleValues
-    };
-  }
-
-  const promptText = normalize(prompt);
-  const intentHints = normalizedHints(intent);
-  const semantic = new Map(semanticFields(context, intent).map((field, index) => [field.field, { confidence: field.confidence, index }]));
-  const fallbacks = new Set(profileFallbackFields(context, intent));
-
-  const matches = context.datasetProfile.columns
-    .map((column) => {
-      const text = columnText(column);
-      const directName = promptText.includes(normalize(column.originalName)) || promptText.includes(normalize(column.displayName)) || promptText.includes(normalize(column.normalizedName));
-      const nameHint = containsAny(text, intentHints) ? 0.42 : 0;
-      const semanticHit = semantic.get(column.normalizedName);
-      const semanticScore = semanticHit ? 0.34 + Math.max(0, 0.12 - semanticHit.index * 0.03) : 0;
-      const fallbackScore = fallbacks.has(column.normalizedName) ? 0.16 : 0;
-      const confidence = Math.min(0.99, Number((nameHint + semanticScore + fallbackScore + typeScore(column, intent) + (directName ? 0.18 : 0)).toFixed(2)));
-      return {
-        column,
-        confidence,
-        reason: directName
-          ? `Coincide directamente con "${column.displayName}".`
-          : confidence >= 0.65
-            ? `Coincide semanticamente con ${intent}.`
-            : `Alternativa posible para ${intent}.`
-      };
-    })
-    .filter((match) => match.confidence >= 0.2)
-    .sort((left, right) => right.confidence - left.confidence);
-
-  const best = matches[0];
-  if (!best || best.confidence < 0.48) {
-    return {
-      intent,
-      requestedConcept: intent,
-      matchType: "not_found",
-      confidence: 0,
-      reason: `No encontre una columna compatible con "${prompt}".`,
-      alternatives: matches.slice(0, 4)
-    };
-  }
-
-  return {
-    intent,
-    requestedConcept: intent,
-    matchedColumn: best.column,
-    originalName: best.column.originalName,
-    normalizedName: best.column.normalizedName,
-    matchType: "semantic",
-    confidence: best.confidence,
-    reason: best.reason,
-    alternatives: matches.slice(1, 5),
-    uniqueCount: best.column.uniqueCount,
-    sampleValues: best.column.sampleValues
-  };
+  const requestedConcept = conceptForIntent(prompt, intent);
+  const matches = intent === "geography" ? geographyMatches(prompt, context) : catalogMatches(prompt, context, intent);
+  const catalogBased = catalogMatches(prompt, context, intent);
+  const merged = [...matches, ...catalogBased]
+    .sort((left, right) => right.confidence - left.confidence)
+    .filter((match, index, list) => list.findIndex((item) => item.column.normalizedName === match.column.normalizedName) === index);
+  return resultFromMatches(prompt, intent, requestedConcept, merged);
 }
 
 export function listAvailableDimensions(profile: DatasetProfile) {

@@ -7,7 +7,7 @@ import { applyAction } from "@/lib/ai/apply-action";
 import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
-import { missingColumnMessage, resolveColumn } from "@/lib/semantic-layer";
+import { buildDatasetCatalog, missingColumnMessage, resolveColumn } from "@/lib/semantic-layer";
 import { copilotOutputSchema, validateCopilotAction } from "@/lib/validation/copilot-actions";
 
 export interface CopilotRequestContext {
@@ -101,6 +101,10 @@ function firstExisting(fields: (string | undefined)[], profile: DatasetProfile) 
   return fields.find((field) => field && columns.has(field));
 }
 
+function columnProfile(profile: DatasetProfile, field?: string) {
+  return profile.columns.find((column) => column.normalizedName === field);
+}
+
 function fieldLabel(profile: DatasetProfile, field?: string) {
   return profile.columns.find((column) => column.normalizedName === field)?.displayName ?? field ?? "campo";
 }
@@ -156,6 +160,43 @@ function createAnalysisWidget(context: CopilotRequestContext, options: { metric?
   } satisfies DashboardWidget;
 }
 
+function breakdownWidgetActions(context: CopilotRequestContext, options: { dimension: string; metric?: string; title?: string; aggregation?: "sum" | "avg" | "count" | "min" | "max"; reason: string; confidence: number }) {
+  const metric = firstExisting([
+    options.metric,
+    context.semanticModel.primaryMetric?.field,
+    context.datasetProfile.detectedMetricColumns[0]
+  ], context.datasetProfile);
+  const dimensionLabel = fieldLabel(context.datasetProfile, options.dimension);
+  const metricLabel = fieldLabel(context.datasetProfile, metric);
+  const title = options.title ?? `${metric ? metricLabel : "Registros"} por ${dimensionLabel}`;
+  const target = preferredWidget(context.dashboardSpec, context.prompt, context.viewState);
+  const chartTarget = target && ["bar_chart", "line_chart", "area_chart", "donut_chart", "scatter_plot"].includes(target.type) ? target : widgetGroupedBy(context.dashboardSpec, options.dimension) ?? context.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+  const query = {
+    ...(metric ? { metric: { field: metric, aggregation: options.aggregation ?? "sum" as const } } : {}),
+    groupBy: [options.dimension],
+    orderBy: { field: "value" as const, direction: "desc" as const },
+    limit: 10
+  };
+
+  if (chartTarget) {
+    const updateAction: DashboardAction = {
+      type: "update_widget",
+      widgetId: chartTarget.id,
+      changes: {
+        type: chartTarget.type === "line_chart" || chartTarget.type === "area_chart" ? chartTarget.type : "bar_chart",
+        title,
+        query,
+        config: { ...chartTarget.config, horizontal: true, generatedBy: "copilot" }
+      }
+    };
+    const focusAction: DashboardAction = { type: "focus_widget", widgetId: chartTarget.id };
+    return [updateAction, focusAction].map((action) => actionEnvelope(action, options.reason, options.confidence));
+  }
+
+  const widget = createAnalysisWidget(context, { metric, dimension: options.dimension, title, aggregation: options.aggregation, limit: 10 });
+  return widget ? [actionEnvelope({ type: "add_widget", widget }, options.reason, options.confidence)] : [];
+}
+
 function widgetGroupedBy(spec: DashboardSpec, field?: string) {
   if (!field) return undefined;
   return spec.widgets.find((widget) => widget.query?.groupBy?.includes(field));
@@ -191,10 +232,21 @@ function columnBySampleValue(value: string, context: CopilotRequestContext) {
   );
 }
 
+function filterValueFromPrompt(prompt: string) {
+  const match = prompt.match(/(?:filtra|filtrar|filtro|solo|por)\s+(?:por\s+)?(?:region|zona|territorio|cliente|cliente_id|vendedor|producto|sku|sku_id|categoria|canal|estado|pais|pa[ií]s|ciudad|comuna|fecha|ventas|margen)?\s*(?:=|:|a|en|por)?\s+([a-zA-Z0-9 aeiouAEIOUáéíóúÁÉÍÓÚñÑ_-]+)/i);
+  const direct = match?.[1]?.trim().split(/\s+/).slice(0, 4).join(" ");
+  if (direct) return direct;
+  return filterValue(prompt);
+}
+
 function requestedColumns(prompt: string, context: CopilotRequestContext) {
   const text = normalize(prompt);
+  if ((text.includes("todas") || text.includes("todos")) && (text.includes("columna") || text.includes("campos"))) {
+    return context.datasetProfile.columns.map((column) => column.normalizedName);
+  }
   const direct = context.datasetProfile.columns.filter((column) => {
-    const names = [column.normalizedName, column.originalName, column.displayName].map(normalize);
+    const catalogColumn = buildDatasetCatalog(context.datasetProfile).columns.find((item) => item.normalizedName === column.normalizedName);
+    const names = [column.normalizedName, column.originalName, column.displayName, ...(catalogColumn?.aliases ?? [])].map(normalize);
     return names.some((name) => name && text.includes(name));
   });
   if (direct.length) return [...new Set(direct.map((column) => column.normalizedName))];
@@ -309,7 +361,7 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     }
   }
 
-  if ((prompt.includes("muestra") || prompt.includes("mostrar") || prompt.includes("solo")) && prompt.includes("columna")) {
+  if ((prompt.includes("muestra") || prompt.includes("mostrar") || prompt.includes("solo") || prompt.includes("ver")) && (prompt.includes("columna") || prompt.includes("campos"))) {
     const columns = requestedColumns(context.prompt, context);
     if (!columns.length) return { reply: "No encontre las columnas solicitadas. Puedo mostrar columnas por nombre, por ejemplo: muestra columnas Pais, Canal y Ventas.", envelopes: [] };
     const action: DashboardAction = { type: "select_visible_columns", columns };
@@ -337,6 +389,28 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     if (!columns.length) return { reply: "No encontre columnas claras para agrupar. Prueba: agrupa por canal o agrupa por pais.", envelopes: [] };
     const action: DashboardAction = { type: "group_by", fields: columns };
     return { reply: `Agrupe la exploracion por ${columns.map((field) => fieldLabel(context.datasetProfile, field)).join(", ")}.`, envelopes: [actionEnvelope(action, "Agrupacion solicitada.", 0.78)] };
+  }
+
+  if ((prompt.includes(" por ") || prompt.startsWith("por ") || prompt.includes("analiza") || prompt.includes("mostrar") || prompt.includes("muestra") || prompt.includes("grafico") || prompt.includes("grÃ¡fico")) && !prompt.includes("columna") && !prompt.includes("solo ") && !prompt.includes("filtra") && !prompt.includes("filtro") && !prompt.includes("vendedor") && !prompt.includes("asesor") && !prompt.includes("ejecutivo") && !prompt.includes("margen") && !prompt.includes("utilidad") && !prompt.includes("profit")) {
+    const dimension = resolveColumn(context.prompt, availableContext(context), "dimension");
+    const metricIntent = prompt.includes("promedio") || prompt.includes("media") ? "metric" : prompt.includes("margen") ? "margin" : "revenue";
+    const metric = resolveColumn(context.prompt, availableContext(context), metricIntent);
+    if (dimension.matchedColumn && dimension.matchedColumn.normalizedName !== metric.matchedColumn?.normalizedName) {
+      const envelopes = breakdownWidgetActions(context, {
+        dimension: dimension.matchedColumn.normalizedName,
+        metric: metric.matchedColumn?.normalizedName,
+        aggregation: prompt.includes("promedio") || prompt.includes("media") ? "avg" : "sum",
+        reason: dimension.reason,
+        confidence: Math.min(dimension.confidence, metric.confidence || 0.74)
+      });
+      if (envelopes.length) {
+        const alternatives = dimension.alternatives.length ? ` Alternativas: ${dimension.alternatives.map((item) => item.column.normalizedName).join(", ")}.` : "";
+        return {
+          reply: `Use la columna real "${dimension.matchedColumn.normalizedName}" y actualice el widget a ${fieldLabel(context.datasetProfile, metric.matchedColumn?.normalizedName)} por ${dimension.matchedColumn.displayName}.${alternatives}`,
+          envelopes
+        };
+      }
+    }
   }
 
   if (prompt.includes("ticket promedio") || (prompt.includes("kpi") && prompt.includes("promedio"))) {
@@ -411,9 +485,9 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
 
   if ((prompt.includes("filtra") || prompt.includes("filtro") || prompt.includes("solo ")) && context.datasetProfile.columns.length) {
     const resolved = resolveColumn(context.prompt, availableContext(context));
-    const value = filterValue(context.prompt);
+    const value = filterValueFromPrompt(context.prompt);
     const valueColumn = value ? columnBySampleValue(value, context) : undefined;
-    const matchedColumn = resolved.matchedColumn ?? valueColumn;
+    const matchedColumn = valueColumn ?? resolved.matchedColumn;
     if (!matchedColumn || !value) {
       return { reply: "Puedo aplicar filtros, pero necesito una columna y un valor claros. Por ejemplo: filtra Pais Chile.", envelopes: [] };
     }
@@ -431,27 +505,11 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     if (existing) {
       actions.push({ type: "focus_widget", widgetId: existing.id });
     } else {
-      const geographyWidget = context.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
-      const metric = firstExisting([
-        context.semanticModel.primaryMetric?.field,
-        context.datasetProfile.detectedMetricColumns[0]
-      ], context.datasetProfile);
-      if (geographyWidget && metric) {
-        actions.push({
-          type: "update_widget",
-          widgetId: geographyWidget.id,
-          changes: {
-            type: "bar_chart",
-            title: `${fieldLabel(context.datasetProfile, metric)} por ${fieldLabel(context.datasetProfile, field)}`,
-            query: { metric: { field: metric, aggregation: "sum" }, groupBy: [field], orderBy: { field: "value", direction: "desc" }, limit: 5 },
-            config: { format: geographyWidget.config.format ?? "number", horizontal: true, generatedBy: "copilot" }
-          }
-        });
-        actions.push({ type: "focus_widget", widgetId: geographyWidget.id });
-      } else {
-        const widget = createAnalysisWidget(context, { dimension: field, title: `Analisis por ${fieldLabel(context.datasetProfile, field)}` });
-        if (widget) actions.push({ type: "add_widget", widget });
-      }
+      const envelopes = breakdownWidgetActions(context, { dimension: field, reason: resolved.reason, confidence: resolved.confidence });
+      return {
+        reply: `Use la columna real "${resolved.matchedColumn.normalizedName}" del archivo y actualice el dashboard por ${fieldLabel(context.datasetProfile, field)}.`,
+        envelopes
+      };
     }
     const isFallback = resolved.matchType === "fallback";
     const reply = isFallback

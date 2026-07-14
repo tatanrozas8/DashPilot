@@ -190,6 +190,7 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
   const viewState = useDashPilotStore((state) => state.viewState);
   const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
   const comparison = data.map((item) => ({ ...item, previous: Math.round(Number(item.value) * 0.72) }));
 
   return (
@@ -199,13 +200,21 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
         <EmptyWidget message={String(widget.config.emptyMessage ?? "No hay datos suficientes para esta serie.")} />
       ) : (
         <ResponsiveContainer width="100%" height={230}>
-          <LineChart data={comparison} margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
+          <LineChart data={seriesKeys.length ? data : comparison} margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
             <CartesianGrid stroke={colors.grid} vertical={false} />
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
             <YAxis axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={(value) => formatCurrency(Number(value))} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            <Line type="monotone" dataKey="value" name="Actual" stroke={colors.primary} strokeWidth={3} dot={{ r: 4 }} />
-            <Line type="monotone" dataKey="previous" name="Comparativo" stroke={colors.muted} strokeDasharray="5 5" strokeWidth={2} dot={false} />
+            {seriesKeys.length ? (
+              seriesKeys.map((key, index) => (
+                <Line key={key} type="monotone" dataKey={key} name={key} stroke={colors.palette[index % colors.palette.length]} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+              ))
+            ) : (
+              <>
+                <Line type="monotone" dataKey="value" name="Actual" stroke={colors.primary} strokeWidth={3} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="previous" name="Comparativo" stroke={colors.muted} strokeDasharray="5 5" strokeWidth={2} dot={false} />
+              </>
+            )}
           </LineChart>
         </ResponsiveContainer>
       )}

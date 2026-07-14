@@ -1,11 +1,12 @@
 import type { ChatMessage } from "@/types/ai";
-import type { DatasetProfile } from "@/types/dataset";
+import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { applyAction } from "@/lib/ai/apply-action";
 import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
+import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { buildDatasetCatalog, missingColumnMessage, resolveColumn } from "@/lib/semantic-layer";
 import { copilotOutputSchema, validateCopilotAction } from "@/lib/validation/copilot-actions";
@@ -19,6 +20,7 @@ export interface CopilotRequestContext {
   presentationSpec?: PresentationSpec;
   messages?: ChatMessage[];
   copilotContext?: CopilotContext;
+  rows?: DataRow[];
 }
 
 export interface CopilotResult {
@@ -39,7 +41,6 @@ export interface HandleCopilotMessageInput extends CopilotRequestContext {
   source?: "mock" | "provider";
   proposedActions?: DashboardAction[];
   providerReply?: string;
-  rows?: never;
 }
 
 export const copilotOutputJsonSchema = {
@@ -667,6 +668,16 @@ function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotA
 
 export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotResult {
   const source = input.source ?? "mock";
+  const analyticalPlan = planAnalyticalChart(input);
+  if (analyticalPlan.handled) {
+    return applyValidatedActions(
+      input,
+      analyticalPlan.actions.map((action) => actionEnvelope(action, "Plan analitico compuesto detectado.", analyticalPlan.confidence)),
+      source,
+      analyticalPlan.reply,
+      analyticalPlan.warnings ?? []
+    );
+  }
   if (input.proposedActions) {
     return applyValidatedActions(input, input.proposedActions.map((action) => actionEnvelope(action, "Accion propuesta por proveedor.", 0.74)), source, input.providerReply ?? "Aplique acciones estructuradas validadas.");
   }

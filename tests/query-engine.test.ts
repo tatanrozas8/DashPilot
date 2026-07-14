@@ -33,6 +33,27 @@ describe("query engine", () => {
     expect(executeDashboardQuery(rows, { metric: { field: "Ventas", aggregation: "sum" }, x: { field: "Fecha", granularity: "year" } })).toHaveLength(1);
   });
 
+  it("builds multi-series temporal rows by dimension", () => {
+    const rows = [
+      { Fecha: "2023-01-01", Region: "Norte", Ventas: 10 },
+      { Fecha: "2023-03-01", Region: "Sur", Ventas: 20 },
+      { Fecha: "2024-01-01", Region: "Norte", Ventas: 30 },
+      { Fecha: "2024-04-01", Region: "Sur", Ventas: 40 }
+    ];
+    const result = executeDashboardQuery(rows, {
+      metric: { field: "Ventas", aggregation: "sum" },
+      x: { field: "Fecha", granularity: "year" },
+      groupBy: ["Region"],
+      seriesBy: "Region",
+      orderBy: { field: "label", direction: "asc" }
+    });
+
+    expect(result).toEqual([
+      { label: "2023", value: 30, Norte: 10, Sur: 20 },
+      { label: "2024", value: 70, Norte: 30, Sur: 40 }
+    ]);
+  });
+
   it("searches globally across the dataset", () => {
     const result = searchRows(demoRows, "Maria");
 

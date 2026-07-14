@@ -16,7 +16,8 @@ function context(prompt: string): CopilotRequestContext {
     datasetProfile,
     semanticModel: inferSemanticLayer(datasetProfile, demoRows),
     dashboardSpec: generateDashboardSpec(datasetProfile, demoRows),
-    viewState: { filters: [] }
+    viewState: { filters: [] },
+    rows: demoRows
   };
 }
 
@@ -27,7 +28,8 @@ function customContext(prompt: string, rows: DataRow[]): CopilotRequestContext {
     datasetProfile,
     semanticModel: inferSemanticLayer(datasetProfile, rows),
     dashboardSpec: generateDashboardSpec(datasetProfile, rows),
-    viewState: { filters: [] }
+    viewState: { filters: [] },
+    rows
   };
 }
 
@@ -167,6 +169,37 @@ describe("copilot service", () => {
     const result = createMockCopilotResponse(ctx);
 
     expect(result.updatedDashboardSpec?.widgets.some((widget) => widget.query?.groupBy?.includes("Pais") && widget.query.metric?.field === "Ventas")).toBe(true);
+  });
+
+  it("creates a temporal region chart when the prompt asks sales by region through years", () => {
+    const ctx = customContext("Necesito un grafico de ventas por region a traves de los anos", [
+      { fecha: "2023-01-01", region: "RM", venta_neta_clp: 100 },
+      { fecha: "2023-02-01", region: "Biobio", venta_neta_clp: 120 },
+      { fecha: "2024-01-01", region: "RM", venta_neta_clp: 180 },
+      { fecha: "2024-02-01", region: "Biobio", venta_neta_clp: 160 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+    const updated = result.updatedDashboardSpec?.widgets.find((widget) => widget.id === result.updatedViewState?.highlightedWidgetId);
+
+    expect(updated?.type).toBe("line_chart");
+    expect(updated?.query?.x).toEqual({ field: "fecha", granularity: "year" });
+    expect(updated?.query?.groupBy).toEqual(["region"]);
+    expect(updated?.query?.seriesBy).toBe("region");
+    expect(updated?.query?.metric?.field).toBe("venta_neta_clp");
+    expect(updated?.type).not.toBe("bar_chart");
+  });
+
+  it("does not create a static region bar chart when the prompt asks through years", () => {
+    const ctx = customContext("ventas por region a traves de los anos", [
+      { fecha: "2023-01-01", region: "RM", ventas: 100 },
+      { fecha: "2024-01-01", region: "RM", ventas: 200 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+    const changed = result.updatedDashboardSpec?.widgets.find((widget) => widget.id === result.updatedViewState?.highlightedWidgetId);
+
+    expect(changed?.query?.x?.granularity).toBe("year");
+    expect(changed?.query?.seriesBy).toBe("region");
+    expect(changed?.type).toBe("line_chart");
   });
 
   it("applies filter, clear and explain actions only to spec or view state", () => {

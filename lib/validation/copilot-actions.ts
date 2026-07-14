@@ -96,6 +96,7 @@ function queryFields(query: unknown) {
   return [
     parsed.data.metric?.field,
     parsed.data.x?.field,
+    parsed.data.seriesBy,
     ...(parsed.data.groupBy ?? []),
     ...(parsed.data.filters ?? []).map((filter) => filter.field)
   ].filter(Boolean) as string[];

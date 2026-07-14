@@ -66,6 +66,7 @@ export interface DashboardQuerySpec {
     granularity?: "day" | "week" | "month" | "quarter" | "year";
   };
   groupBy?: string[];
+  seriesBy?: string;
   filters?: DashboardFilter[];
   orderBy?: {
     field: string;

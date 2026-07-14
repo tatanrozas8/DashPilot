@@ -748,7 +748,8 @@ export const useDashPilotStore = create<DashPilotState>()(
             viewState: before.viewState,
             presentationSpec: before.presentation,
             messages: before.messages,
-            copilotContext
+            copilotContext,
+            rows: before.rows
           });
           let nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
           let nextViewState = result.updatedViewState ?? get().viewState;

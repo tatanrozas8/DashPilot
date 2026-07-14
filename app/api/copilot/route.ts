@@ -32,7 +32,8 @@ function parseContext(raw: unknown): CopilotRequestContext | null {
     viewState: input.viewState as CopilotRequestContext["viewState"],
     presentationSpec: presentationSpec?.success ? presentationSpec.data : undefined,
     messages: Array.isArray(input.messages) ? input.messages as CopilotRequestContext["messages"] : undefined,
-    copilotContext: typeof input.copilotContext === "object" && input.copilotContext ? input.copilotContext as CopilotRequestContext["copilotContext"] : undefined
+    copilotContext: typeof input.copilotContext === "object" && input.copilotContext ? input.copilotContext as CopilotRequestContext["copilotContext"] : undefined,
+    rows: Array.isArray(input.rows) ? input.rows as CopilotRequestContext["rows"] : undefined
   };
 }
 

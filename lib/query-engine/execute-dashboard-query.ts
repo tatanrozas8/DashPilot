@@ -32,6 +32,21 @@ function timeLabel(value: unknown, granularity: TimeGranularity) {
   return new Intl.DateTimeFormat("es", { month: "short", year: "2-digit", timeZone: "UTC" }).format(date).replace(".", "");
 }
 
+function timeSortKey(value: unknown, granularity: TimeGranularity) {
+  const date = parseDateValue(value);
+  if (!date) return Number.MAX_SAFE_INTEGER;
+  if (granularity === "year") return Date.UTC(date.getUTCFullYear(), 0, 1);
+  if (granularity === "quarter") return Date.UTC(date.getUTCFullYear(), Math.floor(date.getUTCMonth() / 3) * 3, 1);
+  if (granularity === "month") return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+  if (granularity === "week") {
+    const firstDay = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const dayOffset = Math.floor((date.getTime() - firstDay.getTime()) / 86400000);
+    const week = Math.ceil((dayOffset + firstDay.getUTCDay() + 1) / 7);
+    return Date.UTC(date.getUTCFullYear(), 0, week * 7);
+  }
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
 function matchesFilter(row: DataRow, filter: DashboardFilter) {
   const value = row[filter.field];
   if (filter.operator === "eq") return value === filter.value;
@@ -80,6 +95,45 @@ export function executeDashboardQuery(rows: DataRow[], query: DashboardQuerySpec
     const field = query.metric?.field;
     const values = field ? filtered.map((row) => row[field]) : filtered.map(() => 1);
     return [{ label: query.metric?.aggregation ?? "count", value: aggregate(values, query.metric?.aggregation ?? "count") }];
+  }
+
+  const seriesField = query.x?.field ? query.seriesBy ?? query.groupBy?.[0] : undefined;
+  if (query.x?.field && seriesField) {
+    const metricField = query.metric?.field;
+    const granularity = query.x.granularity ?? "month";
+    const seriesTotals = new Map<string, number>();
+    const grouped = new Map<string, { label: string; sortKey: number; series: Map<string, unknown[]> }>();
+
+    for (const row of filtered) {
+      const seriesLabel = String(row[seriesField] ?? "Sin valor");
+      const periodLabel = timeLabel(row[query.x.field], granularity);
+      const periodSortKey = timeSortKey(row[query.x.field], granularity);
+      const values = metricField ? [row[metricField]] : [1];
+      seriesTotals.set(seriesLabel, (seriesTotals.get(seriesLabel) ?? 0) + aggregate(values, query.metric?.aggregation ?? "sum"));
+      const period = grouped.get(periodLabel) ?? { label: periodLabel, sortKey: periodSortKey, series: new Map<string, unknown[]>() };
+      period.series.set(seriesLabel, [...(period.series.get(seriesLabel) ?? []), ...values]);
+      grouped.set(periodLabel, period);
+    }
+
+    const allowedSeries = new Set(
+      [...seriesTotals.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "es"))
+        .slice(0, query.limit ?? seriesTotals.size)
+        .map(([series]) => series)
+    );
+
+    return [...grouped.values()]
+      .sort((left, right) => left.sortKey - right.sortKey || left.label.localeCompare(right.label, "es", { numeric: true }))
+      .map((period) => {
+        const output: QueryResultRow = { label: period.label, value: 0 };
+        for (const [series, values] of period.series.entries()) {
+          if (!allowedSeries.has(series)) continue;
+          const value = aggregate(values, query.metric?.aggregation ?? "sum");
+          output[series] = value;
+          output.value = Number(output.value ?? 0) + value;
+        }
+        return output;
+      });
   }
 
   const groupFields = query.x?.field ? [query.x.field] : query.groupBy ?? [];

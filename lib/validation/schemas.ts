@@ -56,6 +56,7 @@ export const dashboardQuerySchema = z.object({
     granularity: z.enum(["day", "week", "month", "quarter", "year"]).optional()
   }).optional(),
   groupBy: z.array(z.string()).optional(),
+  seriesBy: z.string().optional(),
   filters: z.array(dashboardFilterSchema).optional(),
   orderBy: z.object({
     field: z.string(),

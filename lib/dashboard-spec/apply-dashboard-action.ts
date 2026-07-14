@@ -1,6 +1,6 @@
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import { copilotActionSchema } from "@/lib/validation/copilot-actions";
-import { duplicateDashboardWidget, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { duplicateDashboardWidget, updateDashboardDesign, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 
 export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardViewState, action: DashboardAction): { spec: DashboardSpec; viewState: DashboardViewState; message: string } {
   const parsed = copilotActionSchema.safeParse(action);
@@ -25,6 +25,14 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
       spec: updateDashboardTitle(spec, action.title),
       viewState,
       message: `Actualice el titulo del dashboard a "${action.title}".`
+    };
+  }
+
+  if (action.type === "update_dashboard_design") {
+    return {
+      spec: updateDashboardDesign(spec, action.design),
+      viewState,
+      message: "Actualice el estilo visual del dashboard desde DashboardSpec."
     };
   }
 

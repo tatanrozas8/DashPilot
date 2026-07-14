@@ -1,6 +1,12 @@
-import type { DashboardSpec, DashboardWidget, WidgetType } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardSpec, DashboardWidget, WidgetType } from "@/types/dashboard";
 
 const chartTypes: WidgetType[] = ["line_chart", "bar_chart"];
+export const DEFAULT_DASHBOARD_DESIGN: Required<DashboardDesignSettings> = {
+  density: "comfortable",
+  accentColor: "indigo",
+  cardStyle: "soft",
+  chartPalette: "default"
+};
 
 function touch(spec: DashboardSpec): DashboardSpec {
   return { ...spec, updatedAt: new Date().toISOString() };
@@ -28,6 +34,20 @@ export function updateDashboardTitle(spec: DashboardSpec, title: string): Dashbo
 
 export function updateDashboardSubtitle(spec: DashboardSpec, subtitle: string): DashboardSpec {
   return touch({ ...spec, subtitle: subtitle.trim() || undefined });
+}
+
+export function normalizeDashboardDesign(design?: DashboardDesignSettings): Required<DashboardDesignSettings> {
+  return {
+    ...DEFAULT_DASHBOARD_DESIGN,
+    ...(design ?? {})
+  };
+}
+
+export function updateDashboardDesign(spec: DashboardSpec, design: DashboardDesignSettings): DashboardSpec {
+  return touch({
+    ...spec,
+    design: normalizeDashboardDesign({ ...spec.design, ...design })
+  });
 }
 
 export function updateDashboardWidget(spec: DashboardSpec, widgetId: string, changes: Partial<DashboardWidget>): DashboardSpec {

@@ -46,7 +46,7 @@ export function DatasetPreview() {
   ].filter((item): item is string => Boolean(item));
 
   function exportPreviewCsv() {
-    const previewRows = rows.slice(0, 100);
+    const previewRows = rows;
     const header = visibleColumns.map((column) => `"${column.replace(/"/g, '""')}"`).join(",");
     const body = previewRows.map((row) => visibleColumns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([[header, body].filter(Boolean).join("\n")], { type: "text/csv;charset=utf-8" }));
@@ -163,15 +163,15 @@ export function DatasetPreview() {
               <h2 className="text-lg font-bold">Vista previa de datos</h2>
               <button onClick={exportPreviewCsv} className="flex items-center gap-2 rounded-md border border-[#dfe5f0] px-3 py-2 text-sm font-semibold"><Download className="size-4" /> Exportar vista previa</button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="h-[420px] overflow-auto rounded-xl border border-[#edf1fa] lg:h-[520px]">
               <table className="w-full min-w-[980px] text-left text-sm">
-                <thead className="bg-[#fbfcff] text-xs text-[#536088]">
-                  <tr>{visibleColumns.slice(0, 9).map((key) => <th key={key} className="border-y border-[#edf1fa] px-3 py-3 font-bold">{profile.columns.find((column) => column.normalizedName === key)?.displayName ?? key}</th>)}</tr>
+                <thead className="sticky top-0 bg-[#fbfcff] text-xs text-[#536088]">
+                  <tr>{visibleColumns.map((key) => <th key={key} className="border-b border-[#edf1fa] px-3 py-3 font-bold">{profile.columns.find((column) => column.normalizedName === key)?.displayName ?? key}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 8).map((row, index) => (
-                    <tr key={index} className="border-b border-[#edf1fa]">
-                      {visibleColumns.slice(0, 9).map((key) => <td key={key} className="px-3 py-3 text-[#1c2748]">{String(row[key] ?? "-")}</td>)}
+                  {rows.map((row, index) => (
+                    <tr key={index} className="border-b border-[#edf1fa] last:border-0 hover:bg-[#fbfcff]">
+                      {visibleColumns.map((key) => <td key={key} className="max-w-[240px] truncate px-3 py-3 text-[#1c2748]">{String(row[key] ?? "-")}</td>)}
                     </tr>
                   ))}
                 </tbody>

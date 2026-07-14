@@ -58,6 +58,7 @@ export const copilotOutputJsonSchema = {
             type: {
               enum: [
                 "update_dashboard_title",
+                "update_dashboard_design",
                 "update_widget_title",
                 "add_widget",
                 "update_widget",
@@ -224,9 +225,40 @@ function noColumnAction(label: string, context: CopilotRequestContext) {
   return { reply: missingColumnMessage(label, context.datasetProfile), envelopes: [] };
 }
 
+function designFromPrompt(prompt: string): DashboardAction | null {
+  const design: Extract<DashboardAction, { type: "update_dashboard_design" }>["design"] = {};
+
+  if (prompt.includes("compact") || prompt.includes("denso") || prompt.includes("mas informacion") || prompt.includes("mas kpi")) design.density = "compact";
+  if (prompt.includes("comodo") || prompt.includes("amplio") || prompt.includes("respir") || prompt.includes("espaci")) design.density = "comfortable";
+
+  if (prompt.includes("verde") || prompt.includes("emerald") || prompt.includes("esmeralda")) design.accentColor = "emerald";
+  if (prompt.includes("celeste") || prompt.includes("sky")) design.accentColor = "sky";
+  if (prompt.includes("sobrio") || prompt.includes("neutral") || prompt.includes("slate") || prompt.includes("gris")) design.accentColor = "slate";
+  if (prompt.includes("azul") || prompt.includes("indigo") || prompt.includes("morado")) design.accentColor = "indigo";
+
+  if (prompt.includes("borde") || prompt.includes("marco")) design.cardStyle = "bordered";
+  if (prompt.includes("suave") || prompt.includes("soft") || prompt.includes("limpio")) design.cardStyle = "soft";
+
+  if (prompt.includes("contraste")) design.chartPalette = "contrast";
+  if (prompt.includes("business") || prompt.includes("profesional") || prompt.includes("ejecutivo")) design.chartPalette = "business";
+  if (prompt.includes("default") || prompt.includes("normal")) design.chartPalette = "default";
+
+  return Object.keys(design).length ? { type: "update_dashboard_design", design } : null;
+}
+
 function planLocalActions(context: CopilotRequestContext): { reply: string; envelopes: CopilotActionEnvelope[]; warnings?: string[] } {
   const prompt = normalize(context.prompt);
   const target = preferredWidget(context.dashboardSpec, context.prompt, context.viewState);
+
+  if (prompt.includes("estilo") || prompt.includes("diseno") || prompt.includes("diseño") || prompt.includes("color") || prompt.includes("tema") || prompt.includes("compact") || prompt.includes("paleta")) {
+    const action = designFromPrompt(prompt);
+    if (action) {
+      return {
+        reply: "Ajuste el estilo visual del dashboard desde su DashboardSpec para acercarlo al uso que pediste.",
+        envelopes: [actionEnvelope(action, "Preferencias visuales solicitadas por el usuario.", 0.84)]
+      };
+    }
+  }
 
   if (prompt.includes("elimina") || prompt.includes("quita") || prompt.includes("borra")) {
     if (!target) return { reply: "No encontre un widget enfocado para eliminar. Indica el nombre del grafico o enfocarlo primero.", envelopes: [] };
@@ -366,6 +398,7 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     const summary = firstWidgetByType(context.dashboardSpec, "insight_text") ?? context.dashboardSpec.widgets.find((widget) => widget.title.toLowerCase().includes("resumen"));
     const actions: DashboardAction[] = [
       { type: "update_dashboard_title", title: context.dashboardSpec.title.replace(/^Dashboard de /, "Vista Ejecutiva de ") },
+      { type: "update_dashboard_design", design: { density: "compact", accentColor: "slate", cardStyle: "bordered", chartPalette: "business" } },
       ...(summary ? [{ type: "focus_widget" as const, widgetId: summary.id }] : kpis[0] ? [{ type: "focus_widget" as const, widgetId: kpis[0] }] : []),
       { type: "reorder_widgets", widgetIds: [...kpis, ...context.dashboardSpec.widgets.filter((widget) => !kpis.includes(widget.id)).map((widget) => widget.id)] }
     ];
@@ -584,6 +617,7 @@ export function buildCopilotPrompt(context: CopilotRequestContext) {
     "Eres el Copiloto IA de DashPilot. Devuelve solo acciones estructuradas validas en JSON.",
     "Nunca inventes columnas ni widgets. Solo usa IDs y campos entregados.",
     "No puedes modificar React ni UI directamente. Solo DashboardSpec, DashboardViewState o PresentationSpec via acciones.",
+    "Para cambios visuales usa update_dashboard_design con density, accentColor, cardStyle o chartPalette.",
     "No ejecutes codigo. No crees formulas peligrosas. Las acciones destructivas deben requerir confirmacion.",
     JSON.stringify({
       userPrompt: context.prompt,

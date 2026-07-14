@@ -1,5 +1,6 @@
 import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardFilterConfig, DashboardSpec, DashboardWidget } from "@/types/dashboard";
+import { DEFAULT_DASHBOARD_DESIGN } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { inferSemanticLayer, type SemanticField } from "@/lib/semantic-layer";
 import { formatCurrency, formatNumber } from "@/lib/utils";
@@ -174,6 +175,7 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
     subtitle: isSalesDomain ? "Desempeno comercial consolidado con KPIs, filtros e insights accionables." : `Dashboard ${semantic.domain.name} generado desde roles semanticos del dataset.`,
     businessDomain: semantic.domain.name,
     datasetId: profile.id,
+    design: DEFAULT_DASHBOARD_DESIGN,
     globalFilters: filters,
     widgets,
     executiveSummary: isSalesDomain

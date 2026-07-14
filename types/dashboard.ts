@@ -17,11 +17,19 @@ export interface DashboardSpec {
   subtitle?: string;
   businessDomain?: string;
   datasetId: string;
+  design?: DashboardDesignSettings;
   globalFilters: DashboardFilterConfig[];
   widgets: DashboardWidget[];
   executiveSummary?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DashboardDesignSettings {
+  density?: "compact" | "comfortable";
+  accentColor?: "indigo" | "emerald" | "sky" | "slate";
+  cardStyle?: "soft" | "bordered";
+  chartPalette?: "default" | "business" | "contrast";
 }
 
 export interface DashboardWidget {
@@ -106,6 +114,7 @@ export type QueryResultRow = DataRow & {
 export type DashboardAction =
   | { type: "add_widget"; widget: DashboardWidget }
   | { type: "update_dashboard_title"; title: string }
+  | { type: "update_dashboard_design"; design: DashboardDesignSettings }
   | { type: "update_widget_title"; widgetId: string; title: string }
   | { type: "update_widget"; widgetId: string; changes: Partial<DashboardWidget> }
   | { type: "remove_widget"; widgetId: string }

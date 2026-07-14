@@ -1,12 +1,16 @@
 "use client";
 
-import { BarChart3, Copy, Eye, EyeOff, Trash2 } from "lucide-react";
-import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { BarChart3, Copy, Eye, EyeOff, Palette, Trash2 } from "lucide-react";
+import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
-import type { DashboardQuerySpec, DashboardWidget, WidgetType } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardQuerySpec, DashboardWidget, WidgetType } from "@/types/dashboard";
 
 const aggregations: NonNullable<DashboardQuerySpec["metric"]>["aggregation"][] = ["sum", "avg", "count", "count_distinct", "min", "max"];
+const densityOptions: Array<[Required<DashboardDesignSettings>["density"], string]> = [["comfortable", "Comodo"], ["compact", "Compacto"]];
+const accentOptions: Array<[Required<DashboardDesignSettings>["accentColor"], string]> = [["indigo", "Azul"], ["emerald", "Verde"], ["sky", "Celeste"], ["slate", "Sobrio"]];
+const cardStyleOptions: Array<[Required<DashboardDesignSettings>["cardStyle"], string]> = [["soft", "Suave"], ["bordered", "Bordeado"]];
+const paletteOptions: Array<[Required<DashboardDesignSettings>["chartPalette"], string]> = [["default", "Default"], ["business", "Business"], ["contrast", "Contraste"]];
 
 function unique(items: string[]) {
   return Array.from(new Set(items.filter(Boolean)));
@@ -63,6 +67,7 @@ export function DashboardEditor() {
   const draft = useDashPilotStore((state) => state.dashboardEditDraft);
   const updateTitle = useDashPilotStore((state) => state.updateDashboardDraftTitle);
   const updateSubtitle = useDashPilotStore((state) => state.updateDashboardDraftSubtitle);
+  const updateDesign = useDashPilotStore((state) => state.updateDashboardDraftDesign);
   const updateWidget = useDashPilotStore((state) => state.updateDashboardDraftWidget);
   const duplicateWidget = useDashPilotStore((state) => state.duplicateDashboardDraftWidget);
   const removeWidget = useDashPilotStore((state) => state.removeDashboardDraftWidget);
@@ -70,6 +75,7 @@ export function DashboardEditor() {
 
   if (!draft) return null;
 
+  const design = normalizeDashboardDesign(draft.design);
   const metricOptions = unique([
     ...profile.detectedMetricColumns,
     ...profile.columns.filter((column) => ["number", "currency", "percentage"].includes(column.inferredType)).map((column) => column.normalizedName)
@@ -112,6 +118,47 @@ export function DashboardEditor() {
         value={draft.subtitle ?? ""}
         onChange={(event) => updateSubtitle(event.target.value)}
       />
+
+      <section className="mt-6 rounded-lg border border-[#dfe5f0] p-4">
+        <div className="flex items-center gap-2">
+          <Palette className="size-4 text-[#3d35ff]" />
+          <h3 className="text-sm font-bold text-[#071334]">Estilo visual</h3>
+        </div>
+        <div className="mt-4 space-y-4">
+          <label className="block text-xs font-bold text-[#34405f]">
+            Densidad
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {densityOptions.map(([value, label]) => (
+                <button key={value} type="button" onClick={() => updateDesign({ density: value })} className={cn("focus-ring rounded-md border px-3 py-2 text-xs font-semibold", design.density === value ? "border-[#3d35ff] bg-[#f0f1ff] text-[#3d35ff]" : "border-[#dfe5f0] text-[#536088] hover:bg-[#f6f7ff]")}>{label}</button>
+              ))}
+            </div>
+          </label>
+
+          <label className="block text-xs font-bold text-[#34405f]">
+            Color principal
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {accentOptions.map(([value, label]) => (
+                <button key={value} type="button" onClick={() => updateDesign({ accentColor: value })} className={cn("focus-ring rounded-md border px-2 py-2 text-xs font-semibold", design.accentColor === value ? "border-[#3d35ff] bg-[#f0f1ff] text-[#3d35ff]" : "border-[#dfe5f0] text-[#536088] hover:bg-[#f6f7ff]")}>{label}</button>
+              ))}
+            </div>
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-xs font-bold text-[#34405f]">
+              Tarjetas
+              <select className="focus-ring mt-1 h-9 w-full rounded-md border border-[#dfe5f0] bg-white px-2 text-sm" value={design.cardStyle} onChange={(event) => updateDesign({ cardStyle: event.target.value as Required<DashboardDesignSettings>["cardStyle"] })}>
+                {cardStyleOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-bold text-[#34405f]">
+              Paleta
+              <select className="focus-ring mt-1 h-9 w-full rounded-md border border-[#dfe5f0] bg-white px-2 text-sm" value={design.chartPalette} onChange={(event) => updateDesign({ chartPalette: event.target.value as Required<DashboardDesignSettings>["chartPalette"] })}>
+                {paletteOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+      </section>
 
       <div className="mt-7 space-y-4">
         {draft.widgets.map((widget) => {

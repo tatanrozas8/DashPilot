@@ -4,15 +4,17 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMessage } from "@/types/ai";
 import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
-import type { DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { requestCopilotResponse } from "@/lib/ai/copilot-client";
 import { assistantMessage } from "@/lib/ai/copilot-service";
 import {
   duplicateDashboardWidget as duplicateDashboardWidgetSpec,
+  DEFAULT_DASHBOARD_DESIGN,
   removeDashboardWidget as removeDashboardWidgetSpec,
   setDashboardWidgetHidden as setDashboardWidgetHiddenSpec,
+  updateDashboardDesign,
   updateDashboardSubtitle,
   updateDashboardTitle,
   updateDashboardWidget as updateDashboardWidgetSpec
@@ -91,6 +93,8 @@ interface DashPilotState {
   cancelDashboardEditing: () => void;
   updateDashboardDraftTitle: (title: string) => void;
   updateDashboardDraftSubtitle: (subtitle: string) => void;
+  updateDashboardDraftDesign: (design: DashboardDesignSettings) => void;
+  updateDashboardDesign: (design: DashboardDesignSettings) => void;
   updateDashboardDraftWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
   updateDashboardWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
   addDashboardWidget: (widget: DashboardWidget) => void;
@@ -145,6 +149,7 @@ function createEmptyDashboard(): DashboardSpec {
     title: "Aún no hay dashboards",
     subtitle: "Sube un dataset para comenzar.",
     datasetId: "dataset_empty",
+    design: DEFAULT_DASHBOARD_DESIGN,
     globalFilters: [],
     widgets: [],
     createdAt: now,
@@ -451,6 +456,22 @@ export const useDashPilotStore = create<DashPilotState>()(
       updateDashboardDraftSubtitle: (subtitle) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;
         set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardSubtitle(draft, subtitle) });
+      },
+      updateDashboardDraftDesign: (design) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardDesign(draft, design) });
+      },
+      updateDashboardDesign: (design) => {
+        const dashboard = updateDashboardDesign(get().dashboard, design);
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: [...get().versions, dashboard]
+        });
       },
       updateDashboardDraftWidget: (widgetId, changes) => {
         const draft = get().dashboardEditDraft ?? get().dashboard;

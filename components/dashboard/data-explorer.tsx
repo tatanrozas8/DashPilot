@@ -365,7 +365,7 @@ export function DataExplorerPanel() {
               <input className="h-10 rounded-lg border border-[#dfe5f0] px-3 text-sm" placeholder="Buscar dentro de una columna..." value={columnSearch?.query ?? ""} onChange={(event) => { patchExplorer({ columnSearch: { field: columnSearch?.field ?? selectedColumn?.normalizedName ?? allColumns[0] ?? "", query: event.target.value } }); setPage(0); }} />
               <button className="rounded-lg border border-[#dfe5f0] px-3 text-sm font-semibold disabled:opacity-50" disabled={!columnSearch?.query} onClick={() => { patchExplorer({ columnSearch: undefined }); setPage(0); }}>Limpiar columna</button>
             </div>
-            <div className="mt-4 overflow-auto rounded-xl border border-[#edf1fa]">
+            <div className="mt-4 h-[420px] overflow-auto rounded-xl border border-[#edf1fa] lg:h-[520px]">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="sticky top-0 bg-[#fbfcff] text-xs text-[#697597]">
                   <tr>

@@ -59,6 +59,18 @@ describe("copilot service", () => {
     }
   });
 
+  it("applies dashboard design changes from natural language", () => {
+    const ctx = context("haz el dashboard compacto verde con tarjetas bordeadas");
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.[0]?.type).toBe("update_dashboard_design");
+    expect(result.updatedDashboardSpec?.design).toMatchObject({
+      density: "compact",
+      accentColor: "emerald",
+      cardStyle: "bordered"
+    });
+  });
+
   it("adds or focuses a real geography analysis for region prompts", () => {
     const ctx = customContext("pon las regiones", [
       { Pais: "Chile", Ventas: 1200, Fecha: "2024-01-01" },

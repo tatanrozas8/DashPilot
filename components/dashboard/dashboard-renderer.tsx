@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -21,13 +21,13 @@ import { Copy, Eye, Filter, Highlighter, MoreVertical, Pencil, Presentation, Sea
 import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
-import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
-import type { DashboardWidget } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardWidget } from "@/types/dashboard";
 
 function formatValue(value: number, format: unknown) {
   if (format === "currency") return formatCurrency(value);
@@ -36,8 +36,52 @@ function formatValue(value: number, format: unknown) {
   return formatNumber(value);
 }
 
+const DashboardDesignContext = createContext<Required<DashboardDesignSettings>>(normalizeDashboardDesign());
+
+const accentMap: Record<Required<DashboardDesignSettings>["accentColor"], { primary: string; hover: string; soft: string; text: string }> = {
+  indigo: { primary: "#3d35ff", hover: "#3028df", soft: "#f0f1ff", text: "#3d35ff" },
+  emerald: { primary: "#059669", hover: "#047857", soft: "#ecfdf5", text: "#047857" },
+  sky: { primary: "#0284c7", hover: "#0369a1", soft: "#eef8ff", text: "#0369a1" },
+  slate: { primary: "#334155", hover: "#1f2937", soft: "#f1f5f9", text: "#334155" }
+};
+
+const paletteMap: Record<Required<DashboardDesignSettings>["chartPalette"], string[]> = {
+  default: ["#3d35ff", "#16a34a", "#0ea5e9", "#f97316", "#8b5cf6", "#64748b"],
+  business: ["#334155", "#3d35ff", "#0f766e", "#0284c7", "#7c3aed", "#475569"],
+  contrast: ["#111827", "#2563eb", "#dc2626", "#f59e0b", "#059669", "#7c3aed"]
+};
+
+function useDashboardDesign() {
+  return useContext(DashboardDesignContext);
+}
+
+function chartColors(design: Required<DashboardDesignSettings>) {
+  const palette = paletteMap[design.chartPalette];
+  const accent = accentMap[design.accentColor];
+  return {
+    primary: accent.primary,
+    hover: accent.hover,
+    soft: accent.soft,
+    text: accent.text,
+    muted: "#9aa7c7",
+    grid: "#edf1fa",
+    palette
+  };
+}
+
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <section className={cn("soft-card rounded-xl p-5", className)}>{children}</section>;
+  const design = useDashboardDesign();
+  return (
+    <section
+      className={cn(
+        design.cardStyle === "bordered" ? "rounded-xl border border-[#dfe5f0] bg-white shadow-none" : "soft-card rounded-xl",
+        design.density === "compact" ? "p-4" : "p-5",
+        className
+      )}
+    >
+      {children}
+    </section>
+  );
 }
 
 function WidgetHeader({ widget }: { widget: DashboardWidget }) {
@@ -115,6 +159,7 @@ function EmptyWidget({ message }: { message?: string }) {
 
 function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
+  const colors = chartColors(useDashboardDesign());
   const result = widget.query ? executeDashboardQuery(rows, widget.query, viewState)[0]?.value ?? 0 : Number(widget.config.fallbackValue ?? 0);
   const tone = String(widget.config.tone ?? "blue") as "blue" | "violet" | "green" | "sky" | "orange";
   return (
@@ -128,7 +173,7 @@ function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
       <div className="mt-4 h-9">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={[12, 18, 15, 22, 17, 26, 28].map((value, index) => ({ index, value }))}>
-            <Line type="monotone" dataKey="value" stroke={tone === "green" ? "#16a34a" : "#332cff"} strokeWidth={3} dot={false} />
+            <Line type="monotone" dataKey="value" stroke={tone === "green" ? "#16a34a" : colors.primary} strokeWidth={3} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -138,6 +183,7 @@ function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
 
 function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
+  const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
   const comparison = data.map((item) => ({ ...item, previous: Math.round(Number(item.value) * 0.72) }));
 
@@ -149,12 +195,12 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
       ) : (
         <ResponsiveContainer width="100%" height={230}>
           <LineChart data={comparison} margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
-            <CartesianGrid stroke="#edf1fa" vertical={false} />
+            <CartesianGrid stroke={colors.grid} vertical={false} />
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
             <YAxis axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={(value) => formatCurrency(Number(value))} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            <Line type="monotone" dataKey="value" name="Actual" stroke="#3d35ff" strokeWidth={3} dot={{ r: 4 }} />
-            <Line type="monotone" dataKey="previous" name="Comparativo" stroke="#9aa7c7" strokeDasharray="5 5" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="value" name="Actual" stroke={colors.primary} strokeWidth={3} dot={{ r: 4 }} />
+            <Line type="monotone" dataKey="previous" name="Comparativo" stroke={colors.muted} strokeDasharray="5 5" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -164,6 +210,7 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
 
 function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
+  const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
   const compact = Boolean(widget.config.compact);
   return (
@@ -174,11 +221,11 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
       ) : (
         <ResponsiveContainer width="100%" height={compact ? 220 : 230}>
           <BarChart data={data} layout="vertical" margin={{ left: 16, right: 28, top: 4, bottom: 0 }}>
-            <CartesianGrid stroke="#edf1fa" horizontal={false} />
+            <CartesianGrid stroke={colors.grid} horizontal={false} />
             <XAxis type="number" hide />
             <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={82} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            <Bar dataKey="value" radius={[0, 8, 8, 0]} fill="#5a52ff" barSize={compact ? 16 : 24} />
+            <Bar dataKey="value" radius={[0, 8, 8, 0]} fill={colors.primary} barSize={compact ? 16 : 24} />
           </BarChart>
         </ResponsiveContainer>
       )}
@@ -188,8 +235,8 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
 
 function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
+  const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
-  const colors = ["#3d35ff", "#16a34a", "#0ea5e9", "#f97316", "#8b5cf6", "#64748b"];
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
@@ -199,7 +246,7 @@ function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
         <ResponsiveContainer width="100%" height={230}>
           <PieChart>
             <Pie data={data} dataKey="value" nameKey="label" innerRadius={58} outerRadius={92} paddingAngle={2}>
-              {data.map((item, index) => <Cell key={String(item.label ?? index)} fill={colors[index % colors.length]} />)}
+              {data.map((item, index) => <Cell key={String(item.label ?? index)} fill={colors.palette[index % colors.palette.length]} />)}
             </Pie>
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
           </PieChart>
@@ -211,6 +258,7 @@ function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
 
 function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
+  const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState).map((row, index) => ({ ...row, index: index + 1 })) : [];
   return (
     <Card className="min-h-[310px]">
@@ -220,11 +268,11 @@ function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRo
       ) : (
         <ResponsiveContainer width="100%" height={230}>
           <ScatterChart margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
-            <CartesianGrid stroke="#edf1fa" />
+            <CartesianGrid stroke={colors.grid} />
             <XAxis dataKey="index" tick={{ fill: "#697597", fontSize: 12 }} />
             <YAxis dataKey="value" tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={(value) => formatCurrency(Number(value))} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            <Scatter data={data} fill="#3d35ff" />
+            <Scatter data={data} fill={colors.primary} />
           </ScatterChart>
         </ResponsiveContainer>
       )}
@@ -298,27 +346,30 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
   const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
   const highlightedWidgetId = useDashPilotStore((state) => state.viewState.highlightedWidgetId);
   const renderedDashboard = isDashboardEditing && dashboardEditDraft && !slideWidgetIds ? dashboardEditDraft : dashboard;
+  const design = normalizeDashboardDesign(renderedDashboard.design);
   const widgets = slideWidgetIds
     ? renderedDashboard.widgets.filter((widget) => slideWidgetIds.includes(widget.id))
     : renderedDashboard.widgets.filter((widget) => widget.config.hidden !== true);
 
   return (
-    <div className="grid grid-cols-12 gap-4">
-      {widgets.map((widget) => {
-        const width = widget.position.w >= 12 ? "col-span-12" : widget.position.w >= 8 ? "col-span-12 lg:col-span-8" : widget.position.w >= 6 ? "col-span-12 lg:col-span-6" : "col-span-12 sm:col-span-6 xl:col-span-3";
-        return (
-          <div key={widget.id} className={cn(width, highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]")}>
-            {widget.type === "kpi_card" && <KpiWidget widget={widget} rows={rows} />}
-            {widget.type === "line_chart" && <LineWidget widget={widget} rows={rows} />}
-            {widget.type === "bar_chart" && <BarWidget widget={widget} rows={rows} />}
-            {widget.type === "donut_chart" && <DonutWidget widget={widget} rows={rows} />}
-            {widget.type === "scatter_plot" && <ScatterWidget widget={widget} rows={rows} />}
-            {widget.type === "table" && <TableWidget widget={widget} rows={rows} />}
-            {widget.type === "insight_text" && <InsightWidget widget={widget} />}
-          </div>
-        );
-      })}
-    </div>
+    <DashboardDesignContext.Provider value={design}>
+      <div className={cn("grid grid-cols-12", design.density === "compact" ? "gap-3" : "gap-4")}>
+        {widgets.map((widget) => {
+          const width = widget.position.w >= 12 ? "col-span-12" : widget.position.w >= 8 ? "col-span-12 lg:col-span-8" : widget.position.w >= 6 ? "col-span-12 lg:col-span-6" : "col-span-12 sm:col-span-6 xl:col-span-3";
+          return (
+            <div key={widget.id} className={cn(width, highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]")}>
+              {widget.type === "kpi_card" && <KpiWidget widget={widget} rows={rows} />}
+              {widget.type === "line_chart" && <LineWidget widget={widget} rows={rows} />}
+              {widget.type === "bar_chart" && <BarWidget widget={widget} rows={rows} />}
+              {widget.type === "donut_chart" && <DonutWidget widget={widget} rows={rows} />}
+              {widget.type === "scatter_plot" && <ScatterWidget widget={widget} rows={rows} />}
+              {widget.type === "table" && <TableWidget widget={widget} rows={rows} />}
+              {widget.type === "insight_text" && <InsightWidget widget={widget} />}
+            </div>
+          );
+        })}
+      </div>
+    </DashboardDesignContext.Provider>
   );
 }
 

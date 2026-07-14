@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardSubtitle, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardDesign, updateDashboardSubtitle, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { demoRows } from "@/lib/data/demo-dataset";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
@@ -24,6 +24,19 @@ describe("dashboard spec editing", () => {
     expect(widget?.query?.metric?.aggregation).toBe("avg");
     expect(widget?.query?.groupBy).toEqual(["Region"]);
     expect(widget?.query?.limit).toBe(3);
+  });
+
+  it("updates dashboard design settings without touching widgets", () => {
+    const spec = generateDashboardSpec(profileDataset(demoRows), demoRows);
+    const updated = updateDashboardDesign(spec, { density: "compact", accentColor: "emerald", cardStyle: "bordered", chartPalette: "business" });
+
+    expect(updated.design).toEqual({
+      density: "compact",
+      accentColor: "emerald",
+      cardStyle: "bordered",
+      chartPalette: "business"
+    });
+    expect(updated.widgets).toEqual(spec.widgets);
   });
 
   it("duplicates, hides and removes widgets through DashboardSpec", () => {

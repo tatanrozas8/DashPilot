@@ -7,6 +7,12 @@ import { dashboardFilterSchema, dashboardQuerySchema } from "@/lib/validation/sc
 
 const widgetTypeSchema = z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]);
 const aggregationSchema = z.enum(["sum", "avg", "count", "count_distinct", "min", "max"]);
+const dashboardDesignSchema = z.object({
+  density: z.enum(["compact", "comfortable"]).optional(),
+  accentColor: z.enum(["indigo", "emerald", "sky", "slate"]).optional(),
+  cardStyle: z.enum(["soft", "bordered"]).optional(),
+  chartPalette: z.enum(["default", "business", "contrast"]).optional()
+});
 
 const dashboardWidgetSchema = z.object({
   id: z.string().min(1),
@@ -40,6 +46,7 @@ const widgetChangesSchema = z.object({
 export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_widget"), widget: dashboardWidgetSchema }),
   z.object({ type: z.literal("update_dashboard_title"), title: z.string().min(1).max(120) }),
+  z.object({ type: z.literal("update_dashboard_design"), design: dashboardDesignSchema }),
   z.object({ type: z.literal("update_widget_title"), widgetId: z.string(), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_widget"), widgetId: z.string(), changes: widgetChangesSchema }),
   z.object({ type: z.literal("remove_widget"), widgetId: z.string() }),

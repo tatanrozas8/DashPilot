@@ -17,8 +17,21 @@ export interface CopilotContext {
     displayName: string;
     inferredType: string;
     semanticType: string;
+    nullCount: number;
+    nullPercentage: number;
+    uniqueCount: number;
+    min?: number | string;
+    max?: number | string;
+    statistics?: Record<string, unknown>;
     sampleValues: unknown[];
   }>;
+  dataCoverage: {
+    rowCount: number;
+    columnCount: number;
+    profiledRows: number;
+    sampledRows: number;
+    strategy: "full_profile_plus_samples";
+  };
   availableMetrics: string[];
   availableDimensions: string[];
   dateColumns: string[];
@@ -32,11 +45,13 @@ export interface CopilotContext {
     config?: Record<string, unknown>;
   }>;
   dashboardSpec: DashboardSpec;
+  dashboardDesign: DashboardSpec["design"];
   viewState: DashboardViewState;
   presentationSpec?: PresentationSpec;
   recentMessages: ChatMessage[];
   insights: string[];
   sampleRows: DataRow[];
+  availableActions: string[];
 }
 
 export interface BuildCopilotContextInput {
@@ -66,6 +81,12 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     displayName: column.displayName,
     inferredType: column.inferredType,
     semanticType: column.semanticType,
+    nullCount: column.nullCount,
+    nullPercentage: column.nullPercentage,
+    uniqueCount: column.uniqueCount,
+    min: column.min,
+    max: column.max,
+    statistics: column.statistics,
     sampleValues: column.sampleValues.slice(0, 5)
   }));
   const columnNames = columns.map((column) => column.normalizedName);
@@ -74,6 +95,13 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     datasetProfile: input.datasetProfile,
     semanticModel,
     columns,
+    dataCoverage: {
+      rowCount: input.rows.length,
+      columnCount: input.datasetProfile.columnCount,
+      profiledRows: input.datasetProfile.rowCount,
+      sampledRows: Math.min(input.rows.length, MAX_SAMPLE_ROWS),
+      strategy: "full_profile_plus_samples"
+    },
     availableMetrics: [
       ...new Set([
         ...input.datasetProfile.detectedMetricColumns,
@@ -104,6 +132,7 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
       config: widget.config
     })),
     dashboardSpec: input.dashboardSpec,
+    dashboardDesign: input.dashboardSpec.design,
     viewState: input.viewState,
     presentationSpec: input.presentationSpec,
     recentMessages: (input.messages ?? []).slice(-MAX_MESSAGES),
@@ -116,7 +145,18 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
           return Array.isArray(bullets) ? bullets.filter((item): item is string => typeof item === "string") : [];
         })
     ].filter((item): item is string => Boolean(item)),
-    sampleRows: sampleRows(input.rows, columnNames)
+    sampleRows: sampleRows(input.rows, columnNames),
+    availableActions: [
+      "update_dashboard_design",
+      "add_widget",
+      "update_widget",
+      "add_or_update_filter",
+      "show_data_explorer",
+      "select_visible_columns",
+      "sort_table",
+      "generate_insight",
+      "generate_presentation"
+    ]
   };
 }
 
@@ -136,6 +176,7 @@ export function toProviderContext(context: CopilotContext) {
       qualityScore: context.datasetProfile.qualityScore
     },
     semanticModel: context.semanticModel,
+    dataCoverage: context.dataCoverage,
     availableMetrics: context.availableMetrics,
     availableDimensions: context.availableDimensions,
     dateColumns: context.dateColumns,
@@ -147,10 +188,12 @@ export function toProviderContext(context: CopilotContext) {
       title: context.dashboardSpec.title,
       subtitle: context.dashboardSpec.subtitle,
       businessDomain: context.dashboardSpec.businessDomain,
+      design: context.dashboardDesign,
       widgets: context.widgets,
       globalFilters: context.dashboardSpec.globalFilters
     },
     viewState: context.viewState,
+    availableActions: context.availableActions,
     presentation: context.presentationSpec
       ? {
           id: context.presentationSpec.id,

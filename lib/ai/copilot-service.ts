@@ -263,6 +263,32 @@ function filterValueFromPrompt(prompt: string) {
   return filterValue(prompt);
 }
 
+function filterValuesFromPrompt(prompt: string, context: CopilotRequestContext) {
+  const explicitColumn = resolveColumn(prompt, availableContext(context)).matchedColumn;
+  const text = normalize(prompt);
+  const incompleteFieldOnlyFilter = /\bfiltro\b/.test(text) && /\bpor\s+(region|pais|canal|cliente|producto|categoria|fecha)\b/.test(text) && !/(=|:|\bsolo\b|\bfiltra\b)/.test(text);
+  if (incompleteFieldOnlyFilter) return { column: explicitColumn, values: [] as string[] };
+
+  const keywordMatch = prompt.match(/(?:muestrame\s+solo|mostrar\s+solo|solo|filtra|filtrar|filtro)\s+(.+)$/i)?.[1];
+  const afterKeyword = keywordMatch
+    ?.replace(/^(?:por\s+)?(?:region|zona|territorio|cliente|cliente_id|vendedor|producto|sku|sku_id|categoria|canal|estado|pais|ciudad|comuna)\s*(?:=|:|a|en|por)?\s*/i, "")
+    .trim();
+  const rawValues = (afterKeyword ?? "")
+    .replace(/[.?!]$/g, "")
+    .split(/\s*,\s*|\s+y\s+|\s+e\s+/i)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const values = rawValues.length > 1 ? rawValues : [filterValueFromPrompt(prompt)].filter(Boolean);
+  const bySample = context.datasetProfile.columns.find((column) =>
+    values.length > 0 && values.every((value) => column.sampleValues.some((sample) => {
+      const sampleText = normalize(String(sample ?? ""));
+      const valueText = normalize(value);
+      return sampleText === valueText || sampleText.includes(valueText);
+    }))
+  );
+  return { column: bySample ?? explicitColumn ?? (values[0] ? columnBySampleValue(values[0], context) : undefined), values };
+}
+
 function requestedColumns(prompt: string, context: CopilotRequestContext) {
   const text = normalize(prompt);
   if ((text.includes("todas") || text.includes("todos")) && (text.includes("columna") || text.includes("campos"))) {
@@ -289,6 +315,14 @@ function requestedColumns(prompt: string, context: CopilotRequestContext) {
     .filter(([, words]) => words.some((word) => text.includes(word)))
     .map(([intent]) => resolveColumn(prompt, availableContext(context), intent).matchedColumn?.normalizedName)
     .filter((field): field is string => Boolean(field));
+}
+
+function isColumnSelectionPrompt(prompt: string, context: CopilotRequestContext) {
+  const text = normalize(prompt);
+  if (text.includes("columna") || text.includes("campos")) return true;
+  if (!/\b(muestrame|mostrar|ver|quiero ver)\b/.test(text)) return false;
+  if (text.includes("grafico") || text.includes("filtro") || text.includes("filtra")) return false;
+  return requestedColumns(prompt, context).length >= 2;
 }
 
 function availableContext(context: CopilotRequestContext) {
@@ -409,7 +443,7 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     }
   }
 
-  if ((prompt.includes("muestra") || prompt.includes("mostrar") || prompt.includes("solo") || prompt.includes("ver")) && (prompt.includes("columna") || prompt.includes("campos"))) {
+  if ((prompt.includes("muestra") || prompt.includes("mostrar") || prompt.includes("solo") || prompt.includes("ver") || prompt.includes("muestrame")) && isColumnSelectionPrompt(context.prompt, context)) {
     const columns = requestedColumns(context.prompt, context);
     if (!columns.length) return { reply: "No encontre las columnas solicitadas. Puedo mostrar columnas por nombre, por ejemplo: muestra columnas Pais, Canal y Ventas.", envelopes: [] };
     const action: DashboardAction = { type: "select_visible_columns", columns };
@@ -558,15 +592,13 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
 
   if ((prompt.includes("filtra") || prompt.includes("filtro") || prompt.includes("solo ")) && context.datasetProfile.columns.length) {
     const resolved = resolveColumn(context.prompt, availableContext(context));
-    const value = filterValueFromPrompt(context.prompt);
-    const valueColumn = value ? columnBySampleValue(value, context) : undefined;
-    const matchedColumn = valueColumn ?? resolved.matchedColumn;
-    if (!matchedColumn || !value) {
+    const { column: matchedColumn, values } = filterValuesFromPrompt(context.prompt, context);
+    if (!matchedColumn || !values.length) {
       return { reply: "Puedo aplicar filtros, pero necesito una columna y un valor claros. Por ejemplo: filtra Pais Chile.", envelopes: [] };
     }
-    const action: DashboardAction = { type: "add_or_update_filter", filter: { field: matchedColumn.normalizedName, operator: "in", value: [value] } };
-    const reason = resolved.matchedColumn ? resolved.reason : `Detecte "${value}" en muestras reales de "${matchedColumn.displayName}".`;
-    return { reply: `Aplique filtro sobre "${matchedColumn.originalName}" con valor "${value}".`, envelopes: [actionEnvelope(action, reason, resolved.confidence || 0.68)] };
+    const action: DashboardAction = { type: "add_or_update_filter", filter: { field: matchedColumn.normalizedName, operator: "in", value: values } };
+    const reason = resolved.matchedColumn ? resolved.reason : `Detecte valores reales en muestras de "${matchedColumn.displayName}".`;
+    return { reply: `Aplique filtro sobre "${matchedColumn.originalName}" con valores ${values.join(", ")}.`, envelopes: [actionEnvelope(action, reason, resolved.confidence || 0.68)] };
   }
 
   if (prompt.includes("region") || prompt.includes("regiones") || prompt.includes("zona") || prompt.includes("pais") || prompt.includes("ciudad") || prompt.includes("comuna")) {
@@ -750,7 +782,7 @@ function previousInstructionReplacement(input: CopilotRequestContext, previousIn
   });
 
   return {
-    reply: `Listo. Reemplace el grafico seleccionado usando la instruccion anterior: ${previousInstruction}`,
+    reply: `Listo. Use tu ultima instruccion accionable y reemplace el grafico seleccionado. Instruccion usada: ${previousInstruction}`,
     envelopes: actions.map((action) => actionEnvelope(action, "Reemplazo solicitado usando la ultima instruccion accionable.", analyticalPlan.confidence)),
     warnings: analyticalPlan.warnings ?? []
   };

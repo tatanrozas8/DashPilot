@@ -117,4 +117,38 @@ describe("copilot agent loop", () => {
 
     expect(result.actions?.[0]?.type).toBe("undo_last_action");
   });
+
+  it("filters multiple real values from a natural language solo request", () => {
+    const result = createMockCopilotResponse(selectedContext("Muestrame solo RM y Biobio."));
+
+    expect(result.actions?.[0]?.type).toBe("add_or_update_filter");
+    expect(result.updatedViewState?.filters).toEqual([{ field: "region", operator: "in", value: ["RM", "Biobio"] }]);
+  });
+
+  it("selects visible table columns without requiring the word columnas", () => {
+    const result = createMockCopilotResponse(selectedContext("Quiero ver fecha, region, canal y ventas."));
+
+    expect(result.actions?.[0]?.type).toBe("select_visible_columns");
+    expect(result.updatedViewState?.dataExplorer?.isOpen).toBe(true);
+    expect(result.updatedViewState?.dataExplorer?.visibleColumns).toEqual(["fecha", "region", "canal", "ventas"]);
+  });
+
+  it("does not invent a filter value when the user only names the filter field", () => {
+    const result = createMockCopilotResponse(selectedContext("Agrega un filtro por region."));
+
+    expect(result.actions ?? []).toHaveLength(0);
+    expect(result.updatedViewState?.filters).toEqual([]);
+    expect(result.reply).toContain("necesito una columna y un valor");
+  });
+
+  it("creates a new sales by channel widget at the end of the dashboard", () => {
+    const ctx = selectedContext("Crea un nuevo grafico de ventas por canal.");
+    const result = createMockCopilotResponse(ctx);
+    const added = result.updatedDashboardSpec?.widgets.at(-1);
+
+    expect(result.actions?.[0]?.type).toBe("add_widget");
+    expect(result.updatedDashboardSpec?.widgets).toHaveLength(ctx.dashboardSpec.widgets.length + 1);
+    expect(added?.query?.groupBy).toEqual(["canal"]);
+    expect(added?.query?.metric?.field).toBe("ventas");
+  });
 });

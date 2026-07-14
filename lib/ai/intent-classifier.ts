@@ -113,7 +113,7 @@ export function classifyIntent(message: string): IntentClassification {
     intents.push("show_data_explorer");
     actionTypes.push("show_data_explorer");
   }
-  if (includesAny(text, ["columnas visibles", "muestra solo las columnas", "selecciona columnas"])) {
+  if (includesAny(text, ["columnas visibles", "muestra solo las columnas", "selecciona columnas"]) || /\b(muestrame|mostrar|ver)\b/.test(text) && text.split(/\s+y\s+|,/).length >= 3) {
     intents.push("select_columns");
     actionTypes.push("select_visible_columns");
   }

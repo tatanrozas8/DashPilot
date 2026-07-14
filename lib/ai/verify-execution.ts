@@ -81,5 +81,35 @@ export function verifyExecution(input: ExecutionVerificationInput): ExecutionVer
     errors.push("Las columnas visibles finales no coinciden con la accion.");
   }
 
+  if (input.action.type === "add_filter" || input.action.type === "add_or_update_filter" || input.action.type === "update_filter") {
+    const expectedFilter = input.action.filter;
+    if (!input.afterViewState.filters.some((filter) => sameJson(filter, expectedFilter))) {
+      errors.push("El filtro final no coincide con la accion solicitada.");
+    }
+  }
+
+  if (input.action.type === "remove_filter") {
+    const removedField = input.action.field;
+    if (input.afterViewState.filters.some((filter) => filter.field === removedField)) {
+      errors.push("El filtro solicitado sigue activo despues de removerlo.");
+    }
+  }
+
+  if (input.action.type === "clear_filters" && input.afterViewState.filters.length > 0) {
+    errors.push("La accion de limpiar filtros dejo filtros activos.");
+  }
+
+  if (input.action.type === "show_data_explorer" && input.afterViewState.dataExplorer?.isOpen !== true) {
+    errors.push("La vista Datos no quedo abierta.");
+  }
+
+  if (input.action.type === "search_table" && input.afterViewState.dataExplorer?.search !== input.action.query) {
+    errors.push("La busqueda final no coincide con la accion.");
+  }
+
+  if (input.action.type === "sort_table" && !sameJson(input.afterViewState.dataExplorer?.sort, { field: input.action.field, direction: input.action.direction })) {
+    errors.push("El orden final de la tabla no coincide con la accion.");
+  }
+
   return { success: errors.length === 0, errors, warnings };
 }

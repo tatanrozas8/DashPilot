@@ -53,6 +53,12 @@ const paletteMap: Record<Required<DashboardDesignSettings>["chartPalette"], stri
 };
 const EMPTY_CAPABILITIES: string[] = [];
 
+function copilotActionLabel(type: string) {
+  if (type === "add_widget") return "create_widget";
+  if (type === "add_or_update_filter") return "add_filter";
+  return type;
+}
+
 function useDashboardDesign() {
   return useContext(DashboardDesignContext);
 }
@@ -711,6 +717,11 @@ export function CopilotPanel() {
         </div>
       )}
       <div className="shrink-0 border-b border-[#edf1fa] px-5 py-3">
+        {undoCount > 0 && (
+          <button type="button" onClick={undoCopilotChange} disabled={isCopilotThinking} className="mb-3 inline-flex items-center gap-2 text-xs font-bold text-[#3d35ff] disabled:opacity-50">
+            <RotateCcw className="size-3.5" /> Deshacer ultimo cambio
+          </button>
+        )}
         <label className="block text-xs font-bold text-[#697597]">
           Modo actual
           <select
@@ -757,6 +768,20 @@ export function CopilotPanel() {
             <RotateCw className="size-3.5" /> Reemplazar
           </button>
         </div>
+        {effectiveIntent === "create_chart" && (
+          <div className="mt-3 rounded-lg border border-[#d9dcff] bg-[#f7f6ff] p-3">
+            <p className="text-[11px] font-bold uppercase text-[#697597]">Accion seleccionada</p>
+            <div className="mt-2 flex items-center gap-3">
+              <span className="grid size-9 place-items-center rounded-lg bg-[#ebe9ff] text-[#3d35ff]">
+                <Sparkles className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-[#3d35ff]">Crear nuevo widget</p>
+                <p className="text-xs font-semibold leading-5 text-[#697597]">El Copiloto agregara un nuevo grafico al dashboard.</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div className="scrollbar-soft min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
         {messages.map((message) => (
@@ -765,8 +790,11 @@ export function CopilotPanel() {
             {message.content}
             {message.role === "assistant" && message.structuredAction && (
               <p className="mt-3 inline-flex rounded-full border border-[#dfe5fb] bg-[#f6f7ff] px-3 py-1 text-xs font-bold text-[#3d35ff]">
-                Accion aplicada: {message.structuredAction.type}
+                Accion aplicada: {copilotActionLabel(message.structuredAction.type)}
               </p>
+            )}
+            {message.role === "assistant" && /ultima instruccion accionable|instruccion anterior/i.test(message.content) && (
+              <p className="mt-3 text-xs font-semibold text-[#697597]">Memoria utilizada: ultima instruccion accionable</p>
             )}
           </div>
         ))}

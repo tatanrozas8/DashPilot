@@ -24,8 +24,13 @@ export interface DatasetColumnProfile {
   originalName: string;
   normalizedName: string;
   displayName: string;
+  businessName?: string;
+  description?: string;
+  synonyms?: string[];
+  isHidden?: boolean;
   inferredType: InferredColumnType;
   semanticType: SemanticColumnType;
+  userSemanticType?: SemanticColumnType;
   nullCount: number;
   nullPercentage: number;
   uniqueCount: number;

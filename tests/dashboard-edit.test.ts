@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardDesign, updateDashboardSubtitle, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { moveDashboardWidget, reorderDashboardWidgets, duplicateDashboardWidget, removeDashboardWidget, setDashboardWidgetHidden, updateDashboardDesign, updateDashboardSubtitle, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { demoRows } from "@/lib/data/demo-dataset";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
@@ -52,6 +52,18 @@ describe("dashboard spec editing", () => {
     expect(removed.widgets.some((widget) => widget.id === "sales_by_region")).toBe(false);
   });
 
+  it("reorders widgets and persists packed grid positions", () => {
+    const spec = generateDashboardSpec(profileDataset(demoRows), demoRows);
+    const moved = moveDashboardWidget(spec, "executive_summary", "kpi_sales");
+    const reordered = reorderDashboardWidgets(spec, ["sales_detail", "sales_by_month"]);
+
+    expect(moved.widgets[0].id).toBe("executive_summary");
+    expect(moved.widgets[0].position).toMatchObject({ x: 0, y: 0 });
+    expect(reordered.widgets[0].id).toBe("sales_detail");
+    expect(reordered.widgets[1].id).toBe("sales_by_month");
+    expect(reordered.widgets.every((widget) => widget.position.x + widget.position.w <= 12)).toBe(true);
+  });
+
   it("applies live widget menu actions through the app store", () => {
     useDashPilotStore.getState().loadDemo();
 
@@ -64,5 +76,24 @@ describe("dashboard spec editing", () => {
     expect(state.dashboard.widgets.find((widget) => widget.id === "sales_by_region")?.config.hidden).toBe(true);
     expect(state.viewState.dataExplorer?.isOpen).toBe(true);
     expect(state.viewState.dataExplorer?.visibleColumns).toContain("Region");
+  });
+
+  it("stores reusable themes and editable data dictionary metadata", () => {
+    useDashPilotStore.getState().loadDemo();
+    useDashPilotStore.getState().updateDashboardDesign({ density: "compact", accentColor: "emerald" });
+    const theme = useDashPilotStore.getState().saveDashboardTheme("Directorio");
+    useDashPilotStore.getState().updateColumnDictionary("Ventas", {
+      businessName: "Ingreso neto",
+      description: "Monto final despues de descuentos",
+      userSemanticType: "metric",
+      synonyms: ["revenue", "ingresos"]
+    });
+
+    expect(theme?.name).toBe("Directorio");
+    expect(useDashPilotStore.getState().savedThemes[0].design.accentColor).toBe("emerald");
+    const column = useDashPilotStore.getState().profile.columns.find((item) => item.normalizedName === "Ventas");
+    expect(column?.displayName).toBe("Ingreso neto");
+    expect(column?.description).toContain("descuentos");
+    expect(column?.synonyms).toContain("revenue");
   });
 });

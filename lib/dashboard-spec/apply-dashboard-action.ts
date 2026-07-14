@@ -1,6 +1,6 @@
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import { copilotActionSchema } from "@/lib/validation/copilot-actions";
-import { duplicateDashboardWidget, updateDashboardDesign, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { duplicateDashboardWidget, reorderDashboardWidgets, updateDashboardDesign, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 
 export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardViewState, action: DashboardAction): { spec: DashboardSpec; viewState: DashboardViewState; message: string } {
   const parsed = copilotActionSchema.safeParse(action);
@@ -120,13 +120,8 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
   }
 
   if (action.type === "reorder_widgets") {
-    const order = new Map(action.widgetIds.map((widgetId, index) => [widgetId, index]));
     return {
-      spec: {
-        ...spec,
-        widgets: [...spec.widgets].sort((left, right) => (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)),
-        updatedAt: new Date().toISOString()
-      },
+      spec: reorderDashboardWidgets(spec, action.widgetIds),
       viewState,
       message: "Reordene los widgets segun la prioridad solicitada."
     };

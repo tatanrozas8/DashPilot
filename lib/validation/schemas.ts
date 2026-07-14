@@ -6,8 +6,13 @@ export const datasetColumnProfileSchema = z.object({
   originalName: z.string(),
   normalizedName: z.string(),
   displayName: z.string(),
+  businessName: z.string().optional(),
+  description: z.string().optional(),
+  synonyms: z.array(z.string()).optional(),
+  isHidden: z.boolean().optional(),
   inferredType: z.enum(["string", "number", "date", "boolean", "currency", "percentage", "geography", "unknown"]),
   semanticType: z.enum(["metric", "dimension", "time", "geo", "identifier", "category", "measure", "unknown"]),
+  userSemanticType: z.enum(["metric", "dimension", "time", "geo", "identifier", "category", "measure", "unknown"]).optional(),
   nullCount: z.number(),
   nullPercentage: z.number(),
   uniqueCount: z.number(),
@@ -62,6 +67,12 @@ export const dashboardSpecSchema = z.object({
   subtitle: z.string().optional(),
   businessDomain: z.string().optional(),
   datasetId: z.string(),
+  design: z.object({
+    density: z.enum(["compact", "comfortable"]).optional(),
+    accentColor: z.enum(["indigo", "emerald", "sky", "slate"]).optional(),
+    cardStyle: z.enum(["soft", "bordered"]).optional(),
+    chartPalette: z.enum(["default", "business", "contrast"]).optional()
+  }).optional(),
   globalFilters: z.array(z.object({
     id: z.string(),
     field: z.string(),

@@ -23,6 +23,41 @@ function nextCopyId(widgets: DashboardWidget[], widgetId: string) {
   return next;
 }
 
+function orderedWidgets(spec: DashboardSpec, widgetIds: string[]) {
+  const requested = new Map(widgetIds.map((widgetId, index) => [widgetId, index]));
+  return [...spec.widgets].sort((left, right) => {
+    const leftOrder = requested.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = requested.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return spec.widgets.indexOf(left) - spec.widgets.indexOf(right);
+  });
+}
+
+export function packDashboardWidgets(widgets: DashboardWidget[]): DashboardWidget[] {
+  let x = 0;
+  let y = 0;
+  let rowHeight = 1;
+
+  return widgets.map((widget) => {
+    const width = Math.max(1, Math.min(12, widget.position.w));
+    const height = Math.max(1, widget.position.h);
+    if (x > 0 && x + width > 12) {
+      x = 0;
+      y += rowHeight;
+      rowHeight = 1;
+    }
+    const packed = { ...widget, position: { ...widget.position, x, y, w: width, h: height } };
+    x += width;
+    rowHeight = Math.max(rowHeight, height);
+    if (x >= 12) {
+      x = 0;
+      y += rowHeight;
+      rowHeight = 1;
+    }
+    return packed;
+  });
+}
+
 export function compatibleWidgetTypes(widget: DashboardWidget): WidgetType[] {
   return chartTypes.includes(widget.type) ? chartTypes : [widget.type];
 }
@@ -48,6 +83,29 @@ export function updateDashboardDesign(spec: DashboardSpec, design: DashboardDesi
     ...spec,
     design: normalizeDashboardDesign({ ...spec.design, ...design })
   });
+}
+
+export function reorderDashboardWidgets(spec: DashboardSpec, widgetIds: string[]): DashboardSpec {
+  const existingIds = new Set(spec.widgets.map((widget) => widget.id));
+  const requested = widgetIds.filter((widgetId) => existingIds.has(widgetId));
+  if (!requested.length) return spec;
+  const missing = spec.widgets.map((widget) => widget.id).filter((widgetId) => !requested.includes(widgetId));
+  return touch({
+    ...spec,
+    widgets: packDashboardWidgets(orderedWidgets(spec, [...requested, ...missing]))
+  });
+}
+
+export function moveDashboardWidget(spec: DashboardSpec, sourceWidgetId: string, targetWidgetId: string): DashboardSpec {
+  if (sourceWidgetId === targetWidgetId) return spec;
+  const ids = spec.widgets.map((widget) => widget.id);
+  const sourceIndex = ids.indexOf(sourceWidgetId);
+  const targetIndex = ids.indexOf(targetWidgetId);
+  if (sourceIndex < 0 || targetIndex < 0) return spec;
+  const next = [...ids];
+  const [source] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, source);
+  return reorderDashboardWidgets(spec, next);
 }
 
 export function updateDashboardWidget(spec: DashboardSpec, widgetId: string, changes: Partial<DashboardWidget>): DashboardSpec {

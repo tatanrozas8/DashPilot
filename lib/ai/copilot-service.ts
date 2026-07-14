@@ -26,6 +26,7 @@ export interface CopilotResult {
   action?: DashboardAction;
   actions?: DashboardAction[];
   actionEnvelopes?: CopilotActionEnvelope[];
+  pendingConfirmation?: CopilotActionEnvelope;
   warnings?: string[];
   rejectedActionReason?: string;
   updatedDashboardSpec?: DashboardSpec;
@@ -539,16 +540,18 @@ function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotA
   let nextPresentation = input.presentationSpec;
   const appliedActions: DashboardAction[] = [];
   const appliedEnvelopes: CopilotActionEnvelope[] = [];
+  let pendingConfirmation: CopilotActionEnvelope | undefined;
   const messages: string[] = [];
 
   for (const envelope of envelopes) {
-    if (envelope.requiresConfirmation) {
-      warnings.push(`La accion ${envelope.type} requiere confirmacion.`);
-      continue;
-    }
     const validation = validateCopilotAction(envelope.action, { datasetProfile: input.datasetProfile, semanticModel: input.semanticModel, dashboardSpec: nextDashboard, viewState: nextViewState });
     if (!validation.success) {
       warnings.push(validation.error);
+      continue;
+    }
+    if (envelope.requiresConfirmation) {
+      pendingConfirmation = { ...envelope, action: validation.action };
+      messages.push(`La accion ${envelope.type} requiere confirmacion antes de aplicarse.`);
       continue;
     }
     if (validation.action.type === "generate_presentation") {
@@ -570,7 +573,8 @@ function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotA
     reply: [baseReply, ...messages].filter(Boolean).join(" "),
     action: appliedActions[0],
     actions: appliedActions,
-    actionEnvelopes: appliedEnvelopes,
+    actionEnvelopes: pendingConfirmation ? [...appliedEnvelopes, pendingConfirmation] : appliedEnvelopes,
+    pendingConfirmation,
     warnings,
     rejectedActionReason: warnings[0],
     updatedDashboardSpec: nextDashboard,

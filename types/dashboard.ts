@@ -32,6 +32,15 @@ export interface DashboardDesignSettings {
   chartPalette?: "default" | "business" | "contrast";
 }
 
+export interface SavedDashboardTheme {
+  id: string;
+  name: string;
+  scope: "user" | "team";
+  design: Required<DashboardDesignSettings>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DashboardWidget {
   id: string;
   type: WidgetType;

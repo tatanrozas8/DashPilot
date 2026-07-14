@@ -107,6 +107,18 @@ describe("copilot service", () => {
     expect(result.reply).toContain("No encontre");
   });
 
+  it("keeps derived margin metrics pending until explicit confirmation", () => {
+    const ctx = customContext("analiza margen", [
+      { Pais: "Chile", Ventas: 1200, Costo: 800, Fecha: "2024-01-01" },
+      { Pais: "Peru", Ventas: 900, Costo: 700, Fecha: "2024-02-01" }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.pendingConfirmation?.action.type).toBe("create_calculated_metric");
+    expect(result.actions ?? []).toHaveLength(0);
+    expect(result.updatedDashboardSpec?.executiveSummary).not.toContain("Margen calculado");
+  });
+
   it("applies filters using resolved columns and literal values", () => {
     const ctx = customContext("filtra Pais Chile", [
       { Pais: "Chile", Ventas: 1200, Fecha: "2024-01-01" },

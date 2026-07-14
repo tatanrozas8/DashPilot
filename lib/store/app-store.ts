@@ -3,15 +3,18 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMessage } from "@/types/ai";
-import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
-import type { DashboardDesignSettings, DashboardSpec, DashboardViewState, DashboardWidget } from "@/types/dashboard";
+import type { DataRow, DatasetColumnProfile, DatasetProfile, FileParseResult } from "@/types/dataset";
+import type { DashboardDesignSettings, DashboardSpec, DashboardViewState, DashboardWidget, SavedDashboardTheme } from "@/types/dashboard";
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
+import type { CopilotActionEnvelope } from "@/lib/ai/actions";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { requestCopilotResponse } from "@/lib/ai/copilot-client";
 import { assistantMessage } from "@/lib/ai/copilot-service";
+import { applyDashboardAction } from "@/lib/dashboard-spec/apply-dashboard-action";
 import {
   duplicateDashboardWidget as duplicateDashboardWidgetSpec,
   DEFAULT_DASHBOARD_DESIGN,
+  moveDashboardWidget,
   removeDashboardWidget as removeDashboardWidgetSpec,
   setDashboardWidgetHidden as setDashboardWidgetHiddenSpec,
   updateDashboardDesign,
@@ -42,6 +45,23 @@ export interface ShareSettings {
   access: "public" | "private" | "password";
   expiresAt: string;
 }
+
+interface DashboardSnapshot {
+  dashboard: DashboardSpec;
+  viewState: DashboardViewState;
+  presentation: PresentationSpec;
+  reason: string;
+  createdAt: string;
+}
+
+interface PendingCopilotConfirmation {
+  id: string;
+  envelope: CopilotActionEnvelope;
+  prompt: string;
+  createdAt: string;
+}
+
+type ColumnDictionaryChanges = Partial<Pick<DatasetColumnProfile, "businessName" | "description" | "displayName" | "synonyms" | "isHidden" | "userSemanticType" | "semanticType">>;
 
 export interface ProjectSummary {
   id: string;
@@ -76,10 +96,14 @@ interface DashPilotState {
   messages: ChatMessage[];
   chatMessages: ChatMessage[];
   versions: DashboardSpec[];
+  copilotUndoStack: DashboardSnapshot[];
+  copilotRedoStack: DashboardSnapshot[];
+  pendingCopilotConfirmation?: PendingCopilotConfirmation;
   isDemoMode: boolean;
   uploadedFileName: string;
   presentationOptions: PresentationOptions;
   shareSettings: ShareSettings;
+  savedThemes: SavedDashboardTheme[];
   isCopilotPanelOpen: boolean;
   isCopilotThinking: boolean;
   setDataset: (rows: DataRow[], fileName: string) => void;
@@ -97,6 +121,7 @@ interface DashPilotState {
   updateDashboardDesign: (design: DashboardDesignSettings) => void;
   updateDashboardDraftWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
   updateDashboardWidget: (widgetId: string, changes: Partial<DashboardWidget>) => void;
+  moveDashboardDraftWidget: (sourceWidgetId: string, targetWidgetId: string) => void;
   addDashboardWidget: (widget: DashboardWidget) => void;
   duplicateDashboardWidget: (widgetId: string) => void;
   removeDashboardWidget: (widgetId: string) => void;
@@ -108,11 +133,19 @@ interface DashPilotState {
   commitDashboardEditing: () => DashboardSpec | null;
   setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus">>) => void;
   setViewState: (viewState: Partial<DashboardViewState>) => void;
+  updateColumnDictionary: (field: string, changes: ColumnDictionaryChanges) => void;
   sendPrompt: (prompt: string) => Promise<void>;
+  undoCopilotChange: () => void;
+  redoCopilotChange: () => void;
+  confirmPendingCopilotAction: () => void;
+  cancelPendingCopilotAction: () => void;
   resetFilters: () => void;
   generatePresentation: () => void;
   setPresentationOptions: (options: Partial<PresentationOptions>) => void;
   setShareSettings: (settings: Partial<ShareSettings>) => void;
+  saveDashboardTheme: (name: string, scope?: SavedDashboardTheme["scope"]) => SavedDashboardTheme | null;
+  applySavedDashboardTheme: (themeId: string) => void;
+  deleteSavedDashboardTheme: (themeId: string) => void;
   toggleCopilotPanel: () => void;
 }
 
@@ -179,6 +212,45 @@ function baseMessages() {
   ];
 }
 
+function snapshotFromState(state: Pick<DashPilotState, "dashboard" | "viewState" | "presentation">, reason: string): DashboardSnapshot {
+  return {
+    dashboard: structuredClone(state.dashboard),
+    viewState: structuredClone(state.viewState),
+    presentation: structuredClone(state.presentation),
+    reason,
+    createdAt: new Date().toISOString()
+  };
+}
+
+function withLimitedHistory(items: DashboardSnapshot[]) {
+  return items.slice(-20);
+}
+
+function withColumnDictionary(profile: DatasetProfile, field: string, changes: ColumnDictionaryChanges): DatasetProfile {
+  const columns = profile.columns.map((column) => {
+    if (column.normalizedName !== field) return column;
+    const semanticType = changes.userSemanticType ?? changes.semanticType ?? column.userSemanticType ?? column.semanticType;
+    return {
+      ...column,
+      ...changes,
+      displayName: changes.displayName?.trim() || changes.businessName?.trim() || column.displayName,
+      businessName: changes.businessName?.trim() || column.businessName,
+      description: changes.description?.trim() || undefined,
+      synonyms: changes.synonyms?.map((item) => item.trim()).filter(Boolean) ?? column.synonyms,
+      semanticType,
+      userSemanticType: semanticType
+    };
+  });
+  return {
+    ...profile,
+    columns,
+    detectedDateColumns: columns.filter((column) => column.semanticType === "time").map((column) => column.normalizedName),
+    detectedMetricColumns: columns.filter((column) => column.semanticType === "metric" || column.semanticType === "measure").map((column) => column.normalizedName),
+    detectedDimensionColumns: columns.filter((column) => ["dimension", "category", "identifier"].includes(column.semanticType)).map((column) => column.normalizedName),
+    detectedGeoColumns: columns.filter((column) => column.semanticType === "geo").map((column) => column.normalizedName)
+  };
+}
+
 function createInitialState() {
   const viewState: DashboardViewState = { filters: [] };
   const profile = createEmptyProfile();
@@ -210,6 +282,9 @@ function createInitialState() {
     messages: baseMessages(),
     chatMessages: baseMessages(),
     versions: [],
+    copilotUndoStack: [],
+    copilotRedoStack: [],
+    pendingCopilotConfirmation: undefined,
     isDemoMode: false,
     uploadedFileName: "",
     presentationOptions: {
@@ -226,6 +301,7 @@ function createInitialState() {
       access: "public" as const,
       expiresAt: "2026-12-31"
     },
+    savedThemes: [],
     isCopilotPanelOpen: true,
     isCopilotThinking: false
   };
@@ -262,6 +338,9 @@ export const useDashPilotStore = create<DashPilotState>()(
           messages,
           chatMessages: messages,
           versions: [dashboard],
+          copilotUndoStack: [],
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined,
           isDemoMode: false,
           uploadedFileName: fileName
         });
@@ -301,6 +380,9 @@ export const useDashPilotStore = create<DashPilotState>()(
           messages,
           chatMessages: messages,
           versions: [dashboard],
+          copilotUndoStack: [],
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined,
           isDemoMode: false,
           uploadedFileName: parsed.fileName
         });
@@ -338,7 +420,10 @@ export const useDashPilotStore = create<DashPilotState>()(
           activeDatasetId: profile.id,
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
-          versions: [dashboard]
+          versions: [dashboard],
+          copilotUndoStack: [],
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined
         });
       },
       loadDemo: () => {
@@ -376,6 +461,9 @@ export const useDashPilotStore = create<DashPilotState>()(
           messages,
           chatMessages: messages,
           versions: [dashboard],
+          copilotUndoStack: [],
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined,
           isDemoMode: true,
           uploadedFileName: exampleFileName
         });
@@ -420,7 +508,10 @@ export const useDashPilotStore = create<DashPilotState>()(
           activePresentationId: presentation.id,
           isDemoMode: false,
           uploadedFileName: nextProfile.fileName,
-          versions: [dashboard]
+          versions: [dashboard],
+          copilotUndoStack: [],
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined
         });
       },
       hydrateDataset: ({ rows, profile, datasetId }) => {
@@ -444,7 +535,10 @@ export const useDashPilotStore = create<DashPilotState>()(
           activePresentationId: presentation.id,
           uploadedFileName: profile.fileName,
           isDemoMode: false,
-          versions: [dashboard]
+          versions: [dashboard],
+          copilotUndoStack: [],
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined
         });
       },
       startDashboardEditing: () => set({ isDashboardEditing: true, dashboardEditDraft: structuredClone(get().dashboard) }),
@@ -487,6 +581,14 @@ export const useDashPilotStore = create<DashPilotState>()(
           presentationSpec: presentation,
           activePresentationId: presentation.id,
           versions: dashboard === get().dashboard ? get().versions : [...get().versions, dashboard]
+        });
+      },
+      moveDashboardDraftWidget: (sourceWidgetId, targetWidgetId) => {
+        const draft = get().dashboardEditDraft ?? get().dashboard;
+        const nextDraft = moveDashboardWidget(draft, sourceWidgetId, targetWidgetId);
+        set({
+          isDashboardEditing: true,
+          dashboardEditDraft: nextDraft
         });
       },
       addDashboardWidget: (widget) => {
@@ -600,6 +702,13 @@ export const useDashPilotStore = create<DashPilotState>()(
           viewState: { ...get().viewState, ...viewState },
           filters: { ...get().viewState, ...viewState }
         }),
+      updateColumnDictionary: (field, changes) => {
+        const profile = withColumnDictionary(get().profile, field, changes);
+        set({
+          profile,
+          datasetProfile: profile
+        });
+      },
       resetFilters: () => {
         const viewState = { filters: [], selectedDateRange: undefined };
         set({ viewState, filters: viewState });
@@ -607,10 +716,12 @@ export const useDashPilotStore = create<DashPilotState>()(
       sendPrompt: async (prompt) => {
         const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: prompt, createdAt: new Date().toISOString() };
         const before = get();
+        const beforeSnapshot = snapshotFromState(before, `Copiloto: ${prompt}`);
         set({
           messages: [...before.messages, userMessage],
           chatMessages: [...before.messages, userMessage],
-          isCopilotThinking: true
+          isCopilotThinking: true,
+          pendingCopilotConfirmation: undefined
         });
         try {
           const copilotContext = buildCopilotContext({
@@ -639,7 +750,16 @@ export const useDashPilotStore = create<DashPilotState>()(
           }
           const warningText = result.warnings?.length ? ` Advertencias: ${result.warnings.join(" ")}` : "";
           const botMessage = assistantMessage(`${result.reply}${warningText}`, result.action);
+          const pending = result.pendingConfirmation
+            ? {
+                id: crypto.randomUUID(),
+                envelope: result.pendingConfirmation,
+                prompt,
+                createdAt: new Date().toISOString()
+              }
+            : undefined;
           const dashboardChanged = nextDashboard !== get().dashboard;
+          const viewStateChanged = JSON.stringify(nextViewState) !== JSON.stringify(get().viewState);
           const presentationChanged = nextPresentation !== get().presentation;
           set({
             dashboard: nextDashboard,
@@ -652,6 +772,9 @@ export const useDashPilotStore = create<DashPilotState>()(
             messages: [...get().messages, botMessage],
             chatMessages: [...get().messages, botMessage],
             versions: dashboardChanged ? [...get().versions, nextDashboard] : get().versions,
+            copilotUndoStack: dashboardChanged || viewStateChanged || presentationChanged ? withLimitedHistory([...get().copilotUndoStack, beforeSnapshot]) : get().copilotUndoStack,
+            copilotRedoStack: dashboardChanged || viewStateChanged || presentationChanged ? [] : get().copilotRedoStack,
+            pendingCopilotConfirmation: pending,
             presentationOptions: presentationChanged ? { ...get().presentationOptions, generated: true } : get().presentationOptions,
             isCopilotThinking: false
           });
@@ -667,6 +790,80 @@ export const useDashPilotStore = create<DashPilotState>()(
           });
         }
       },
+      undoCopilotChange: () => {
+        const undoStack = get().copilotUndoStack;
+        const previous = undoStack.at(-1);
+        if (!previous) return;
+        const current = snapshotFromState(get(), "Rehacer cambio del Copiloto");
+        const botMessage = assistantMessage(`Deshice: ${previous.reason}.`);
+        set({
+          dashboard: previous.dashboard,
+          dashboardSpec: previous.dashboard,
+          viewState: previous.viewState,
+          filters: previous.viewState,
+          presentation: previous.presentation,
+          presentationSpec: previous.presentation,
+          activeDashboardId: previous.dashboard.id,
+          activePresentationId: previous.presentation.id,
+          copilotUndoStack: undoStack.slice(0, -1),
+          copilotRedoStack: withLimitedHistory([...get().copilotRedoStack, current]),
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage]
+        });
+      },
+      redoCopilotChange: () => {
+        const redoStack = get().copilotRedoStack;
+        const next = redoStack.at(-1);
+        if (!next) return;
+        const current = snapshotFromState(get(), "Deshacer cambio rehecho");
+        const botMessage = assistantMessage(`Rehice: ${next.reason}.`);
+        set({
+          dashboard: next.dashboard,
+          dashboardSpec: next.dashboard,
+          viewState: next.viewState,
+          filters: next.viewState,
+          presentation: next.presentation,
+          presentationSpec: next.presentation,
+          activeDashboardId: next.dashboard.id,
+          activePresentationId: next.presentation.id,
+          copilotUndoStack: withLimitedHistory([...get().copilotUndoStack, current]),
+          copilotRedoStack: redoStack.slice(0, -1),
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage]
+        });
+      },
+      confirmPendingCopilotAction: () => {
+        const pending = get().pendingCopilotConfirmation;
+        if (!pending) return;
+        const beforeSnapshot = snapshotFromState(get(), `Confirmacion: ${pending.envelope.reason}`);
+        const applied = applyDashboardAction(get().dashboard, get().viewState, pending.envelope.action);
+        const presentation = generatePresentationSpec(applied.spec, get().presentationOptions.theme);
+        const botMessage = assistantMessage(`Confirmado. ${applied.message}`, pending.envelope.action);
+        set({
+          dashboard: applied.spec,
+          dashboardSpec: applied.spec,
+          viewState: applied.viewState,
+          filters: applied.viewState,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: [...get().versions, applied.spec],
+          copilotUndoStack: withLimitedHistory([...get().copilotUndoStack, beforeSnapshot]),
+          copilotRedoStack: [],
+          pendingCopilotConfirmation: undefined,
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage]
+        });
+      },
+      cancelPendingCopilotAction: () => {
+        if (!get().pendingCopilotConfirmation) return;
+        const botMessage = assistantMessage("Accion cancelada. No aplique el cambio pendiente.");
+        set({
+          pendingCopilotConfirmation: undefined,
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage]
+        });
+      },
       generatePresentation: () => {
         const presentation = generatePresentationSpec(get().dashboard, get().presentationOptions.theme);
         set({
@@ -678,6 +875,41 @@ export const useDashPilotStore = create<DashPilotState>()(
       },
       setPresentationOptions: (options) => set({ presentationOptions: { ...get().presentationOptions, ...options } }),
       setShareSettings: (settings) => set({ shareSettings: { ...get().shareSettings, ...settings } }),
+      saveDashboardTheme: (name, scope = "user") => {
+        const trimmed = name.trim();
+        if (!trimmed) return null;
+        const now = new Date().toISOString();
+        const theme: SavedDashboardTheme = {
+          id: `theme_${crypto.randomUUID()}`,
+          name: trimmed,
+          scope,
+          design: { ...DEFAULT_DASHBOARD_DESIGN, ...((get().dashboardEditDraft ?? get().dashboard).design ?? {}) },
+          createdAt: now,
+          updatedAt: now
+        };
+        set({ savedThemes: [theme, ...get().savedThemes.filter((item) => item.name.toLowerCase() !== trimmed.toLowerCase())].slice(0, 12) });
+        return theme;
+      },
+      applySavedDashboardTheme: (themeId) => {
+        const theme = get().savedThemes.find((item) => item.id === themeId);
+        if (!theme) return;
+        if (get().isDashboardEditing) {
+          const draft = get().dashboardEditDraft ?? get().dashboard;
+          set({ isDashboardEditing: true, dashboardEditDraft: updateDashboardDesign(draft, theme.design) });
+          return;
+        }
+        const dashboard = updateDashboardDesign(get().dashboard, theme.design);
+        const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
+        set({
+          dashboard,
+          dashboardSpec: dashboard,
+          presentation,
+          presentationSpec: presentation,
+          activePresentationId: presentation.id,
+          versions: [...get().versions, dashboard]
+        });
+      },
+      deleteSavedDashboardTheme: (themeId) => set({ savedThemes: get().savedThemes.filter((theme) => theme.id !== themeId) }),
       toggleCopilotPanel: () => set({ isCopilotPanelOpen: !get().isCopilotPanelOpen })
     }),
     {
@@ -721,6 +953,7 @@ export const useDashPilotStore = create<DashPilotState>()(
         uploadedFileName: state.uploadedFileName,
         presentationOptions: state.presentationOptions,
         shareSettings: state.shareSettings,
+        savedThemes: state.savedThemes,
         isCopilotPanelOpen: state.isCopilotPanelOpen
       })
     }

@@ -8,10 +8,11 @@ import { queryTableRows } from "@/lib/query-engine/search";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatNumber } from "@/lib/utils";
-import type { DataRow, DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
+import type { DataRow, DatasetColumnProfile, DatasetProfile, SemanticColumnType } from "@/types/dataset";
 import type { DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 
 const PAGE_SIZE = 50;
+const semanticOptions: SemanticColumnType[] = ["metric", "measure", "dimension", "category", "time", "geo", "identifier", "unknown"];
 
 function nextWidgetId(widgets: DashboardWidget[]) {
   const ids = new Set(widgets.map((widget) => widget.id));
@@ -71,15 +72,42 @@ function ColumnStatsPanel({
   onShowOnly,
   onAskCopilot,
   onCreateWidget,
-  onUseAsFilter
+  onUseAsFilter,
+  onUpdateDictionary
 }: {
   column?: DatasetColumnProfile;
   onShowOnly: () => void;
   onAskCopilot: () => void;
   onCreateWidget: () => void;
   onUseAsFilter: () => void;
+  onUpdateDictionary: (changes: Partial<Pick<DatasetColumnProfile, "businessName" | "description" | "displayName" | "synonyms" | "isHidden" | "userSemanticType">>) => void;
 }) {
+  const [businessName, setBusinessName] = useState(column?.businessName ?? column?.displayName ?? "");
+  const [description, setDescription] = useState(column?.description ?? "");
+  const [semanticType, setSemanticType] = useState<SemanticColumnType>(column?.userSemanticType ?? column?.semanticType ?? "unknown");
+  const [synonyms, setSynonyms] = useState((column?.synonyms ?? []).join(", "));
+  const [isHidden, setIsHidden] = useState(column?.isHidden ?? false);
+
+  useEffect(() => {
+    setBusinessName(column?.businessName ?? column?.displayName ?? "");
+    setDescription(column?.description ?? "");
+    setSemanticType(column?.userSemanticType ?? column?.semanticType ?? "unknown");
+    setSynonyms((column?.synonyms ?? []).join(", "));
+    setIsHidden(column?.isHidden ?? false);
+  }, [column]);
+
   if (!column) return null;
+
+  function saveDictionary() {
+    onUpdateDictionary({
+      businessName,
+      displayName: businessName,
+      description,
+      userSemanticType: semanticType,
+      synonyms: synonyms.split(","),
+      isHidden
+    });
+  }
 
   return (
     <section className="soft-card rounded-xl p-4">
@@ -98,6 +126,32 @@ function ColumnStatsPanel({
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {column.sampleValues.slice(0, 5).map((value) => <span key={String(value)} className="rounded-full bg-[#f6f7ff] px-3 py-1 text-xs font-semibold text-[#697597]">{String(value)}</span>)}
+      </div>
+      <div className="mt-4 rounded-lg border border-[#e3e8f5] bg-[#fbfcff] p-3">
+        <p className="text-xs font-bold uppercase tracking-[0.08em] text-[#697597]">Diccionario</p>
+        <label className="mt-3 block text-xs font-bold text-[#34405f]">
+          Nombre de negocio
+          <input className="mt-1 h-9 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" value={businessName} onChange={(event) => setBusinessName(event.target.value)} />
+        </label>
+        <label className="mt-3 block text-xs font-bold text-[#34405f]">
+          Rol semantico
+          <select className="mt-1 h-9 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" value={semanticType} onChange={(event) => setSemanticType(event.target.value as SemanticColumnType)}>
+            {semanticOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+        <label className="mt-3 block text-xs font-bold text-[#34405f]">
+          Descripcion
+          <textarea className="mt-1 min-h-16 w-full rounded-md border border-[#dfe5f0] bg-white px-3 py-2 text-sm" value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <label className="mt-3 block text-xs font-bold text-[#34405f]">
+          Sinonimos
+          <input className="mt-1 h-9 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" value={synonyms} onChange={(event) => setSynonyms(event.target.value)} placeholder="ventas, revenue, ingresos" />
+        </label>
+        <label className="mt-3 flex items-center gap-2 text-xs font-bold text-[#34405f]">
+          <input type="checkbox" checked={isHidden} onChange={(event) => setIsHidden(event.target.checked)} />
+          Ocultar de sugerencias principales
+        </label>
+        <button onClick={saveDictionary} className="mt-3 w-full rounded-lg bg-[#3d35ff] px-3 py-2 text-sm font-semibold text-white hover:bg-[#3028df]">Guardar diccionario</button>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <button onClick={onShowOnly} className="rounded-lg border border-[#dfe5f0] px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]">Mostrar solo</button>
@@ -233,6 +287,7 @@ export function DataExplorerPanel() {
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const addDashboardWidget = useDashPilotStore((state) => state.addDashboardWidget);
   const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
+  const updateColumnDictionary = useDashPilotStore((state) => state.updateColumnDictionary);
   const [page, setPage] = useState(0);
   const [columnSearchText, setColumnSearchText] = useState("");
   const [selectedColumnName, setSelectedColumnName] = useState<string | undefined>();
@@ -405,6 +460,7 @@ export function DataExplorerPanel() {
             onAskCopilot={() => selectedColumn && void sendPrompt(`Explica la columna ${selectedColumn.displayName}`)}
             onCreateWidget={() => selectedColumn && createWidgetFromColumn(selectedColumn)}
             onUseAsFilter={() => selectedColumn && patchExplorer({ columnSearch: { field: selectedColumn.normalizedName, query: String(selectedColumn.sampleValues[0] ?? "") } })}
+            onUpdateDictionary={(changes) => selectedColumn && updateColumnDictionary(selectedColumn.normalizedName, changes)}
           />
           <ChartBuilder />
         </div>

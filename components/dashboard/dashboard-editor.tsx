@@ -1,6 +1,7 @@
 "use client";
 
-import { BarChart3, Copy, Eye, EyeOff, Palette, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { BarChart3, Copy, Eye, EyeOff, Palette, Save, Trash2 } from "lucide-react";
 import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
@@ -68,10 +69,16 @@ export function DashboardEditor() {
   const updateTitle = useDashPilotStore((state) => state.updateDashboardDraftTitle);
   const updateSubtitle = useDashPilotStore((state) => state.updateDashboardDraftSubtitle);
   const updateDesign = useDashPilotStore((state) => state.updateDashboardDraftDesign);
+  const savedThemes = useDashPilotStore((state) => state.savedThemes);
+  const saveTheme = useDashPilotStore((state) => state.saveDashboardTheme);
+  const applyTheme = useDashPilotStore((state) => state.applySavedDashboardTheme);
+  const deleteTheme = useDashPilotStore((state) => state.deleteSavedDashboardTheme);
   const updateWidget = useDashPilotStore((state) => state.updateDashboardDraftWidget);
   const duplicateWidget = useDashPilotStore((state) => state.duplicateDashboardDraftWidget);
   const removeWidget = useDashPilotStore((state) => state.removeDashboardDraftWidget);
   const setHidden = useDashPilotStore((state) => state.setDashboardDraftWidgetHidden);
+
+  const [themeName, setThemeName] = useState("");
 
   if (!draft) return null;
 
@@ -156,6 +163,39 @@ export function DashboardEditor() {
                 {paletteOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
+          </div>
+          <div className="rounded-lg bg-[#f8faff] p-3">
+            <label className="block text-xs font-bold text-[#34405f]">
+              Guardar tema
+              <div className="mt-2 flex gap-2">
+                <input className="focus-ring h-9 min-w-0 flex-1 rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" value={themeName} onChange={(event) => setThemeName(event.target.value)} placeholder="Ej. Directorio" />
+                <button
+                  type="button"
+                  className="focus-ring grid size-9 place-items-center rounded-md bg-[#3d35ff] text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!themeName.trim()}
+                  onClick={() => {
+                    const saved = saveTheme(themeName);
+                    if (saved) setThemeName("");
+                  }}
+                  aria-label="Guardar tema visual"
+                >
+                  <Save className="size-4" />
+                </button>
+              </div>
+            </label>
+            {savedThemes.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {savedThemes.slice(0, 4).map((theme) => (
+                  <div key={theme.id} className="flex items-center gap-2 rounded-md border border-[#e3e8f5] bg-white p-2">
+                    <button type="button" onClick={() => applyTheme(theme.id)} className="min-w-0 flex-1 truncate text-left text-xs font-bold text-[#34405f]">{theme.name}</button>
+                    <span className="text-[10px] font-bold uppercase text-[#697597]">{theme.scope}</span>
+                    <button type="button" onClick={() => deleteTheme(theme.id)} className="grid size-7 place-items-center rounded-md text-red-600 hover:bg-red-50" aria-label={`Eliminar tema ${theme.name}`}>
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </section>

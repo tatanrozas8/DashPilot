@@ -17,7 +17,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { Copy, Eye, Filter, Highlighter, MoreVertical, Pencil, Presentation, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Copy, Eye, Filter, GripVertical, Highlighter, MoreVertical, Pencil, Presentation, RotateCcw, RotateCw, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
@@ -345,6 +345,8 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
   const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
   const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
   const highlightedWidgetId = useDashPilotStore((state) => state.viewState.highlightedWidgetId);
+  const moveDashboardDraftWidget = useDashPilotStore((state) => state.moveDashboardDraftWidget);
+  const [draggedWidgetId, setDraggedWidgetId] = useState<string | null>(null);
   const renderedDashboard = isDashboardEditing && dashboardEditDraft && !slideWidgetIds ? dashboardEditDraft : dashboard;
   const design = normalizeDashboardDesign(renderedDashboard.design);
   const widgets = slideWidgetIds
@@ -357,7 +359,41 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
         {widgets.map((widget) => {
           const width = widget.position.w >= 12 ? "col-span-12" : widget.position.w >= 8 ? "col-span-12 lg:col-span-8" : widget.position.w >= 6 ? "col-span-12 lg:col-span-6" : "col-span-12 sm:col-span-6 xl:col-span-3";
           return (
-            <div key={widget.id} className={cn(width, highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]")}>
+            <div
+              key={widget.id}
+              draggable={isDashboardEditing && !slideWidgetIds}
+              onDragStart={(event) => {
+                if (!isDashboardEditing || slideWidgetIds) return;
+                setDraggedWidgetId(widget.id);
+                event.dataTransfer.setData("text/plain", widget.id);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(event) => {
+                if (!isDashboardEditing || slideWidgetIds) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                if (!isDashboardEditing || slideWidgetIds) return;
+                event.preventDefault();
+                const source = event.dataTransfer.getData("text/plain") || draggedWidgetId;
+                if (source && source !== widget.id) moveDashboardDraftWidget(source, widget.id);
+                setDraggedWidgetId(null);
+              }}
+              onDragEnd={() => setDraggedWidgetId(null)}
+              className={cn(
+                "relative transition",
+                width,
+                isDashboardEditing && !slideWidgetIds && "cursor-grab active:cursor-grabbing",
+                draggedWidgetId === widget.id && "opacity-50",
+                highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]"
+              )}
+            >
+              {isDashboardEditing && !slideWidgetIds && (
+                <span className="absolute left-3 top-3 z-20 grid size-8 place-items-center rounded-md border border-[#dfe5f0] bg-white/95 text-[#697597] shadow-sm" title="Arrastra para reordenar">
+                  <GripVertical className="size-4" />
+                </span>
+              )}
               {widget.type === "kpi_card" && <KpiWidget widget={widget} rows={rows} />}
               {widget.type === "line_chart" && <LineWidget widget={widget} rows={rows} />}
               {widget.type === "bar_chart" && <BarWidget widget={widget} rows={rows} />}
@@ -470,6 +506,13 @@ export function CopilotPanel() {
   const profile = useDashPilotStore((state) => state.profile);
   const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
   const isCopilotThinking = useDashPilotStore((state) => state.isCopilotThinking);
+  const undoCount = useDashPilotStore((state) => state.copilotUndoStack.length);
+  const redoCount = useDashPilotStore((state) => state.copilotRedoStack.length);
+  const pendingConfirmation = useDashPilotStore((state) => state.pendingCopilotConfirmation);
+  const undoCopilotChange = useDashPilotStore((state) => state.undoCopilotChange);
+  const redoCopilotChange = useDashPilotStore((state) => state.redoCopilotChange);
+  const confirmPendingCopilotAction = useDashPilotStore((state) => state.confirmPendingCopilotAction);
+  const cancelPendingCopilotAction = useDashPilotStore((state) => state.cancelPendingCopilotAction);
   const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
@@ -504,14 +547,36 @@ export function CopilotPanel() {
     <aside className="fixed bottom-0 right-0 top-20 z-40 flex w-full min-w-0 flex-col border-l border-[#e3e8f5] bg-white shadow-2xl shadow-slate-900/10 sm:w-[420px] xl:z-20 xl:w-[360px] xl:shadow-none">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-[#edf1fa] px-5">
         <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-6 text-[#3d35ff]" /> Copiloto IA</h2>
-        <button
-          aria-label="Cerrar Copiloto IA"
-          onClick={toggleCopilotPanel}
-          className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff]"
-        >
-          <X className="size-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button aria-label="Deshacer cambio del Copiloto" disabled={!undoCount || isCopilotThinking} onClick={undoCopilotChange} className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff] disabled:cursor-not-allowed disabled:opacity-40">
+            <RotateCcw className="size-4" />
+          </button>
+          <button aria-label="Rehacer cambio del Copiloto" disabled={!redoCount || isCopilotThinking} onClick={redoCopilotChange} className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff] disabled:cursor-not-allowed disabled:opacity-40">
+            <RotateCw className="size-4" />
+          </button>
+          <button
+            aria-label="Cerrar Copiloto IA"
+            onClick={toggleCopilotPanel}
+            className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff]"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
       </div>
+      {pendingConfirmation && (
+        <div className="shrink-0 border-b border-[#edf1fa] bg-[#fffaf0] px-5 py-3">
+          <p className="text-xs font-bold text-[#8a5a00]">Confirmacion requerida</p>
+          <p className="mt-1 text-sm font-semibold leading-5 text-[#1c2748]">{pendingConfirmation.envelope.reason}</p>
+          <div className="mt-3 flex gap-2">
+            <button onClick={confirmPendingCopilotAction} disabled={isCopilotThinking} className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-[#3d35ff] px-3 text-xs font-bold text-white disabled:opacity-50">
+              <Check className="size-4" /> Confirmar
+            </button>
+            <button onClick={cancelPendingCopilotAction} disabled={isCopilotThinking} className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[#dfe5f0] bg-white px-3 text-xs font-bold text-[#536088] disabled:opacity-50">
+              <X className="size-4" /> Cancelar
+            </button>
+          </div>
+        </div>
+      )}
       <div className="scrollbar-soft min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
         {messages.map((message) => (
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>

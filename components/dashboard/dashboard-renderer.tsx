@@ -712,7 +712,7 @@ export function CopilotPanel() {
       )}
       <div className="shrink-0 border-b border-[#edf1fa] px-5 py-3">
         <label className="block text-xs font-bold text-[#697597]">
-          Intencion
+          Modo actual
           <select
             className="mt-1 h-9 w-full rounded-lg border border-[#dfe5f0] bg-white px-3 text-sm font-semibold text-[#1c2748]"
             value={effectiveIntent}
@@ -729,7 +729,7 @@ export function CopilotPanel() {
         {selectedTargetType !== "none" && selectedTargetTitle && (
           <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#dfe5fb] bg-[#f8f9ff] px-3 py-2">
             <div className="min-w-0">
-              <p className="text-[11px] font-bold uppercase text-[#697597]">Objetivo seleccionado</p>
+              <p className="text-[11px] font-bold uppercase text-[#697597]">{selectedTargetType === "widget" ? "Editando este grafico" : "Objetivo seleccionado"}</p>
               <p className="truncate text-sm font-bold text-[#1c2748]">{selectedTargetTitle}</p>
               <p className="truncate text-[11px] font-semibold text-[#697597]">{(selectedTargetCapabilities ?? EMPTY_CAPABILITIES).slice(0, 4).join(" · ")}</p>
             </div>
@@ -738,6 +738,25 @@ export function CopilotPanel() {
             </button>
           </div>
         )}
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          <button type="button" onClick={clearSelectedTarget} className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
+            <X className="size-3.5" /> Limpiar
+          </button>
+          <button type="button" onClick={() => setCopilotIntent("create_chart")} className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
+            <Sparkles className="size-3.5" /> Nuevo
+          </button>
+          <button
+            type="button"
+            disabled={selectedTargetType === "none"}
+            onClick={() => {
+              setCopilotIntent("modify_selection");
+              setPrompt("Reemplazalo por uno con las instrucciones anteriores.");
+            }}
+            className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <RotateCw className="size-3.5" /> Reemplazar
+          </button>
+        </div>
       </div>
       <div className="scrollbar-soft min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
         {messages.map((message) => (

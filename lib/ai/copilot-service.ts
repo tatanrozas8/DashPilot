@@ -5,6 +5,7 @@ import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { executeCopilotActions } from "@/lib/ai/action-execution-engine";
 import { buildActionPlan } from "@/lib/ai/action-plan";
+import { buildCopilotAgentLoop } from "@/lib/ai/copilot-agent";
 import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
@@ -718,11 +719,56 @@ function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotA
   };
 }
 
+function widgetFromUpdate(target: DashboardWidget, action: Extract<DashboardAction, { type: "update_widget" }>): DashboardWidget {
+  return {
+    ...target,
+    ...action.changes,
+    id: target.id,
+    config: { ...target.config, ...(action.changes.config ?? {}) },
+    position: action.changes.position ?? target.position
+  };
+}
+
+function previousInstructionReplacement(input: CopilotRequestContext, previousInstruction: string, target: DashboardWidget) {
+  const selectedViewState: DashboardViewState = {
+    ...input.viewState,
+    highlightedWidgetId: target.id,
+    selectedTargetType: target.type === "kpi_card" ? "kpi" : target.type === "table" ? "table" : "widget",
+    selectedTargetId: target.id,
+    selectedTargetTitle: target.title,
+    selectedTargetSpec: target,
+    selectedTargetCapabilities: input.viewState.selectedTargetCapabilities ?? []
+  };
+  const analyticalPlan = planAnalyticalChart({ ...input, prompt: previousInstruction, viewState: selectedViewState });
+  if (!analyticalPlan.handled || !analyticalPlan.actions.length) return undefined;
+
+  const actions = analyticalPlan.actions.flatMap<DashboardAction>((action) => {
+    if (action.type === "update_widget" && action.widgetId === target.id) return [{ type: "replace_widget", widgetId: target.id, widget: widgetFromUpdate(target, action) }];
+    if (action.type === "add_widget") return [{ type: "replace_widget", widgetId: target.id, widget: action.widget }];
+    if (action.type === "focus_widget") return [{ type: "focus_widget", widgetId: target.id }];
+    return [action];
+  });
+
+  return {
+    reply: `Listo. Reemplace el grafico seleccionado usando la instruccion anterior: ${previousInstruction}`,
+    envelopes: actions.map((action) => actionEnvelope(action, "Reemplazo solicitado usando la ultima instruccion accionable.", analyticalPlan.confidence)),
+    warnings: analyticalPlan.warnings ?? []
+  };
+}
+
 export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotResult {
   const source = input.source ?? "mock";
-  const actionPlan = buildActionPlan({ prompt: input.prompt, dashboardSpec: input.dashboardSpec, viewState: input.viewState });
+  const agentLoop = buildCopilotAgentLoop(input);
+  const actionPlan = agentLoop.actionPlan;
   if (actionPlan.needsClarification) {
     return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: actionPlan.clarification ?? "Necesito una aclaracion antes de aplicar cambios." }, actionPlan.reason, actionPlan.confidence)], source, actionPlan.clarification ?? "Necesito una aclaracion antes de aplicar cambios.");
+  }
+  if (actionPlan.usesPreviousInstruction && actionPlan.replaceSelectedWidget && agentLoop.previousInstruction && actionPlan.target) {
+    const replacement = previousInstructionReplacement(input, agentLoop.previousInstruction, actionPlan.target);
+    if (replacement) {
+      return applyValidatedActions({ ...input, prompt: agentLoop.previousInstruction }, replacement.envelopes, source, replacement.reply, replacement.warnings);
+    }
+    return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: "No pude convertir la instruccion anterior en un reemplazo seguro para el grafico seleccionado." }, actionPlan.reason, 0.78)], source, "No aplique cambios porque la instruccion anterior no genero un plan ejecutable seguro.");
   }
   if (actionPlan.action) {
     return applyValidatedActions(input, [actionEnvelope(actionPlan.action, actionPlan.reason, actionPlan.confidence)], source, actionPlan.action.type === "undo_last_action" ? "Voy a deshacer el ultimo cambio del Copiloto." : "Aplique el plan contextual validado.");

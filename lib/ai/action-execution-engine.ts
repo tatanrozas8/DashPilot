@@ -6,6 +6,7 @@ import type { SemanticLayer } from "@/lib/semantic-layer";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { buildActionPlan } from "@/lib/ai/action-plan";
 import { applyAction } from "@/lib/ai/apply-action";
+import { verifyExecution } from "@/lib/ai/verify-execution";
 import { buildAnalysisPlan, planAnalyticalChart, validateAnalysisPlan, validateWidgetMatchesPlan } from "@/lib/dashboard-spec/chart-planner";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { buildDatasetCatalog } from "@/lib/semantic-layer";
@@ -236,6 +237,21 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
         continue;
       }
       warnings.push(...widgetValidation.warnings);
+    }
+    const executionVerification = verifyExecution({
+      plan: contextualPlan,
+      action,
+      beforeDashboardSpec: previousDashboard,
+      afterDashboardSpec: nextDashboard,
+      beforeViewState: previousViewState,
+      afterViewState: nextViewState
+    });
+    if (!executionVerification.success) {
+      nextDashboard = previousDashboard;
+      nextViewState = previousViewState;
+      errors.push(`La verificacion posterior fallo: ${executionVerification.errors.join(" ")}`);
+      warnings.push(...executionVerification.warnings);
+      continue;
     }
     appliedActions.push(action);
     appliedEnvelopes.push(withConfirmation);

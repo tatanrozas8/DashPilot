@@ -431,11 +431,34 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
     if (existing) {
       actions.push({ type: "focus_widget", widgetId: existing.id });
     } else {
-      const widget = createAnalysisWidget(context, { dimension: field, title: `Analisis por ${fieldLabel(context.datasetProfile, field)}` });
-      if (widget) actions.push({ type: "add_widget", widget });
+      const geographyWidget = context.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+      const metric = firstExisting([
+        context.semanticModel.primaryMetric?.field,
+        context.datasetProfile.detectedMetricColumns[0]
+      ], context.datasetProfile);
+      if (geographyWidget && metric) {
+        actions.push({
+          type: "update_widget",
+          widgetId: geographyWidget.id,
+          changes: {
+            type: "bar_chart",
+            title: `${fieldLabel(context.datasetProfile, metric)} por ${fieldLabel(context.datasetProfile, field)}`,
+            query: { metric: { field: metric, aggregation: "sum" }, groupBy: [field], orderBy: { field: "value", direction: "desc" }, limit: 5 },
+            config: { format: geographyWidget.config.format ?? "number", horizontal: true, generatedBy: "copilot" }
+          }
+        });
+        actions.push({ type: "focus_widget", widgetId: geographyWidget.id });
+      } else {
+        const widget = createAnalysisWidget(context, { dimension: field, title: `Analisis por ${fieldLabel(context.datasetProfile, field)}` });
+        if (widget) actions.push({ type: "add_widget", widget });
+      }
     }
+    const isFallback = resolved.matchType === "fallback";
+    const reply = isFallback
+      ? `No encontre una columna exacta para ${resolved.requestedConcept}; use "${resolved.matchedColumn.originalName}" como fallback.`
+      : `Use la columna real "${resolved.matchedColumn.originalName}" del archivo y actualice el dashboard con ventas por ${fieldLabel(context.datasetProfile, field)}.`;
     return {
-      reply: `Analice por ${fieldLabel(context.datasetProfile, field)} usando la columna real "${resolved.matchedColumn.originalName}".`,
+      reply,
       envelopes: actions.map((action) => actionEnvelope(action, resolved.reason, resolved.confidence))
     };
   }

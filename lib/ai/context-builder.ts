@@ -34,6 +34,9 @@ export interface CopilotContext {
     inferredType: string;
     semanticType: string;
     userSemanticType?: string;
+    semanticConfidence?: number;
+    geoRole?: string;
+    geoConfidence?: number;
     nullCount: number;
     nullPercentage: number;
     uniqueCount: number;
@@ -55,6 +58,15 @@ export interface CopilotContext {
   availableDimensions: string[];
   dateColumns: string[];
   geoColumns: string[];
+  geographicColumns: Array<{
+    originalName: string;
+    normalizedName: string;
+    displayName: string;
+    geoRole?: string;
+    confidence?: number;
+    uniqueCount: number;
+    sampleValues: unknown[];
+  }>;
   filters: DashboardViewState["filters"];
   widgets: Array<{
     id: string;
@@ -151,6 +163,9 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     inferredType: column.inferredType,
     semanticType: column.semanticType,
     userSemanticType: column.userSemanticType,
+    semanticConfidence: column.semanticConfidence,
+    geoRole: column.geoRole,
+    geoConfidence: column.geoConfidence,
     nullCount: column.nullCount,
     nullPercentage: column.nullPercentage,
     uniqueCount: column.uniqueCount,
@@ -197,6 +212,17 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     ],
     dateColumns: [...new Set([...input.datasetProfile.detectedDateColumns, ...semanticModel.dates.map((field) => field.field)])],
     geoColumns: [...new Set([...input.datasetProfile.detectedGeoColumns, ...semanticModel.geographies.map((field) => field.field)])],
+    geographicColumns: columns
+      .filter((column) => column.semanticType === "geo" || column.inferredType === "geography")
+      .map((column) => ({
+        originalName: column.originalName,
+        normalizedName: column.normalizedName,
+        displayName: column.displayName,
+        geoRole: column.geoRole,
+        confidence: column.geoConfidence ?? column.semanticConfidence,
+        uniqueCount: column.uniqueCount,
+        sampleValues: column.sampleValues
+      })),
     filters: input.viewState.filters ?? [],
     widgets: input.dashboardSpec.widgets.map((widget) => ({
       id: widget.id,
@@ -256,6 +282,7 @@ export function toProviderContext(context: CopilotContext) {
     availableDimensions: context.availableDimensions,
     dateColumns: context.dateColumns,
     geoColumns: context.geoColumns,
+    geographicColumns: context.geographicColumns,
     filters: context.filters,
     widgets: context.widgets,
     dashboard: {

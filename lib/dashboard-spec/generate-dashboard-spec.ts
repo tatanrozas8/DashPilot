@@ -62,13 +62,20 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
   const secondaryMetric = semantic.secondaryMetric;
   const salesField = fieldName(primaryMetric);
   const marginField = fieldName(semantic.marginMetrics[0]);
-  const regionField = fieldName(semantic.primaryGeography);
+  const regionGeo = semantic.geographies.find((field) => field.geoRole === "region") ?? semantic.geographies.find((field) => field.geoRole === "zone" || field.geoRole === "territory") ?? semantic.primaryGeography;
+  const countryGeo = semantic.geographies.find((field) => field.geoRole === "country");
+  const cityGeo = semantic.geographies.find((field) => field.geoRole === "city" || field.geoRole === "commune");
+  const regionField = fieldName(regionGeo);
+  const countryField = fieldName(countryGeo);
+  const cityField = fieldName(cityGeo);
   const sellerField = fieldName(semantic.primarySeller);
   const categoryField = fieldName(semantic.primaryCategory);
   const clientField = fieldName(semantic.primaryClient);
   const productField = fieldName(semantic.primaryProduct);
   const orderField = fieldName(semantic.primaryOrder);
   const secondaryDimension = fieldName(semantic.primaryDimension);
+  const geoBreakdownField = regionField ?? cityField ?? countryField;
+  const geoBreakdown = [regionGeo, cityGeo, countryGeo].find((field) => field?.field === geoBreakdownField);
   const rankingDimension = sellerField ?? productField ?? categoryField ?? clientField ?? secondaryDimension;
   const isSalesDomain = semantic.domain.name === "sales";
   const metricLabel = isSalesDomain && primaryMetric?.role === "revenue" ? "Ventas" : fieldLabel(primaryMetric, "Registros");
@@ -87,7 +94,9 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
 
   const filters: DashboardFilterConfig[] = [
     dateField && { id: "date", field: dateField, label: fieldLabel(semantic.primaryDate, "Fecha"), type: "date_range" },
-    regionField && { id: "region", field: regionField, label: fieldLabel(semantic.primaryGeography, "Region"), type: "multi_select" },
+    regionField && { id: "region", field: regionField, label: fieldLabel(regionGeo, "Region"), type: "multi_select" },
+    countryField && countryField !== regionField && { id: "country", field: countryField, label: fieldLabel(countryGeo, "Pais"), type: "multi_select" },
+    !regionField && cityField && { id: "city", field: cityField, label: fieldLabel(cityGeo, "Ciudad"), type: "multi_select" },
     sellerField && { id: "seller", field: sellerField, label: fieldLabel(semantic.primarySeller, "Vendedor"), type: "multi_select" },
     categoryField && { id: "category", field: categoryField, label: fieldLabel(semantic.primaryCategory, "Categoria"), type: "multi_select" },
     clientField && { id: "client", field: clientField, label: fieldLabel(semantic.primaryClient, "Cliente"), type: "multi_select" },
@@ -135,9 +144,9 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
     }),
     widget("sales_by_region", {
       type: "bar_chart",
-      title: regionField && isSalesDomain ? "Ventas por Region" : secondaryDimension ? `${salesField ? metricLabel : "Registros"} por ${fieldLabel(semantic.primaryDimension)}` : "Distribucion principal",
-      query: salesField && secondaryDimension ? { metric: { field: salesField, aggregation: "sum" }, groupBy: [secondaryDimension], orderBy: { field: "value", direction: "desc" }, limit: 5 } : secondaryDimension ? { groupBy: [secondaryDimension], orderBy: { field: "value", direction: "desc" }, limit: 5 } : undefined,
-      config: { format: metricFormat, horizontal: true, semanticConfidence: semantic.primaryDimension?.confidence },
+      title: geoBreakdownField && isSalesDomain ? `Ventas por ${fieldLabel(geoBreakdown, "Region")}` : secondaryDimension ? `${salesField ? metricLabel : "Registros"} por ${fieldLabel(semantic.primaryDimension)}` : "Distribucion principal",
+      query: salesField && (geoBreakdownField ?? secondaryDimension) ? { metric: { field: salesField, aggregation: "sum" }, groupBy: [geoBreakdownField ?? secondaryDimension!], orderBy: { field: "value", direction: "desc" }, limit: 5 } : (geoBreakdownField ?? secondaryDimension) ? { groupBy: [geoBreakdownField ?? secondaryDimension!], orderBy: { field: "value", direction: "desc" }, limit: 5 } : undefined,
+      config: { format: metricFormat, horizontal: true, semanticConfidence: geoBreakdown?.confidence ?? semantic.primaryDimension?.confidence },
       position: { x: 6, y: 1, w: 6, h: 3 }
     }),
     widget("top_sellers", {

@@ -1,8 +1,8 @@
-import type { DataRow, DatasetColumnProfile, DatasetProfile, InferredColumnType, NormalizedColumn, SemanticColumnType } from "@/types/dataset";
+import type { DataRow, DatasetColumnProfile, DatasetProfile, GeoRole, InferredColumnType, NormalizedColumn, SemanticColumnType } from "@/types/dataset";
 import { parseDateValue, parseLocaleNumber } from "@/lib/data/parse-values";
 import { slugify } from "@/lib/utils";
 
-const geoHints = ["region", "pais", "ciudad", "zona", "comuna", "estado"];
+const geoHints = ["region", "zona", "pais", "ciudad", "comuna", "territorio", "ubicacion", "geographic", "geography", "country", "city", "state", "province", "provincia"];
 const dateHints = ["fecha", "date", "periodo", "mes", "dia"];
 const idHints = ["id", "pedido", "order", "codigo", "sku"];
 const moneyHints = ["venta", "sales", "revenue", "costo", "precio", "monto", "total", "ingreso"];
@@ -33,10 +33,26 @@ function inferType(name: string, values: unknown[]): InferredColumnType {
   return "string";
 }
 
-function semanticType(name: string, inferredType: InferredColumnType, uniqueCount: number, rowCount: number): SemanticColumnType {
+export function detectGeoRole(name: string): { geoRole?: GeoRole; confidence: number } {
+  const normalized = slugify(name);
+  const tokens = new Set(normalized.split("_").filter(Boolean));
+
+  if (tokens.has("region") || normalized === "region") return { geoRole: "region", confidence: 0.98 };
+  if (normalized.includes("region")) return { geoRole: "region", confidence: 0.92 };
+  if (tokens.has("zona") || tokens.has("zone")) return { geoRole: "zone", confidence: 0.9 };
+  if (tokens.has("territorio") || tokens.has("territory")) return { geoRole: "territory", confidence: 0.88 };
+  if (tokens.has("ciudad") || tokens.has("city")) return { geoRole: "city", confidence: 0.86 };
+  if (tokens.has("comuna")) return { geoRole: "commune", confidence: 0.86 };
+  if (tokens.has("pais") || tokens.has("country")) return { geoRole: "country", confidence: 0.82 };
+  if (tokens.has("provincia") || tokens.has("province") || tokens.has("state")) return { geoRole: "region", confidence: 0.72 };
+  if (tokens.has("ubicacion") || tokens.has("geographic") || tokens.has("geography")) return { geoRole: "unknown", confidence: 0.62 };
+  return { confidence: 0 };
+}
+
+function semanticType(name: string, inferredType: InferredColumnType, uniqueCount: number, rowCount: number, geoRole?: GeoRole): SemanticColumnType {
   const normalized = slugify(name);
   if (inferredType === "date") return "time";
-  if (inferredType === "geography") return "geo";
+  if (geoRole || inferredType === "geography") return "geo";
   if (idHints.some((hint) => normalized.includes(hint))) return "identifier";
   if (["currency", "number", "percentage"].includes(inferredType)) return "metric";
   if (uniqueCount <= Math.max(20, rowCount * 0.35)) return "dimension";
@@ -58,6 +74,8 @@ export function profileDataset(rows: DataRow[], fileName = "Datos de ejemplo.xls
     const populated = values.filter((value) => !isEmpty(value));
     const unique = new Set(populated.map((value) => String(value)));
     const inferredType = inferType(metadata?.originalName ?? column, values);
+    const geo = detectGeoRole(`${metadata?.originalName ?? column} ${metadata?.displayName ?? ""} ${column}`);
+    const resolvedSemanticType = semanticType(metadata?.originalName ?? column, inferredType, unique.size, rowCount, geo.geoRole);
     const numeric = populated.map(parseLocaleNumber).filter((value): value is number => value !== null);
     const numericRatio = populated.length ? numeric.length / populated.length : 0;
 
@@ -66,7 +84,10 @@ export function profileDataset(rows: DataRow[], fileName = "Datos de ejemplo.xls
       normalizedName: column,
       displayName: metadata?.displayName ?? displayName(column),
       inferredType,
-      semanticType: semanticType(metadata?.originalName ?? column, inferredType, unique.size, rowCount),
+      semanticType: resolvedSemanticType,
+      semanticConfidence: resolvedSemanticType === "geo" ? geo.confidence : undefined,
+      geoRole: resolvedSemanticType === "geo" ? geo.geoRole ?? "unknown" : undefined,
+      geoConfidence: resolvedSemanticType === "geo" ? geo.confidence : undefined,
       nullCount,
       nullPercentage: rowCount === 0 ? 0 : Number(((nullCount / rowCount) * 100).toFixed(1)),
       uniqueCount: unique.size,

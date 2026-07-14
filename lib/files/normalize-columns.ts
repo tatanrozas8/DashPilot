@@ -2,12 +2,16 @@ import type { DataRow, NormalizedColumn } from "@/types/dataset";
 import { slugify } from "@/lib/utils";
 
 function cleanHeader(value: unknown, position: number) {
-  const text = String(value ?? "").trim();
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
   return text.length ? text : `Columna ${position + 1}`;
 }
 
 export function normalizeColumnName(value: string) {
-  const withoutUnits = value.replace(/[$]/g, "").replace(/\([^)]*%[^)]*\)/g, "").replace(/%/g, "");
+  const withoutUnits = value
+    .replace(/[$]/g, "")
+    .replace(/\([^)]*%[^)]*\)/g, "")
+    .replace(/%/g, "")
+    .replace(/[-\s]+/g, " ");
   const normalized = slugify(withoutUnits);
   return normalized || "columna";
 }

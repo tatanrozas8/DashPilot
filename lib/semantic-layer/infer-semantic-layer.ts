@@ -1,4 +1,4 @@
-import type { DataRow, DatasetColumnProfile, DatasetProfile, InferredColumnType } from "@/types/dataset";
+import type { DataRow, DatasetColumnProfile, DatasetProfile, GeoRole, InferredColumnType } from "@/types/dataset";
 import { slugify } from "@/lib/utils";
 
 export type SemanticDomainName = "sales" | "finance" | "operations" | "inventory" | "hr" | "marketing" | "generic";
@@ -25,6 +25,7 @@ export interface SemanticField {
   role: SemanticRole;
   confidence: number;
   inferredType: InferredColumnType;
+  geoRole?: GeoRole;
 }
 
 export interface SemanticLayer {
@@ -105,10 +106,19 @@ function nameScore(column: DatasetColumnProfile, hints: string[]) {
   }, 0);
 }
 
+function geoRoleScore(column: DatasetColumnProfile) {
+  if (column.geoRole === "region") return 0.42;
+  if (column.geoRole === "zone" || column.geoRole === "territory") return 0.34;
+  if (column.geoRole === "city" || column.geoRole === "commune") return 0.28;
+  if (column.geoRole === "country") return 0.18;
+  if (column.geoRole === "unknown") return 0.1;
+  return 0;
+}
+
 function typeScore(column: DatasetColumnProfile, role: SemanticRole) {
   const numeric = ["number", "currency", "percentage"].includes(column.inferredType);
   if (role === "date") return column.inferredType === "date" || column.semanticType === "time" ? 0.38 : 0;
-  if (role === "geography") return column.inferredType === "geography" || column.semanticType === "geo" ? 0.34 : 0;
+  if (role === "geography") return (column.inferredType === "geography" || column.semanticType === "geo" ? 0.24 : 0) + geoRoleScore(column);
   if (["metric", "revenue", "cost", "margin", "quantity"].includes(role)) return numeric || column.semanticType === "metric" ? 0.32 : 0;
   if (role === "order") return column.semanticType === "identifier" ? 0.24 : 0;
   if (["dimension", "client", "seller", "product", "category"].includes(role)) return ["dimension", "category", "identifier", "geo"].includes(column.semanticType) ? 0.24 : 0;
@@ -135,14 +145,15 @@ function inferField(column: DatasetColumnProfile, role: SemanticRole, rowCount: 
     displayName: column.displayName,
     role,
     confidence: clamp(score),
-    inferredType: column.inferredType
+    inferredType: column.inferredType,
+    geoRole: role === "geography" ? column.geoRole : undefined
   };
 }
 
-function uniqueByField(fields: SemanticField[]) {
+function uniqueByField(fields: SemanticField[], preserveOrder = false) {
   const seen = new Set<string>();
-  return fields
-    .sort((left, right) => right.confidence - left.confidence)
+  const ordered = preserveOrder ? fields : fields.sort((left, right) => right.confidence - left.confidence);
+  return ordered
     .filter((field) => {
       if (seen.has(field.field)) return false;
       seen.add(field.field);
@@ -150,8 +161,21 @@ function uniqueByField(fields: SemanticField[]) {
     });
 }
 
+function geoPriority(role?: GeoRole) {
+  if (role === "region") return 6;
+  if (role === "zone" || role === "territory") return 5;
+  if (role === "city" || role === "commune") return 4;
+  if (role === "country") return 3;
+  if (role === "unknown") return 1;
+  return 0;
+}
+
 function inferRole(columns: DatasetColumnProfile[], role: SemanticRole, rowCount: number) {
-  return uniqueByField(columns.map((column) => inferField(column, role, rowCount)).filter((field): field is SemanticField => Boolean(field)));
+  const fields = columns.map((column) => inferField(column, role, rowCount)).filter((field): field is SemanticField => Boolean(field));
+  if (role === "geography") {
+    return uniqueByField(fields.sort((left, right) => geoPriority(right.geoRole) - geoPriority(left.geoRole) || right.confidence - left.confidence), true);
+  }
+  return uniqueByField(fields);
 }
 
 function inferDomain(profile: DatasetProfile, fieldsByRole: Pick<SemanticLayer, "clients" | "sellers" | "products" | "orders" | "revenueMetrics" | "costMetrics" | "marginMetrics" | "quantityMetrics">): SemanticLayer["domain"] {

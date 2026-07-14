@@ -1,4 +1,4 @@
-import type { DatasetColumnProfile, DatasetProfile } from "@/types/dataset";
+import type { DatasetColumnProfile, DatasetProfile, GeoRole } from "@/types/dataset";
 import type { SemanticLayer } from "@/lib/semantic-layer/infer-semantic-layer";
 import { slugify } from "@/lib/utils";
 
@@ -23,14 +23,24 @@ export interface ColumnMatch {
   column: DatasetColumnProfile;
   confidence: number;
   reason: string;
+  matchType?: ColumnMatchType;
 }
+
+export type ColumnMatchType = "exact" | "contains" | "semantic" | "fallback" | "not_found";
+export type RequestedColumnConcept = ColumnIntent | "region" | "country" | "city" | "zone" | "commune" | "territory" | string;
 
 export interface ColumnResolveResult {
   intent: ColumnIntent;
+  requestedConcept: RequestedColumnConcept;
   matchedColumn?: DatasetColumnProfile;
+  originalName?: string;
+  normalizedName?: string;
+  matchType: ColumnMatchType;
   confidence: number;
   reason: string;
   alternatives: ColumnMatch[];
+  uniqueCount?: number;
+  sampleValues?: unknown[];
 }
 
 const hints: Record<ColumnIntent, string[]> = {
@@ -60,6 +70,102 @@ function normalizedHints(intent: ColumnIntent) {
 
 function containsAny(text: string, words: string[]) {
   return words.some((word) => text.includes(word));
+}
+
+function hasToken(text: string, token: string) {
+  return text.split("_").includes(token);
+}
+
+function geoConcept(prompt: string): RequestedColumnConcept {
+  const text = normalize(prompt);
+  if (hasToken(text, "region") || text.includes("regiones")) return "region";
+  if (hasToken(text, "zona") || text.includes("territorio")) return "zone";
+  if (hasToken(text, "ciudad")) return "city";
+  if (hasToken(text, "comuna")) return "commune";
+  if (hasToken(text, "pais") || hasToken(text, "country")) return "country";
+  return "geography";
+}
+
+function geoPriorityForConcept(concept: RequestedColumnConcept, role?: GeoRole) {
+  if (concept === "region") {
+    if (role === "region") return 100;
+    if (role === "zone" || role === "territory") return 76;
+    if (role === "city" || role === "commune") return 58;
+    if (role === "country") return 52;
+    return 10;
+  }
+  if (concept === "country") {
+    if (role === "country") return 100;
+    if (role === "region") return 48;
+    if (role === "zone" || role === "territory") return 40;
+    if (role === "city" || role === "commune") return 30;
+    return 10;
+  }
+  if (concept === "zone" || concept === "territory") {
+    if (role === "zone" || role === "territory") return 100;
+    if (role === "region") return 82;
+    if (role === "city" || role === "commune") return 52;
+    if (role === "country") return 34;
+    return 10;
+  }
+  if (concept === "city" || concept === "commune") {
+    if (role === concept) return 100;
+    if (role === "city" || role === "commune") return 90;
+    if (role === "region" || role === "zone" || role === "territory") return 56;
+    if (role === "country") return 30;
+    return 10;
+  }
+  if (role === "region") return 100;
+  if (role === "zone" || role === "territory") return 88;
+  if (role === "city" || role === "commune") return 76;
+  if (role === "country") return 64;
+  if (role === "unknown") return 22;
+  return 0;
+}
+
+function geoMatchType(concept: RequestedColumnConcept, column: DatasetColumnProfile): ColumnMatchType {
+  const normalizedName = normalize(column.normalizedName);
+  if ((concept === "region" && normalizedName === "region") || (concept === "country" && ["pais", "country"].includes(normalizedName)) || normalizedName === concept) return "exact";
+  if (normalizedName.includes(String(concept))) return "contains";
+  if (geoPriorityForConcept(concept, column.geoRole) >= 90) return "semantic";
+  return "fallback";
+}
+
+function geographyMatches(prompt: string, context: ColumnResolverContext): ColumnMatch[] {
+  const concept = geoConcept(prompt);
+  const promptText = normalize(prompt);
+  return context.datasetProfile.columns
+    .map((column) => {
+      const normalizedName = normalize(column.normalizedName);
+      const displayText = columnText(column);
+      const exactName =
+        (concept === "region" && normalizedName === "region") ||
+        (concept === "country" && ["pais", "country"].includes(normalizedName)) ||
+        normalizedName === concept;
+      const containsConcept = normalizedName.includes(String(concept)) || displayText.includes(String(concept));
+      const directName = promptText.includes(normalize(column.originalName)) || promptText.includes(normalize(column.displayName)) || promptText.includes(normalize(column.normalizedName));
+      const rolePriority = geoPriorityForConcept(concept, column.geoRole);
+      const typeBonus = column.semanticType === "geo" || column.inferredType === "geography" ? 12 : 0;
+      const nameBonus = exactName ? 22 : containsConcept ? 16 : directName ? 10 : 0;
+      const rawScore = rolePriority + typeBonus + nameBonus;
+      const confidence = Math.min(0.99, Number((rawScore / 132).toFixed(2)));
+      const matchType = geoMatchType(concept, column);
+      return {
+        column,
+        confidence,
+        matchType,
+        reason:
+          matchType === "exact"
+            ? `Coincide exactamente con "${column.displayName}".`
+            : matchType === "contains"
+              ? `El nombre de "${column.displayName}" contiene ${concept}.`
+              : matchType === "semantic"
+                ? `Coincide por rol geografico ${column.geoRole}.`
+                : `Fallback geografico para ${concept}; no se encontro una columna mas especifica.`
+      };
+    })
+    .filter((match) => match.confidence >= 0.2)
+    .sort((left, right) => right.confidence - left.confidence || geoPriorityForConcept(concept, right.column.geoRole) - geoPriorityForConcept(concept, left.column.geoRole));
 }
 
 function semanticFields(context: ColumnResolverContext, intent: ColumnIntent) {
@@ -102,6 +208,35 @@ export function inferColumnIntent(prompt: string, fallback: ColumnIntent = "dime
 }
 
 export function resolveColumn(prompt: string, context: ColumnResolverContext, intent = inferColumnIntent(prompt)): ColumnResolveResult {
+  if (intent === "geography") {
+    const requestedConcept = geoConcept(prompt);
+    const matches = geographyMatches(prompt, context);
+    const best = matches[0];
+    if (!best || best.confidence < 0.45) {
+      return {
+        intent,
+        requestedConcept,
+        matchType: "not_found",
+        confidence: 0,
+        reason: `No encontre una columna compatible con "${prompt}".`,
+        alternatives: matches.slice(0, 4)
+      };
+    }
+    return {
+      intent,
+      requestedConcept,
+      matchedColumn: best.column,
+      originalName: best.column.originalName,
+      normalizedName: best.column.normalizedName,
+      matchType: best.matchType ?? "semantic",
+      confidence: best.confidence,
+      reason: best.reason,
+      alternatives: matches.slice(1, 5),
+      uniqueCount: best.column.uniqueCount,
+      sampleValues: best.column.sampleValues
+    };
+  }
+
   const promptText = normalize(prompt);
   const intentHints = normalizedHints(intent);
   const semantic = new Map(semanticFields(context, intent).map((field, index) => [field.field, { confidence: field.confidence, index }]));
@@ -133,6 +268,8 @@ export function resolveColumn(prompt: string, context: ColumnResolverContext, in
   if (!best || best.confidence < 0.48) {
     return {
       intent,
+      requestedConcept: intent,
+      matchType: "not_found",
       confidence: 0,
       reason: `No encontre una columna compatible con "${prompt}".`,
       alternatives: matches.slice(0, 4)
@@ -141,10 +278,16 @@ export function resolveColumn(prompt: string, context: ColumnResolverContext, in
 
   return {
     intent,
+    requestedConcept: intent,
     matchedColumn: best.column,
+    originalName: best.column.originalName,
+    normalizedName: best.column.normalizedName,
+    matchType: "semantic",
     confidence: best.confidence,
     reason: best.reason,
-    alternatives: matches.slice(1, 5)
+    alternatives: matches.slice(1, 5),
+    uniqueCount: best.column.uniqueCount,
+    sampleValues: best.column.sampleValues
   };
 }
 

@@ -20,6 +20,8 @@ export type SemanticColumnType =
   | "measure"
   | "unknown";
 
+export type GeoRole = "region" | "country" | "city" | "zone" | "commune" | "territory" | "unknown";
+
 export interface DatasetColumnProfile {
   originalName: string;
   normalizedName: string;
@@ -31,6 +33,9 @@ export interface DatasetColumnProfile {
   inferredType: InferredColumnType;
   semanticType: SemanticColumnType;
   userSemanticType?: SemanticColumnType;
+  semanticConfidence?: number;
+  geoRole?: GeoRole;
+  geoConfidence?: number;
   nullCount: number;
   nullPercentage: number;
   uniqueCount: number;

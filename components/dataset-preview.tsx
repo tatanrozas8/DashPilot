@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { BarChart3, Calendar, CheckCircle2, Database, Download, FileSpreadsheet, Sparkles, Table2, Timer } from "lucide-react";
 import { AppShell } from "@/components/shared/app-shell";
 import { useToast } from "@/components/shared/toast";
+import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { loadPersistedDataset } from "@/lib/data-access";
+import { createDatasetDiagnostics, logDatasetDiagnostics } from "@/lib/debug/dataset-diagnostics";
 import { useDashPilotStore } from "@/lib/store/app-store";
 
 export function DatasetPreview() {
@@ -18,6 +20,8 @@ export function DatasetPreview() {
   const selectedSheetName = useDashPilotStore((state) => state.selectedSheetName);
   const selectSheet = useDashPilotStore((state) => state.selectSheet);
   const importWarnings = useDashPilotStore((state) => state.importWarnings);
+  const dashboard = useDashPilotStore((state) => state.dashboard);
+  const viewState = useDashPilotStore((state) => state.viewState);
   const persistenceMode = useDashPilotStore((state) => state.persistenceMode);
   const persistenceStatus = useDashPilotStore((state) => state.persistenceStatus);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
@@ -26,9 +30,16 @@ export function DatasetPreview() {
   const [loading, setLoading] = useState(false);
   const [showAllInsights, setShowAllInsights] = useState(false);
   const [showAllKpis, setShowAllKpis] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<string | null>(null);
   const visibleColumns = profile.columns.length ? profile.columns.map((column) => column.normalizedName) : Object.keys(rows[0] ?? {});
   const hasRows = rows.length > 0;
+  const diagnostics = useMemo(() => {
+    const copilotContext = process.env.NODE_ENV === "development" && hasRows
+      ? buildCopilotContext({ rows, datasetProfile: profile, dashboardSpec: dashboard, viewState })
+      : undefined;
+    return createDatasetDiagnostics({ profile, parsedDataset, dashboardSpec: dashboard, copilotContext });
+  }, [dashboard, hasRows, parsedDataset, profile, rows, viewState]);
   const updatedAt = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" }) : "Sin actualizacion";
   const dateColumn = profile.columns.find((column) => profile.detectedDateColumns.includes(column.normalizedName));
   const detectedPeriod = dateColumn ? `Detectado desde ${dateColumn.displayName}` : "Sin periodo detectado";
@@ -75,6 +86,10 @@ export function DatasetPreview() {
       active = false;
     };
   }, [activeDatasetId, hydrateDataset, params.datasetId, toast]);
+
+  useEffect(() => {
+    if (hasRows) logDatasetDiagnostics(diagnostics);
+  }, [diagnostics, hasRows]);
 
   return (
     <AppShell>
@@ -219,6 +234,40 @@ export function DatasetPreview() {
               </article>
             ))}
           </div>
+        </section>}
+
+        {hasRows && process.env.NODE_ENV === "development" && <section className="mt-7 rounded-xl border border-dashed border-[#b8c2e6] bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold">Diagnostico dataset</h2>
+              <p className="mt-1 text-sm text-[#536088]">{diagnostics.parsedRowCount.toLocaleString("en-US")} filas procesadas - {diagnostics.parsedColumnCount} columnas parseadas - hoja {diagnostics.selectedSheetName ?? "actual"}</p>
+            </div>
+            <button onClick={() => setShowDiagnostics((value) => !value)} className="rounded-lg border border-[#dfe5fb] px-4 py-2 text-sm font-semibold text-[#3d35ff]">{showDiagnostics ? "Ocultar columnas" : "Columnas detectadas"}</button>
+          </div>
+          {showDiagnostics && (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-[#edf1fa]">
+              <table className="w-full min-w-[920px] text-left text-xs">
+                <thead className="bg-[#fbfcff] text-[#536088]">
+                  <tr>
+                    {["Original", "Normalizada", "Tipo", "Semantica", "GeoRole", "Unicos", "Muestras"].map((header) => <th key={header} className="border-b border-[#edf1fa] px-3 py-2 font-bold">{header}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {diagnostics.columns.map((column) => (
+                    <tr key={column.normalized} className="border-b border-[#edf1fa] last:border-0">
+                      <td className="px-3 py-2 font-semibold text-[#1c2748]">{column.original}</td>
+                      <td className="px-3 py-2 text-[#1c2748]">{column.normalized}</td>
+                      <td className="px-3 py-2 text-[#536088]">{column.inferredType}</td>
+                      <td className="px-3 py-2 text-[#536088]">{column.semanticType}</td>
+                      <td className="px-3 py-2 text-[#536088]">{column.geoRole ?? "-"}</td>
+                      <td className="px-3 py-2 text-[#536088]">{column.uniqueCount}</td>
+                      <td className="max-w-[260px] truncate px-3 py-2 text-[#536088]">{column.sampleValues.map((value) => String(value)).join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>}
       </div>
     </AppShell>

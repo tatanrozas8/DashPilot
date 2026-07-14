@@ -1,0 +1,7 @@
+fecha,pais,region,canal,cliente_id,sku_id,ventas
+2024-01-01,Chile,Norte,Online,C001,SKU001,1200
+2024-01-02,Chile,Centro,Tienda,C002,SKU002,1800
+2024-01-03,Chile,Sur,Online,C003,SKU003,900
+2024-01-04,Chile,Norte,Mayoristas,C004,SKU004,2100
+2024-01-05,Chile,Centro,Online,C005,SKU005,1600
+2024-01-06,Chile,Sur,Tienda,C006,SKU006,1300

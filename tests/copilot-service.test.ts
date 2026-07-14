@@ -33,6 +33,23 @@ function customContext(prompt: string, rows: DataRow[]): CopilotRequestContext {
   };
 }
 
+function selectedCustomContext(prompt: string, rows: DataRow[], selectedTargetId = "sales_by_region"): CopilotRequestContext {
+  const ctx = customContext(prompt, rows);
+  const selected = ctx.dashboardSpec.widgets.find((widget) => widget.id === selectedTargetId);
+  return {
+    ...ctx,
+    viewState: {
+      ...ctx.viewState,
+      highlightedWidgetId: selectedTargetId,
+      selectedTargetType: selected?.type === "kpi_card" ? "kpi" : selected?.type === "table" ? "table" : "widget",
+      selectedTargetId,
+      selectedTargetTitle: selected?.title,
+      selectedTargetSpec: selected,
+      selectedTargetCapabilities: ["change_chart_type", "update_query", "orientation"]
+    }
+  };
+}
+
 describe("copilot service", () => {
   it("accepts valid structured actions against existing columns and widgets", () => {
     const ctx = context("cambia a barras");
@@ -221,6 +238,77 @@ describe("copilot service", () => {
     expect(changed?.query?.x?.granularity).toBe("year");
     expect(changed?.query?.seriesBy).toBe("region");
     expect(changed?.type).toBe("line_chart");
+  });
+
+  it("does not interpret correction text as a filter", () => {
+    const ctx = selectedCustomContext("No, no te pedi cambiar la logica", [
+      { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2024-01-02", region: "Biobio", canal: "Mayoristas", ventas: 120 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.some((action) => action.type === "add_or_update_filter" || action.type === "add_filter")).toBe(false);
+    expect(result.updatedViewState?.filters).toEqual([]);
+    expect(result.reply).not.toContain("Listo");
+  });
+
+  it("changes only selected bar chart orientation when requested", () => {
+    const ctx = selectedCustomContext("Actualmente el grafico se ve horizontal y quiero que lo muestre vertical.", [
+      { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2024-01-02", region: "Biobio", canal: "Mayoristas", ventas: 120 }
+    ]);
+    const before = ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+    const result = createMockCopilotResponse(ctx);
+    const after = result.updatedDashboardSpec?.widgets.find((widget) => widget.id === "sales_by_region");
+
+    expect(result.actions?.[0]?.type).toBe("update_widget_visual_config");
+    expect(after?.config.visualConfig?.orientation).toBe("vertical");
+    expect(after?.query).toEqual(before?.query);
+    expect(result.updatedViewState?.filters).toEqual([]);
+  });
+
+  it("returns undo action for correction asking to go back", () => {
+    const ctx = selectedCustomContext("No, vuelve atras", [
+      { fecha: "2024-01-01", region: "RM", ventas: 100 },
+      { fecha: "2024-01-02", region: "Biobio", ventas: 120 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.[0]?.type).toBe("undo_last_action");
+  });
+
+  it("creates a new chart instead of replacing the selected widget", () => {
+    const ctx = selectedCustomContext("Crea un nuevo grafico de ventas por region", [
+      { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 100 },
+      { fecha: "2024-01-02", region: "Biobio", canal: "Mayoristas", ventas: 120 }
+    ]);
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.[0]?.type).toBe("add_widget");
+    expect(result.updatedDashboardSpec?.widgets).toHaveLength(ctx.dashboardSpec.widgets.length + 1);
+    expect(result.updatedDashboardSpec?.widgets.find((widget) => widget.id === "sales_by_region")?.query).toEqual(ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region")?.query);
+  });
+
+  it("updates selected chart when prompt says this chart", () => {
+    const ctx = selectedCustomContext("Cambia este grafico a barras", [
+      { fecha: "2024-01-01", region: "RM", ventas: 100 },
+      { fecha: "2024-01-02", region: "Biobio", ventas: 120 }
+    ], "sales_by_month");
+    const result = createMockCopilotResponse(ctx);
+
+    expect(result.actions?.[0]?.type).toBe("change_chart_type");
+    expect(result.updatedDashboardSpec?.widgets.find((widget) => widget.id === "sales_by_month")?.type).toBe("bar_chart");
+  });
+
+  it("asks for selection when prompt says this chart without selected target", () => {
+    const ctx = customContext("Cambia este grafico a barras", [
+      { fecha: "2024-01-01", region: "RM", ventas: 100 },
+      { fecha: "2024-01-02", region: "Biobio", ventas: 120 }
+    ]);
+    const result = createMockCopilotResponse({ ...ctx, viewState: { filters: [] } });
+
+    expect(result.actions?.[0]?.type).toBe("ask_clarification");
+    expect(result.reply).toContain("Selecciona primero");
   });
 
   it("applies filter, clear and explain actions only to spec or view state", () => {

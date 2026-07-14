@@ -12,6 +12,22 @@ export type WidgetType =
   | "table"
   | "insight_text";
 
+export type DashboardTargetType = "dashboard" | "widget" | "kpi" | "table" | "filter" | "presentation" | "slide" | "none";
+export type DashboardVisualOrientation = "horizontal" | "vertical";
+
+export interface DashboardWidgetVisualConfig {
+  orientation?: DashboardVisualOrientation;
+  legend?: boolean;
+}
+
+export interface DashboardSelectedTarget {
+  selectedTargetType: DashboardTargetType;
+  selectedTargetId?: string;
+  selectedTargetTitle?: string;
+  selectedTargetSpec?: unknown;
+  selectedTargetCapabilities: string[];
+}
+
 export interface DashboardSpec {
   id: string;
   title: string;
@@ -48,7 +64,12 @@ export interface DashboardWidget {
   title: string;
   description?: string;
   query?: DashboardQuerySpec;
-  config: Record<string, unknown>;
+  config: Record<string, unknown> & {
+    visualConfig?: DashboardWidgetVisualConfig;
+    horizontal?: boolean;
+    hidden?: boolean;
+    columns?: string[];
+  };
   position: {
     x: number;
     y: number;
@@ -116,6 +137,12 @@ export interface DashboardViewState {
     };
     pageSize?: number;
   };
+  selectedTargetType?: DashboardTargetType;
+  selectedTargetId?: string;
+  selectedTargetTitle?: string;
+  selectedTargetSpec?: unknown;
+  selectedTargetCapabilities?: string[];
+  copilotIntent?: "modify_selection" | "create_chart" | "modify_dashboard" | "filters" | "data_table" | "presentation";
 }
 
 export type QueryResultRow = DataRow & {
@@ -130,6 +157,11 @@ export type DashboardAction =
   | { type: "update_dashboard_design"; design: DashboardDesignSettings }
   | { type: "update_widget_title"; widgetId: string; title: string }
   | { type: "update_widget"; widgetId: string; changes: Partial<DashboardWidget> }
+  | { type: "update_widget_visual_config"; widgetId: string; visualConfig: DashboardWidgetVisualConfig }
+  | { type: "select_target"; targetType: DashboardTargetType; targetId?: string }
+  | { type: "clear_selected_target" }
+  | { type: "replace_widget"; widgetId: string; widget: DashboardWidget }
+  | { type: "undo_last_action" }
   | { type: "remove_widget"; widgetId: string }
   | { type: "duplicate_widget"; widgetId: string }
   | { type: "change_chart_type"; widgetId: string; chartType: WidgetType }

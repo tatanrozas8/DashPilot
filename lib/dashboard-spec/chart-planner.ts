@@ -319,7 +319,7 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
     const target = targetWidget(context.dashboardSpec, context.viewState, analysisPlan.xAxis.normalizedName);
     let chartAction: DashboardAction;
     if (compatibleUpdateTarget(target)) {
-      chartAction = { type: "update_widget", widgetId: target.id, changes: { type: "bar_chart", title, query, config: { generatedBy: "copilot", seriesBy: seriesField, horizontal: true } } };
+      chartAction = { type: "update_widget", widgetId: target.id, changes: { type: "bar_chart", title, query, config: { generatedBy: "copilot", seriesBy: seriesField, visualConfig: { orientation: "horizontal" }, horizontal: true } } };
     } else {
       chartAction = {
         type: "add_widget",
@@ -328,7 +328,7 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
           type: "bar_chart",
           title,
           query,
-          config: { generatedBy: "copilot", seriesBy: seriesField, horizontal: true },
+          config: { generatedBy: "copilot", seriesBy: seriesField, visualConfig: { orientation: "horizontal" }, horizontal: true },
           position: nextWidgetPosition(context.dashboardSpec)
         }
       };

@@ -81,6 +81,13 @@ export interface CopilotContext {
   dashboardSpec: DashboardSpec;
   dashboardDesign: DashboardSpec["design"];
   viewState: DashboardViewState;
+  selectedTarget: {
+    type: DashboardViewState["selectedTargetType"];
+    id?: string;
+    title?: string;
+    spec?: unknown;
+    capabilities: string[];
+  };
   presentationSpec?: PresentationSpec;
   recentMessages: ChatMessage[];
   insights: string[];
@@ -243,6 +250,13 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
     dashboardSpec: input.dashboardSpec,
     dashboardDesign: input.dashboardSpec.design,
     viewState: input.viewState,
+    selectedTarget: {
+      type: input.viewState.selectedTargetType ?? "none",
+      id: input.viewState.selectedTargetId,
+      title: input.viewState.selectedTargetTitle,
+      spec: input.viewState.selectedTargetSpec,
+      capabilities: input.viewState.selectedTargetCapabilities ?? []
+    },
     presentationSpec: input.presentationSpec,
     recentMessages: (input.messages ?? []).slice(-MAX_MESSAGES),
     insights: [
@@ -259,6 +273,11 @@ export function buildCopilotContext(input: BuildCopilotContextInput): CopilotCon
       "update_dashboard_design",
       "add_widget",
       "update_widget",
+      "update_widget_visual_config",
+      "select_target",
+      "clear_selected_target",
+      "replace_widget",
+      "undo_last_action",
       "add_or_update_filter",
       "show_data_explorer",
       "select_visible_columns",
@@ -324,6 +343,7 @@ export function toProviderContext(context: CopilotContext) {
       globalFilters: context.dashboardSpec.globalFilters
     },
     viewState: context.viewState,
+    selectedTarget: context.selectedTarget,
     availableActions: context.availableActions,
     presentation: context.presentationSpec
       ? {

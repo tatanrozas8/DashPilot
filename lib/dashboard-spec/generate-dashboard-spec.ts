@@ -146,7 +146,7 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
       type: "bar_chart",
       title: geoBreakdownField && isSalesDomain ? `Ventas por ${fieldLabel(geoBreakdown, "Region")}` : secondaryDimension ? `${salesField ? metricLabel : "Registros"} por ${fieldLabel(semantic.primaryDimension)}` : "Distribucion principal",
       query: salesField && (geoBreakdownField ?? secondaryDimension) ? { metric: { field: salesField, aggregation: "sum" }, groupBy: [geoBreakdownField ?? secondaryDimension!], orderBy: { field: "value", direction: "desc" }, limit: 5 } : (geoBreakdownField ?? secondaryDimension) ? { groupBy: [geoBreakdownField ?? secondaryDimension!], orderBy: { field: "value", direction: "desc" }, limit: 5 } : undefined,
-      config: { format: metricFormat, horizontal: true, semanticConfidence: geoBreakdown?.confidence ?? semantic.primaryDimension?.confidence },
+      config: { format: metricFormat, visualConfig: { orientation: "horizontal" }, horizontal: true, semanticConfidence: geoBreakdown?.confidence ?? semantic.primaryDimension?.confidence },
       position: { x: 6, y: 1, w: 6, h: 3 }
     }),
     widget("top_sellers", {

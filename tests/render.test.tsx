@@ -2,7 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { CopilotPanel, DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { ToastProvider } from "@/components/shared/toast";
+import { barOrientation } from "@/lib/dashboard-spec/visual-config";
 import { useDashPilotStore } from "@/lib/store/app-store";
+import type { DashboardWidget } from "@/types/dashboard";
 
 describe("DashboardRenderer", () => {
   it("renders core dashboard widgets", () => {
@@ -36,5 +38,20 @@ describe("DashboardRenderer", () => {
     await waitFor(() => expect(input).toHaveValue(""));
     expect(screen.getByText("Hazlo mas ejecutivo")).toBeInTheDocument();
     expect(await screen.findByText(/Simplifique la vista ejecutiva/)).toBeInTheDocument();
+  });
+
+  it("resolves bar chart renderer orientation from visualConfig and legacy horizontal flag", () => {
+    const base: DashboardWidget = {
+      id: "bar",
+      type: "bar_chart",
+      title: "Ventas por Region",
+      query: { metric: { field: "Ventas", aggregation: "sum" }, groupBy: ["Region"] },
+      config: {},
+      position: { x: 0, y: 0, w: 6, h: 3 }
+    };
+
+    expect(barOrientation({ ...base, config: { visualConfig: { orientation: "vertical" }, horizontal: true } })).toBe("vertical");
+    expect(barOrientation({ ...base, config: { horizontal: false } })).toBe("vertical");
+    expect(barOrientation({ ...base, config: { horizontal: true } })).toBe("horizontal");
   });
 });

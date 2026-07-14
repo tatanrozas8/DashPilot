@@ -3,7 +3,7 @@ import type { DatasetProfile } from "@/types/dataset";
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
-import { dashboardFilterSchema, dashboardQuerySchema } from "@/lib/validation/schemas";
+import { dashboardFilterSchema, dashboardQuerySchema, dashboardWidgetVisualConfigSchema } from "@/lib/validation/schemas";
 
 const widgetTypeSchema = z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]);
 const aggregationSchema = z.enum(["sum", "avg", "count", "count_distinct", "min", "max"]);
@@ -60,14 +60,20 @@ const widgetChangesSchema = z.object({
     h: z.number()
   }).optional()
 });
+const targetTypeSchema = z.enum(["dashboard", "widget", "kpi", "table", "filter", "presentation", "slide", "none"]);
 
 export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_widget"), widget: dashboardWidgetSchema }),
+  z.object({ type: z.literal("replace_widget"), widgetId: z.string(), widget: dashboardWidgetSchema }),
+  z.object({ type: z.literal("select_target"), targetType: targetTypeSchema, targetId: z.string().optional() }),
+  z.object({ type: z.literal("clear_selected_target") }),
+  z.object({ type: z.literal("undo_last_action") }),
   z.object({ type: z.literal("update_dashboard_title"), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_dashboard_subtitle"), subtitle: z.string().max(240) }),
   z.object({ type: z.literal("update_dashboard_design"), design: dashboardDesignSchema }),
   z.object({ type: z.literal("update_widget_title"), widgetId: z.string(), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_widget"), widgetId: z.string(), changes: widgetChangesSchema }),
+  z.object({ type: z.literal("update_widget_visual_config"), widgetId: z.string(), visualConfig: dashboardWidgetVisualConfigSchema }),
   z.object({ type: z.literal("remove_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("duplicate_widget"), widgetId: z.string() }),
   z.object({ type: z.literal("change_chart_type"), widgetId: z.string(), chartType: widgetTypeSchema }),
@@ -148,6 +154,7 @@ function fieldsForAction(action: DashboardAction) {
   if (action.type === "group_by") return action.fields;
   if (action.type === "explain_column") return [action.field];
   if (action.type === "add_widget") return [...queryFields(action.widget.query), ...configFields(action.widget.config)];
+  if (action.type === "replace_widget") return [...queryFields(action.widget.query), ...configFields(action.widget.config)];
   if (action.type === "update_widget") return [...queryFields(action.changes.query), ...configFields(action.changes.config)];
   if (action.type === "create_calculated_metric") return action.operands;
   if (action.type === "update_view_state") {
@@ -168,7 +175,7 @@ export function validateCopilotAction(rawAction: unknown, context: CopilotValida
   const missingField = fieldsForAction(action).find((field) => field && !columns.has(field));
   if (missingField) return { success: false, error: `La accion referencia una columna inexistente: ${missingField}.` };
 
-  if (["update_widget", "update_widget_title", "remove_widget", "duplicate_widget", "change_chart_type", "explain_widget", "focus_widget", "resize_widget", "show_widget_data"].includes(action.type)) {
+  if (["update_widget", "update_widget_visual_config", "update_widget_title", "replace_widget", "remove_widget", "duplicate_widget", "change_chart_type", "explain_widget", "focus_widget", "resize_widget", "show_widget_data"].includes(action.type)) {
     const widgetId = "widgetId" in action ? action.widgetId : undefined;
     if (!widgetId || !widgets.has(widgetId)) return { success: false, error: "La accion referencia un widget inexistente." };
   }
@@ -193,6 +200,21 @@ export function validateCopilotAction(rawAction: unknown, context: CopilotValida
 
   if (action.type === "add_widget" && widgets.has(action.widget.id)) {
     return { success: false, error: "La accion intenta crear un widget con id duplicado." };
+  }
+
+  if (action.type === "replace_widget" && widgets.has(action.widget.id) && action.widget.id !== action.widgetId) {
+    return { success: false, error: "La accion intenta reemplazar con un id duplicado." };
+  }
+
+  if (action.type === "select_target" && action.targetId && !widgets.has(action.targetId) && action.targetType !== "dashboard") {
+    return { success: false, error: "La accion intenta seleccionar un objetivo inexistente." };
+  }
+
+  if (action.type === "update_widget_visual_config") {
+    const widget = widgets.get(action.widgetId);
+    if (action.visualConfig.orientation && widget?.type !== "bar_chart") {
+      return { success: false, error: "Este tipo de grafico no admite orientacion. Puedo convertirlo a barras verticales si quieres." };
+    }
   }
 
   if (action.type === "change_chart_type") {

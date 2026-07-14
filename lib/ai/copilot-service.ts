@@ -4,6 +4,7 @@ import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidge
 import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { executeCopilotActions } from "@/lib/ai/action-execution-engine";
+import { buildActionPlan } from "@/lib/ai/action-plan";
 import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
@@ -62,8 +63,13 @@ export const copilotOutputJsonSchema = {
                 "update_dashboard_title",
                 "update_dashboard_design",
                 "update_widget_title",
+                "update_widget_visual_config",
                 "update_dashboard_subtitle",
                 "add_widget",
+                "replace_widget",
+                "select_target",
+                "clear_selected_target",
+                "undo_last_action",
                 "update_widget",
                 "remove_widget",
                 "duplicate_widget",
@@ -131,7 +137,12 @@ function widgetByText(spec: DashboardSpec, text: string) {
 }
 
 function preferredWidget(spec: DashboardSpec, prompt: string, viewState?: DashboardViewState) {
-  return (viewState?.highlightedWidgetId ? spec.widgets.find((widget) => widget.id === viewState.highlightedWidgetId) : undefined) ?? widgetByText(spec, prompt) ?? chartWidgets(spec)[0] ?? spec.widgets[0];
+  const selectedId = viewState?.selectedTargetType && viewState.selectedTargetType !== "dashboard" && viewState.selectedTargetType !== "none" ? viewState.selectedTargetId : undefined;
+  return (selectedId ? spec.widgets.find((widget) => widget.id === selectedId) : undefined)
+    ?? (viewState?.highlightedWidgetId ? spec.widgets.find((widget) => widget.id === viewState.highlightedWidgetId) : undefined)
+    ?? widgetByText(spec, prompt)
+    ?? chartWidgets(spec)[0]
+    ?? spec.widgets[0];
 }
 
 function nextWidgetId(spec: DashboardSpec, prefix = "ai_widget") {
@@ -167,7 +178,7 @@ function createAnalysisWidget(context: CopilotRequestContext, options: { metric?
     type: options.type ?? "bar_chart",
     title: options.title,
     query: { metric: { field: metric, aggregation: options.aggregation ?? "sum" }, groupBy: [dimension], orderBy: { field: "value" as const, direction: "desc" as const }, limit: options.limit ?? 5 },
-    config: { format: options.format ?? "number", compact: true, generatedBy: "copilot" },
+    config: { format: options.format ?? "number", compact: true, generatedBy: "copilot", visualConfig: { orientation: "horizontal" }, horizontal: true },
     position: nextWidgetPosition(context.dashboardSpec)
   } satisfies DashboardWidget;
 }
@@ -198,7 +209,7 @@ function breakdownWidgetActions(context: CopilotRequestContext, options: { dimen
         type: chartTarget.type === "line_chart" || chartTarget.type === "area_chart" ? chartTarget.type : "bar_chart",
         title,
         query,
-        config: { ...chartTarget.config, horizontal: true, generatedBy: "copilot" }
+        config: { ...chartTarget.config, visualConfig: { ...(chartTarget.config.visualConfig ?? {}), orientation: "horizontal" }, horizontal: true, generatedBy: "copilot" }
       }
     };
     const focusAction: DashboardAction = { type: "focus_widget", widgetId: chartTarget.id };
@@ -313,7 +324,31 @@ function designFromPrompt(prompt: string): DashboardAction | null {
 
 function planLocalActions(context: CopilotRequestContext): { reply: string; envelopes: CopilotActionEnvelope[]; warnings?: string[] } {
   const prompt = normalize(context.prompt);
-  const target = preferredWidget(context.dashboardSpec, context.prompt, context.viewState);
+  const actionPlan = buildActionPlan({ prompt: context.prompt, dashboardSpec: context.dashboardSpec, viewState: context.viewState });
+  const target = actionPlan.target ?? preferredWidget(context.dashboardSpec, context.prompt, context.viewState);
+
+  if (actionPlan.createNewWidget) {
+    const dimensionIntent = prompt.includes("producto") ? "product" : prompt.includes("categoria") || prompt.includes("categorÃ­a") ? "category" : prompt.includes("region") || prompt.includes("pais") || prompt.includes("zona") ? "geography" : "dimension";
+    const dimension = resolveColumn(context.prompt, availableContext(context), dimensionIntent);
+    if (!dimension.matchedColumn) return noColumnAction(dimensionIntent, context);
+    const metric = resolveColumn(context.prompt, availableContext(context), prompt.includes("margen") ? "margin" : "revenue");
+    const metricField = metric.matchedColumn?.normalizedName ?? context.semanticModel.primaryMetric?.field;
+    const title = `${fieldLabel(context.datasetProfile, metricField)} por ${dimension.matchedColumn.displayName}`;
+    const widget = createAnalysisWidget(context, { metric: metricField, dimension: dimension.matchedColumn.normalizedName, title, type: actionPlan.chartType && actionPlan.chartType !== "kpi_card" ? actionPlan.chartType : "bar_chart", limit: 10 });
+    if (!widget) return { reply: "Encontre la dimension solicitada, pero falta una metrica compatible para crear el grafico.", envelopes: [] };
+    return { reply: `Agregue un nuevo grafico usando "${dimension.matchedColumn.originalName}" y la metrica principal.`, envelopes: [actionEnvelope({ type: "add_widget", widget }, "El usuario pidio crear un grafico nuevo, no reemplazar la seleccion.", Math.min(dimension.confidence, metric.confidence || 0.78))] };
+  }
+
+  if (actionPlan.replaceSelectedWidget) {
+    if (!target) return { reply: "Selecciona primero el grafico que quieres reemplazar.", envelopes: [] };
+    const dimension = resolveColumn(context.prompt, availableContext(context), prompt.includes("region") || prompt.includes("pais") || prompt.includes("zona") ? "geography" : "dimension");
+    if (!dimension.matchedColumn) return noColumnAction("dimension", context);
+    const metric = resolveColumn(context.prompt, availableContext(context), prompt.includes("margen") ? "margin" : "revenue");
+    const metricField = metric.matchedColumn?.normalizedName ?? context.semanticModel.primaryMetric?.field;
+    const widget = createAnalysisWidget(context, { metric: metricField, dimension: dimension.matchedColumn.normalizedName, title: `${fieldLabel(context.datasetProfile, metricField)} por ${dimension.matchedColumn.displayName}`, type: actionPlan.chartType ?? "bar_chart", limit: 10 });
+    if (!widget) return { reply: "No pude construir el reemplazo porque falta metrica o dimension compatible.", envelopes: [] };
+    return { reply: `Reemplace el grafico seleccionado por ${widget.title}.`, envelopes: [actionEnvelope({ type: "replace_widget", widgetId: target.id, widget }, "El usuario pidio reemplazar el grafico seleccionado.", Math.min(dimension.confidence, metric.confidence || 0.78))] };
+  }
 
   if (prompt.includes("estilo") || prompt.includes("diseno") || prompt.includes("diseño") || prompt.includes("color") || prompt.includes("tema") || prompt.includes("compact") || prompt.includes("paleta")) {
     const action = designFromPrompt(prompt);
@@ -685,7 +720,17 @@ function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotA
 
 export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotResult {
   const source = input.source ?? "mock";
-  const analyticalPlan = planAnalyticalChart(input);
+  const actionPlan = buildActionPlan({ prompt: input.prompt, dashboardSpec: input.dashboardSpec, viewState: input.viewState });
+  if (actionPlan.needsClarification) {
+    return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: actionPlan.clarification ?? "Necesito una aclaracion antes de aplicar cambios." }, actionPlan.reason, actionPlan.confidence)], source, actionPlan.clarification ?? "Necesito una aclaracion antes de aplicar cambios.");
+  }
+  if (actionPlan.action) {
+    return applyValidatedActions(input, [actionEnvelope(actionPlan.action, actionPlan.reason, actionPlan.confidence)], source, actionPlan.action.type === "undo_last_action" ? "Voy a deshacer el ultimo cambio del Copiloto." : "Aplique el plan contextual validado.");
+  }
+  if (actionPlan.messageKind === "correction") {
+    return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: "Entendido: no aplicare filtros ni cambiare columnas. Indica si quieres deshacer, cambiar solo lo visual o reemplazar el grafico seleccionado." }, actionPlan.reason, 0.86)], source, "No aplique cambios porque tu mensaje es una correccion, no una nueva orden de datos.");
+  }
+  const analyticalPlan = actionPlan.createNewWidget ? { handled: false as const, reply: "", actions: [], confidence: 0 } : planAnalyticalChart(input);
   if (analyticalPlan.handled) {
     return applyValidatedActions(
       input,
@@ -730,7 +775,10 @@ export function buildCopilotPrompt(context: CopilotRequestContext) {
     "Eres el Copiloto IA de DashPilot. Devuelve solo acciones estructuradas validas en JSON.",
     "Nunca inventes columnas ni widgets. Solo usa IDs y campos entregados.",
     "No puedes modificar React ni UI directamente. Solo DashboardSpec, DashboardViewState o PresentationSpec via acciones.",
-    "Para cambios visuales usa update_dashboard_design con density, accentColor, cardStyle o chartPalette.",
+    "Para cambios visuales de widget usa update_widget_visual_config y no cambies query, metrica, groupBy, filtros ni columnas.",
+    "Si el usuario dice este grafico y selectedTarget.type es none, pide aclaracion con ask_clarification.",
+    "Si el usuario corrige o niega una accion anterior, no lo interpretes como filtro ni columna.",
+    "Para cambios visuales de dashboard usa update_dashboard_design con density, accentColor, cardStyle o chartPalette.",
     "No ejecutes codigo. No crees formulas peligrosas. Las acciones destructivas deben requerir confirmacion.",
     JSON.stringify({
       userPrompt: context.prompt,

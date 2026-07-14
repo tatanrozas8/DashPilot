@@ -78,6 +78,23 @@ describe("dashboard spec editing", () => {
     expect(state.viewState.dataExplorer?.visibleColumns).toContain("Region");
   });
 
+  it("selects and clears a dashboard target for Copilot context", () => {
+    useDashPilotStore.getState().loadDemo();
+
+    useDashPilotStore.getState().selectDashboardTarget("widget", "sales_by_region");
+    const selected = useDashPilotStore.getState().viewState;
+
+    expect(selected.selectedTargetType).toBe("widget");
+    expect(selected.selectedTargetId).toBe("sales_by_region");
+    expect(selected.selectedTargetTitle).toBe("Ventas por Region");
+    expect(selected.selectedTargetCapabilities).toContain("orientation");
+    expect(selected.highlightedWidgetId).toBe("sales_by_region");
+
+    useDashPilotStore.getState().clearSelectedTarget();
+    expect(useDashPilotStore.getState().viewState.selectedTargetType).toBe("none");
+    expect(useDashPilotStore.getState().viewState.selectedTargetId).toBeUndefined();
+  });
+
   it("stores reusable themes and editable data dictionary metadata", () => {
     useDashPilotStore.getState().loadDemo();
     useDashPilotStore.getState().updateDashboardDesign({ density: "compact", accentColor: "emerald" });

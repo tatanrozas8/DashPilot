@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMessage } from "@/types/ai";
 import type { DataRow, DatasetColumnProfile, DatasetProfile, FileParseResult } from "@/types/dataset";
-import type { DashboardDesignSettings, DashboardSpec, DashboardViewState, DashboardWidget, SavedDashboardTheme } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardSpec, DashboardTargetType, DashboardViewState, DashboardWidget, SavedDashboardTheme } from "@/types/dashboard";
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
 import type { CopilotActionEnvelope } from "@/lib/ai/actions";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
@@ -133,6 +133,9 @@ interface DashPilotState {
   commitDashboardEditing: () => DashboardSpec | null;
   setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus">>) => void;
   setViewState: (viewState: Partial<DashboardViewState>) => void;
+  selectDashboardTarget: (targetType: DashboardTargetType, targetId?: string) => void;
+  clearSelectedTarget: () => void;
+  setCopilotIntent: (intent: NonNullable<DashboardViewState["copilotIntent"]>) => void;
   updateColumnDictionary: (field: string, changes: ColumnDictionaryChanges) => void;
   sendPrompt: (prompt: string) => Promise<void>;
   undoCopilotChange: () => void;
@@ -224,6 +227,57 @@ function snapshotFromState(state: Pick<DashPilotState, "dashboard" | "viewState"
 
 function withLimitedHistory(items: DashboardSnapshot[]) {
   return items.slice(-20);
+}
+
+function targetTypeForWidget(type: DashboardWidget["type"]): DashboardTargetType {
+  if (type === "kpi_card") return "kpi";
+  if (type === "table") return "table";
+  return "widget";
+}
+
+function capabilitiesForWidget(type: DashboardWidget["type"]) {
+  const base = ["select", "explain"];
+  if (type === "bar_chart") return [...base, "change_chart_type", "update_query", "orientation", "resize", "duplicate", "remove"];
+  if (["line_chart", "area_chart", "donut_chart", "scatter_plot"].includes(type)) return [...base, "change_chart_type", "update_query", "resize", "duplicate", "remove"];
+  if (type === "kpi_card") return [...base, "update_query", "rename", "resize", "duplicate", "remove"];
+  if (type === "table") return [...base, "select_columns", "open_data", "resize", "duplicate", "remove"];
+  return base;
+}
+
+function targetViewState(dashboard: DashboardSpec, viewState: DashboardViewState, targetType: DashboardTargetType, targetId?: string): DashboardViewState {
+  if (targetType === "dashboard") {
+    return {
+      ...viewState,
+      highlightedWidgetId: undefined,
+      selectedTargetType: "dashboard",
+      selectedTargetId: dashboard.id,
+      selectedTargetTitle: dashboard.title,
+      selectedTargetSpec: dashboard,
+      selectedTargetCapabilities: ["update_design", "reorder_widgets", "create_widget", "presentation"]
+    };
+  }
+  const widget = targetId ? dashboard.widgets.find((item) => item.id === targetId) : undefined;
+  if (!widget || targetType === "none") {
+    return {
+      ...viewState,
+      highlightedWidgetId: undefined,
+      selectedTargetType: "none",
+      selectedTargetId: undefined,
+      selectedTargetTitle: undefined,
+      selectedTargetSpec: undefined,
+      selectedTargetCapabilities: []
+    };
+  }
+  return {
+    ...viewState,
+    highlightedWidgetId: widget.id,
+    selectedTargetType: targetTypeForWidget(widget.type),
+    selectedTargetId: widget.id,
+    selectedTargetTitle: widget.title,
+    selectedTargetSpec: widget,
+    selectedTargetCapabilities: capabilitiesForWidget(widget.type),
+    copilotIntent: viewState.copilotIntent ?? "modify_selection"
+  };
 }
 
 function runBackgroundTask(task: () => Promise<unknown>) {
@@ -710,6 +764,18 @@ export const useDashPilotStore = create<DashPilotState>()(
           viewState: { ...get().viewState, ...viewState },
           filters: { ...get().viewState, ...viewState }
         }),
+      selectDashboardTarget: (targetType, targetId) => {
+        const viewState = targetViewState(get().dashboard, get().viewState, targetType, targetId);
+        set({ viewState, filters: viewState });
+      },
+      clearSelectedTarget: () => {
+        const viewState = targetViewState(get().dashboard, get().viewState, "none");
+        set({ viewState, filters: viewState });
+      },
+      setCopilotIntent: (intent) => {
+        const viewState = { ...get().viewState, copilotIntent: intent };
+        set({ viewState, filters: viewState });
+      },
       updateColumnDictionary: (field, changes) => {
         const profile = withColumnDictionary(get().profile, field, changes);
         set({
@@ -751,6 +817,35 @@ export const useDashPilotStore = create<DashPilotState>()(
             copilotContext,
             rows: before.rows
           });
+          if (result.actions?.some((action) => action.type === "undo_last_action")) {
+            const previous = before.copilotUndoStack.at(-1);
+            const botMessage = assistantMessage(previous ? `Deshice: ${previous.reason}.` : "No hay cambios anteriores del Copiloto para deshacer.");
+            if (!previous) {
+              set({
+                messages: [...get().messages, botMessage],
+                chatMessages: [...get().messages, botMessage],
+                isCopilotThinking: false
+              });
+              return;
+            }
+            const current = snapshotFromState(before, "Rehacer cambio del Copiloto");
+            set({
+              dashboard: previous.dashboard,
+              dashboardSpec: previous.dashboard,
+              viewState: previous.viewState,
+              filters: previous.viewState,
+              presentation: previous.presentation,
+              presentationSpec: previous.presentation,
+              activeDashboardId: previous.dashboard.id,
+              activePresentationId: previous.presentation.id,
+              copilotUndoStack: before.copilotUndoStack.slice(0, -1),
+              copilotRedoStack: withLimitedHistory([...before.copilotRedoStack, current]),
+              messages: [...get().messages, botMessage],
+              chatMessages: [...get().messages, botMessage],
+              isCopilotThinking: false
+            });
+            return;
+          }
           let nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
           let nextViewState = result.updatedViewState ?? get().viewState;
           let nextPresentation = result.updatedPresentationSpec ?? get().presentation;

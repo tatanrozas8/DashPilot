@@ -66,6 +66,11 @@ export const dashboardQuerySchema = z.object({
   limit: z.number().optional()
 });
 
+export const dashboardWidgetVisualConfigSchema = z.object({
+  orientation: z.enum(["horizontal", "vertical"]).optional(),
+  legend: z.boolean().optional()
+});
+
 export const dashboardSpecSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -90,7 +95,12 @@ export const dashboardSpecSchema = z.object({
     title: z.string(),
     description: z.string().optional(),
     query: dashboardQuerySchema.optional(),
-    config: z.record(z.string(), z.unknown()),
+    config: z.record(z.string(), z.unknown()).and(z.object({
+      visualConfig: dashboardWidgetVisualConfigSchema.optional(),
+      horizontal: z.boolean().optional(),
+      hidden: z.boolean().optional(),
+      columns: z.array(z.string()).optional()
+    }).partial()),
     position: z.object({
       x: z.number(),
       y: z.number(),

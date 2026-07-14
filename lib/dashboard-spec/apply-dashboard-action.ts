@@ -2,6 +2,45 @@ import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types
 import { copilotActionSchema } from "@/lib/validation/copilot-actions";
 import { duplicateDashboardWidget, moveDashboardWidget, reorderDashboardWidgets, updateDashboardDesign, updateDashboardSubtitle, updateDashboardTitle, updateDashboardWidget } from "@/lib/dashboard-spec/edit-dashboard-spec";
 
+function targetTypeForWidget(type: DashboardSpec["widgets"][number]["type"]) {
+  if (type === "kpi_card") return "kpi" as const;
+  if (type === "table") return "table" as const;
+  return "widget" as const;
+}
+
+function capabilitiesForWidget(type: DashboardSpec["widgets"][number]["type"]) {
+  const base = ["select", "explain"];
+  if (type === "bar_chart") return [...base, "change_chart_type", "update_query", "orientation", "resize", "duplicate", "remove"];
+  if (["line_chart", "area_chart", "donut_chart", "scatter_plot"].includes(type)) return [...base, "change_chart_type", "update_query", "resize", "duplicate", "remove"];
+  if (type === "kpi_card") return [...base, "update_query", "rename", "resize", "duplicate", "remove"];
+  if (type === "table") return [...base, "select_columns", "open_data", "resize", "duplicate", "remove"];
+  return base;
+}
+
+function selectedTargetViewState(spec: DashboardSpec, viewState: DashboardViewState, targetId?: string) {
+  const widget = targetId ? spec.widgets.find((item) => item.id === targetId) : undefined;
+  if (!widget) {
+    return {
+      ...viewState,
+      highlightedWidgetId: undefined,
+      selectedTargetType: "none" as const,
+      selectedTargetId: undefined,
+      selectedTargetTitle: undefined,
+      selectedTargetSpec: undefined,
+      selectedTargetCapabilities: []
+    };
+  }
+  return {
+    ...viewState,
+    highlightedWidgetId: widget.id,
+    selectedTargetType: targetTypeForWidget(widget.type),
+    selectedTargetId: widget.id,
+    selectedTargetTitle: widget.title,
+    selectedTargetSpec: widget,
+    selectedTargetCapabilities: capabilitiesForWidget(widget.type)
+  };
+}
+
 export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardViewState, action: DashboardAction): { spec: DashboardSpec; viewState: DashboardViewState; message: string } {
   const parsed = copilotActionSchema.safeParse(action);
   if (!parsed.success) {
@@ -18,6 +57,69 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
       },
       message: "Listo. Actualice el widget solicitado usando una accion estructurada validada."
     };
+  }
+
+  if (action.type === "update_widget_visual_config") {
+    const current = spec.widgets.find((widget) => widget.id === action.widgetId);
+    const orientation = action.visualConfig.orientation;
+    const nextConfig = {
+      ...current?.config,
+      visualConfig: {
+        ...(current?.config.visualConfig ?? {}),
+        ...action.visualConfig
+      },
+      ...(orientation ? { horizontal: orientation === "horizontal" } : {})
+    };
+    return {
+      viewState: selectedTargetViewState(spec, viewState, action.widgetId),
+      spec: {
+        ...spec,
+        widgets: spec.widgets.map((widget) => (widget.id === action.widgetId ? { ...widget, config: nextConfig } : widget)),
+        updatedAt: new Date().toISOString()
+      },
+      message: orientation
+        ? `Listo. Cambie solo la orientacion del grafico seleccionado a ${orientation}. No modifique metrica, filtros ni dimension.`
+        : "Listo. Actualice solo la configuracion visual del widget seleccionado."
+    };
+  }
+
+  if (action.type === "select_target") {
+    if (action.targetType === "dashboard") {
+      return {
+        spec,
+        viewState: {
+          ...viewState,
+          highlightedWidgetId: undefined,
+          selectedTargetType: "dashboard",
+          selectedTargetId: spec.id,
+          selectedTargetTitle: spec.title,
+          selectedTargetSpec: spec,
+          selectedTargetCapabilities: ["update_design", "reorder_widgets", "create_widget", "presentation"]
+        },
+        message: "Seleccione el dashboard completo como objetivo del Copiloto."
+      };
+    }
+    return { spec, viewState: selectedTargetViewState(spec, viewState, action.targetId), message: "Seleccione el elemento como objetivo del Copiloto." };
+  }
+
+  if (action.type === "clear_selected_target") {
+    return { spec, viewState: selectedTargetViewState(spec, viewState), message: "Quite la seleccion actual del Copiloto." };
+  }
+
+  if (action.type === "replace_widget") {
+    return {
+      viewState: selectedTargetViewState({ ...spec, widgets: spec.widgets.map((widget) => (widget.id === action.widgetId ? { ...action.widget, id: action.widgetId } : widget)) }, viewState, action.widgetId),
+      spec: {
+        ...spec,
+        widgets: spec.widgets.map((widget) => (widget.id === action.widgetId ? { ...action.widget, id: action.widgetId } : widget)),
+        updatedAt: new Date().toISOString()
+      },
+      message: "Reemplace el widget seleccionado con la nueva especificacion validada."
+    };
+  }
+
+  if (action.type === "undo_last_action") {
+    return { spec, viewState, message: "Deshice el ultimo cambio del Copiloto." };
   }
 
   if (action.type === "update_dashboard_title") {

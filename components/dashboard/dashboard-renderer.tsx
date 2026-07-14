@@ -22,12 +22,13 @@ import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
 import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
+import { barOrientation } from "@/lib/dashboard-spec/visual-config";
 import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { buildDatasetCatalog, inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
-import type { DashboardDesignSettings, DashboardWidget } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardViewState, DashboardWidget } from "@/types/dashboard";
 
 function formatValue(value: number, format: unknown) {
   if (format === "currency") return formatCurrency(value);
@@ -50,6 +51,7 @@ const paletteMap: Record<Required<DashboardDesignSettings>["chartPalette"], stri
   business: ["#334155", "#3d35ff", "#0f766e", "#0284c7", "#7c3aed", "#475569"],
   contrast: ["#111827", "#2563eb", "#dc2626", "#f59e0b", "#059669", "#7c3aed"]
 };
+const EMPTY_CAPABILITIES: string[] = [];
 
 function useDashboardDesign() {
   return useContext(DashboardDesignContext);
@@ -228,6 +230,9 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
   const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
   const compact = Boolean(widget.config.compact);
+  const orientation = barOrientation(widget);
+  const isHorizontal = orientation === "horizontal";
+  const barRadius: [number, number, number, number] = isHorizontal ? [0, 8, 8, 0] : [8, 8, 0, 0];
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
@@ -235,17 +240,17 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
         <EmptyWidget />
       ) : (
         <ResponsiveContainer width="100%" height={compact ? 220 : 230}>
-          <BarChart data={data} layout="vertical" margin={{ left: 16, right: 28, top: 4, bottom: 0 }}>
-            <CartesianGrid stroke={colors.grid} horizontal={false} />
-            <XAxis type="number" hide />
-            <YAxis type="category" dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={82} />
+          <BarChart data={data} layout={isHorizontal ? "vertical" : "horizontal"} margin={isHorizontal ? { left: 16, right: 28, top: 4, bottom: 0 } : { left: 4, right: 18, top: 10, bottom: 24 }}>
+            <CartesianGrid stroke={colors.grid} horizontal={!isHorizontal} vertical={isHorizontal} />
+            <XAxis type={isHorizontal ? "number" : "category"} dataKey={isHorizontal ? undefined : "label"} hide={isHorizontal} axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
+            <YAxis type={isHorizontal ? "category" : "number"} dataKey={isHorizontal ? "label" : undefined} axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={isHorizontal ? 82 : 54} tickFormatter={(value) => isHorizontal ? String(value) : formatCurrency(Number(value))} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
             {seriesKeys.length ? (
               seriesKeys.map((key, index) => (
-                <Bar key={key} dataKey={key} radius={[0, 8, 8, 0]} fill={colors.palette[index % colors.palette.length]} barSize={compact ? 12 : 18} />
+                <Bar key={key} dataKey={key} radius={barRadius} fill={colors.palette[index % colors.palette.length]} barSize={compact ? 12 : 18} />
               ))
             ) : (
-              <Bar dataKey="value" radius={[0, 8, 8, 0]} fill={colors.primary} barSize={compact ? 16 : 24} />
+              <Bar dataKey="value" radius={barRadius} fill={colors.primary} barSize={compact ? 16 : 24} />
             )}
           </BarChart>
         </ResponsiveContainer>
@@ -371,6 +376,9 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
   const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
   const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
   const highlightedWidgetId = useDashPilotStore((state) => state.viewState.highlightedWidgetId);
+  const selectedTargetId = useDashPilotStore((state) => state.viewState.selectedTargetId);
+  const selectDashboardTarget = useDashPilotStore((state) => state.selectDashboardTarget);
+  const clearSelectedTarget = useDashPilotStore((state) => state.clearSelectedTarget);
   const moveDashboardDraftWidget = useDashPilotStore((state) => state.moveDashboardDraftWidget);
   const [draggedWidgetId, setDraggedWidgetId] = useState<string | null>(null);
   const renderedDashboard = isDashboardEditing && dashboardEditDraft && !slideWidgetIds ? dashboardEditDraft : dashboard;
@@ -384,9 +392,23 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
       <div className={cn("grid grid-cols-12", design.density === "compact" ? "gap-3" : "gap-4")}>
         {widgets.map((widget) => {
           const width = widget.position.w >= 12 ? "col-span-12" : widget.position.w >= 8 ? "col-span-12 lg:col-span-8" : widget.position.w >= 6 ? "col-span-12 lg:col-span-6" : "col-span-12 sm:col-span-6 xl:col-span-3";
+          const isSelected = selectedTargetId === widget.id;
           return (
             <div
               key={widget.id}
+              role={slideWidgetIds ? undefined : "button"}
+              tabIndex={slideWidgetIds ? undefined : 0}
+              aria-label={slideWidgetIds ? undefined : `Seleccionar ${widget.title} para editar con Copiloto`}
+              onClick={() => {
+                if (!slideWidgetIds) selectDashboardTarget(widget.type === "kpi_card" ? "kpi" : widget.type === "table" ? "table" : "widget", widget.id);
+              }}
+              onKeyDown={(event) => {
+                if (slideWidgetIds) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  selectDashboardTarget(widget.type === "kpi_card" ? "kpi" : widget.type === "table" ? "table" : "widget", widget.id);
+                }
+              }}
               draggable={isDashboardEditing && !slideWidgetIds}
               onDragStart={(event) => {
                 if (!isDashboardEditing || slideWidgetIds) return;
@@ -412,9 +434,26 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
                 width,
                 isDashboardEditing && !slideWidgetIds && "cursor-grab active:cursor-grabbing",
                 draggedWidgetId === widget.id && "opacity-50",
-                highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]"
+                highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]",
+                isSelected && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-4 ring-offset-[#f8faff]"
               )}
             >
+              {isSelected && !slideWidgetIds && (
+                <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-full border border-[#cfd5ff] bg-white px-3 py-1 text-xs font-bold text-[#3d35ff] shadow-sm">
+                  Editando este grafico
+                  <button
+                    type="button"
+                    aria-label="Deseleccionar objetivo"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      clearSelectedTarget();
+                    }}
+                    className="grid size-5 place-items-center rounded-full hover:bg-[#f0f1ff]"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              )}
               {isDashboardEditing && !slideWidgetIds && (
                 <span className="absolute left-3 top-3 z-20 grid size-8 place-items-center rounded-md border border-[#dfe5f0] bg-white/95 text-[#697597] shadow-sm" title="Arrastra para reordenar">
                   <GripVertical className="size-4" />
@@ -595,6 +634,12 @@ export function CopilotPanel() {
   const confirmPendingCopilotAction = useDashPilotStore((state) => state.confirmPendingCopilotAction);
   const cancelPendingCopilotAction = useDashPilotStore((state) => state.cancelPendingCopilotAction);
   const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
+  const selectedTargetType = useDashPilotStore((state) => state.viewState.selectedTargetType ?? "none");
+  const selectedTargetTitle = useDashPilotStore((state) => state.viewState.selectedTargetTitle);
+  const selectedTargetCapabilities = useDashPilotStore((state) => state.viewState.selectedTargetCapabilities);
+  const copilotIntent = useDashPilotStore((state) => state.viewState.copilotIntent);
+  const setCopilotIntent = useDashPilotStore((state) => state.setCopilotIntent);
+  const clearSelectedTarget = useDashPilotStore((state) => state.clearSelectedTarget);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
   const [recommendationsOpen, setRecommendationsOpen] = useState(false);
@@ -621,6 +666,8 @@ export function CopilotPanel() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages, isCopilotThinking]);
+
+  const effectiveIntent = copilotIntent ?? (selectedTargetType !== "none" ? "modify_selection" : "create_chart");
 
   function submitPrompt(value: string) {
     const trimmed = value.trim();
@@ -663,6 +710,35 @@ export function CopilotPanel() {
           </div>
         </div>
       )}
+      <div className="shrink-0 border-b border-[#edf1fa] px-5 py-3">
+        <label className="block text-xs font-bold text-[#697597]">
+          Intencion
+          <select
+            className="mt-1 h-9 w-full rounded-lg border border-[#dfe5f0] bg-white px-3 text-sm font-semibold text-[#1c2748]"
+            value={effectiveIntent}
+            onChange={(event) => setCopilotIntent(event.target.value as NonNullable<DashboardViewState["copilotIntent"]>)}
+          >
+            <option value="modify_selection">Modificar seleccion actual</option>
+            <option value="create_chart">Crear nuevo grafico</option>
+            <option value="modify_dashboard">Modificar todo el dashboard</option>
+            <option value="filters">Trabajar con filtros</option>
+            <option value="data_table">Trabajar con datos/tabla</option>
+            <option value="presentation">Trabajar con presentacion</option>
+          </select>
+        </label>
+        {selectedTargetType !== "none" && selectedTargetTitle && (
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#dfe5fb] bg-[#f8f9ff] px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase text-[#697597]">Objetivo seleccionado</p>
+              <p className="truncate text-sm font-bold text-[#1c2748]">{selectedTargetTitle}</p>
+              <p className="truncate text-[11px] font-semibold text-[#697597]">{(selectedTargetCapabilities ?? EMPTY_CAPABILITIES).slice(0, 4).join(" · ")}</p>
+            </div>
+            <button type="button" onClick={clearSelectedTarget} className="grid size-8 shrink-0 place-items-center rounded-md text-[#697597] hover:bg-white" aria-label="Deseleccionar objetivo">
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+      </div>
       <div className="scrollbar-soft min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
         {messages.map((message) => (
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>

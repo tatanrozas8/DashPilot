@@ -147,6 +147,40 @@ describe("copilot action execution engine", () => {
     expect(finalWidget?.query?.groupBy).not.toEqual(["canal"]);
   });
 
+  it("applies visual orientation without changing metric, dimension or filters", () => {
+    const ctx = context("muestralo vertical");
+    const original = ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+    const envelope = actionEnvelope({ type: "update_widget_visual_config", widgetId: "sales_by_region", visualConfig: { orientation: "vertical" } }, "Cambio visual solicitado.", 0.92);
+    const result = executeCopilotActions({ ...ctx, envelopes: [envelope] });
+    const updated = result.updatedDashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+
+    expect(envelope.changesVisualOnly).toBe(true);
+    expect(envelope.changesDataLogic).toBe(false);
+    expect(result.actions[0]?.type).toBe("update_widget_visual_config");
+    expect(updated?.config.visualConfig?.orientation).toBe("vertical");
+    expect(updated?.query).toEqual(original?.query);
+    expect(result.updatedViewState.filters).toEqual(ctx.viewState.filters);
+    expect(result.assistantMessage).toContain("No modifique metrica");
+  });
+
+  it("post-validation rejects visual actions that change widget query", () => {
+    const ctx = context("muestralo vertical");
+    const result = executeCopilotActions({
+      ...ctx,
+      actions: [{
+        type: "update_widget",
+        widgetId: "sales_by_region",
+        changes: {
+          config: { visualConfig: { orientation: "vertical" } },
+          query: { metric: { field: "Ventas", aggregation: "sum" }, groupBy: ["Canal"] }
+        }
+      }]
+    });
+
+    expect(result.actions).toHaveLength(0);
+    expect(result.assistantMessage).not.toContain("Listo");
+  });
+
   it("creates and edits presentations through structured actions", () => {
     const ctx = context("crea presentacion");
     const created = executeCopilotActions({ ...ctx, actions: [{ type: "create_presentation", options: { theme: "executive", durationMinutes: 5 } }] });

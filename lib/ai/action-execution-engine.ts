@@ -4,6 +4,7 @@ import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types
 import type { PresentationSpec } from "@/types/presentation";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
+import { buildActionPlan } from "@/lib/ai/action-plan";
 import { applyAction } from "@/lib/ai/apply-action";
 import { buildAnalysisPlan, planAnalyticalChart, validateAnalysisPlan, validateWidgetMatchesPlan } from "@/lib/dashboard-spec/chart-planner";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
@@ -43,6 +44,23 @@ export interface ActionExecutionResult {
 
 function destructiveAction(action: DashboardAction) {
   return ["remove_widget", "clear_filters", "remove_filter"].includes(action.type);
+}
+
+function sameJson(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function normalize(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function visualOnlyPrompt(value: string) {
+  const text = normalize(value);
+  return /\b(vertical|horizontal|orientacion|visualizacion|visual)\b/.test(text) && !/\b(eje x|eje y|metrica|dimension|filtro|filtra|por region|por canal|por pais|por vendedor)\b/.test(text);
+}
+
+function widgetIdForAction(action: DashboardAction) {
+  return "widgetId" in action ? action.widgetId : undefined;
 }
 
 function applyPresentationAction(presentation: PresentationSpec | undefined, dashboard: DashboardSpec, action: DashboardAction) {
@@ -110,6 +128,7 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
   });
   const requiresPlanValidation = Boolean(analysisPlan.userIntent.xAxisIntent || analysisPlan.userIntent.yAxisIntent || analysisPlan.userIntent.seriesIntent);
   const planValidation = requiresPlanValidation ? validateAnalysisPlan(analysisPlan, catalog) : { success: true, errors: [], warnings: [] };
+  const contextualPlan = buildActionPlan({ prompt: input.userMessage, dashboardSpec: input.dashboardSpec, viewState: input.viewState });
   const { envelopes, baseReply } = envelopesFromInput(input);
   let nextDashboard = input.dashboardSpec;
   let nextViewState = input.focusedWidgetId ? { ...input.viewState, highlightedWidgetId: input.focusedWidgetId } : input.viewState;
@@ -147,30 +166,66 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
       errors.push(validation.error);
       continue;
     }
+    const action = validation.action;
+    if ((contextualPlan.changesVisualOnly || visualOnlyPrompt(input.userMessage)) && action.type === "update_widget" && action.changes.query) {
+      errors.push("La instruccion era visual, pero la accion intento cambiar la logica de datos.");
+      continue;
+    }
     if (withConfirmation.requiresConfirmation) {
-      pendingConfirmation = { ...withConfirmation, action: validation.action };
+      pendingConfirmation = { ...withConfirmation, action };
       warnings.push(`La accion ${withConfirmation.type} requiere confirmacion antes de aplicarse.`);
       continue;
     }
-    if (["generate_presentation", "create_presentation", "add_slide", "generate_speaker_notes"].includes(validation.action.type)) {
-      const applied = applyPresentationAction(nextPresentation, nextDashboard, validation.action);
+    if (action.type === "undo_last_action") {
+      appliedActions.push(action);
+      appliedEnvelopes.push(withConfirmation);
+      messages.push("Deshice el ultimo cambio del Copiloto.");
+      continue;
+    }
+    if (["generate_presentation", "create_presentation", "add_slide", "generate_speaker_notes"].includes(action.type)) {
+      const applied = applyPresentationAction(nextPresentation, nextDashboard, action);
       nextPresentation = applied.presentation;
-      appliedActions.push(validation.action);
+      appliedActions.push(action);
       appliedEnvelopes.push(withConfirmation);
       messages.push(applied.message);
       continue;
     }
-    if (validation.action.type === "ask_clarification" || validation.action.type === "explain_limitation") {
-      messages.push(validation.action.type === "ask_clarification" ? validation.action.question : validation.action.message);
+    if (action.type === "ask_clarification" || action.type === "explain_limitation") {
+      appliedActions.push(action);
+      appliedEnvelopes.push(withConfirmation);
+      messages.push(action.type === "ask_clarification" ? action.question : action.message);
       continue;
     }
     const previousDashboard = nextDashboard;
     const previousViewState = nextViewState;
-    const applied = applyAction(nextDashboard, nextViewState, validation.action);
+    const actionWidgetId = widgetIdForAction(action);
+    const previousWidget = actionWidgetId ? nextDashboard.widgets.find((item) => item.id === actionWidgetId) : undefined;
+    const applied = applyAction(nextDashboard, nextViewState, action);
     nextDashboard = applied.spec;
     nextViewState = applied.viewState;
-    if (requiresPlanValidation && (validation.action.type === "add_widget" || validation.action.type === "update_widget")) {
-      const widgetId = validation.action.type === "add_widget" ? validation.action.widget.id : validation.action.widgetId;
+    const producedChange = !sameJson(previousDashboard, nextDashboard) || !sameJson(previousViewState, nextViewState);
+    if (!producedChange) {
+      errors.push("La accion validada no produjo cambios reales.");
+      continue;
+    }
+    if (action.type === "update_widget_visual_config") {
+      const nextWidget = nextDashboard.widgets.find((item) => item.id === action.widgetId);
+      if (!sameJson(previousWidget?.query, nextWidget?.query)) {
+        nextDashboard = previousDashboard;
+        nextViewState = previousViewState;
+        errors.push("El cambio visual intento modificar la logica de datos del widget.");
+        continue;
+      }
+      const orientation = action.visualConfig.orientation;
+      if (orientation && nextWidget?.config.visualConfig?.orientation !== orientation) {
+        nextDashboard = previousDashboard;
+        nextViewState = previousViewState;
+        errors.push("La orientacion final no coincide con la instruccion visual.");
+        continue;
+      }
+    }
+    if (requiresPlanValidation && (action.type === "add_widget" || action.type === "update_widget")) {
+      const widgetId = action.type === "add_widget" ? action.widget.id : action.widgetId;
       const widget = nextDashboard.widgets.find((item) => item.id === widgetId);
       const widgetValidation = validateWidgetMatchesPlan(widget, analysisPlan);
       if (!widgetValidation.success) {
@@ -182,7 +237,7 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
       }
       warnings.push(...widgetValidation.warnings);
     }
-    appliedActions.push(validation.action);
+    appliedActions.push(action);
     appliedEnvelopes.push(withConfirmation);
     messages.push(applied.message);
   }

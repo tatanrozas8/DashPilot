@@ -109,6 +109,7 @@ export function buildActionPlan(input: { prompt: string; dashboardSpec: Dashboar
   const requestedCurrentTarget = /\b(este grafico|este widget|este kpi|esta tarjeta|esta tabla|mostrarlo|muestralo|cambialo|reemplazalo|sustituyelo|grafico seleccionado|seleccion actual)\b/.test(text) || /\blo\b/.test(text);
   const correction = classification.isCorrection;
   const undo = classification.intent === "undo";
+  const explainWidget = classification.intents.includes("explain_widget");
   const orientation = orientationIntent(text);
   const chartType = chartTypeIntent(text);
   const createNewWidget = includesAny(text, ["crea un nuevo grafico", "crear un nuevo grafico", "crea uno nuevo", "agrega un grafico", "anade un grafico", "nuevo grafico", "nuevo widget"]);
@@ -146,6 +147,42 @@ export function buildActionPlan(input: { prompt: string; dashboardSpec: Dashboar
       needsClarification: true,
       clarification: "Selecciona primero el grafico que quieres modificar.",
       missingInfo: ["selectedTargetId"],
+      confidence: 0.9
+    });
+  }
+
+  if (explainWidget) {
+    if (!target) {
+      return basePlan({
+        intent: "ask_clarification",
+        usesPreviousInstruction,
+        reason: "El usuario pidio explicar un grafico, pero no hay objetivo seleccionado.",
+        messageKind: correction ? "correction" : "new_instruction",
+        actionCategory: "ambiguous",
+        requestedCurrentTarget: true,
+        createNewWidget,
+        replaceSelectedWidget,
+        needsClarification: true,
+        clarification: "Selecciona primero el grafico que quieres que explique.",
+        missingInfo: ["selectedTargetId"],
+        confidence: 0.88
+      });
+    }
+    const action: DashboardAction = { type: "explain_widget", widgetId: target.id };
+    return basePlan({
+      intent: "explain_widget",
+      target,
+      action,
+      reason: "El usuario pidio una explicacion del grafico seleccionado sin cambiar datos ni visuales.",
+      messageKind: correction ? "clarification" : "new_instruction",
+      actionCategory: "analytical",
+      requestedCurrentTarget,
+      createNewWidget,
+      replaceSelectedWidget,
+      changesVisualOnly: false,
+      changesDataLogic: false,
+      changesDashboardStructure: false,
+      needsClarification: false,
       confidence: 0.9
     });
   }

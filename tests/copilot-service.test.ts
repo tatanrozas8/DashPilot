@@ -252,6 +252,43 @@ describe("copilot service", () => {
     expect(result.reply).not.toContain("Listo");
   });
 
+  it("explains selected chart series colors instead of treating the prompt as a correction", () => {
+    const ctx = selectedCustomContext("Describe a que ano se refiere cada color dentro del grafico", [
+      { fecha: "2024-01-01", region: "RM", ventas: 100 },
+      { fecha: "2025-01-01", region: "RM", ventas: 160 },
+      { fecha: "2024-01-01", region: "Biobio", ventas: 120 }
+    ]);
+    const current = ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+    const seriesWidget = {
+      ...current!,
+      title: "Ventas por region por Ano",
+      type: "bar_chart" as const,
+      query: {
+        metric: { field: "ventas", aggregation: "sum" as const },
+        x: { field: "region" },
+        groupBy: ["region"],
+        seriesBy: "fecha",
+        seriesGranularity: "year" as const
+      }
+    };
+    const result = createMockCopilotResponse({
+      ...ctx,
+      dashboardSpec: {
+        ...ctx.dashboardSpec,
+        widgets: ctx.dashboardSpec.widgets.map((widget) => widget.id === seriesWidget.id ? seriesWidget : widget)
+      },
+      viewState: {
+        ...ctx.viewState,
+        selectedTargetSpec: seriesWidget,
+        selectedTargetTitle: seriesWidget.title
+      }
+    });
+
+    expect(result.actions?.[0]?.type).toBe("explain_widget");
+    expect(result.reply).toContain("Cada color representa un ano");
+    expect(result.updatedViewState?.highlightedWidgetId).toBe("sales_by_region");
+  });
+
   it("changes only selected bar chart orientation when requested", () => {
     const ctx = selectedCustomContext("Actualmente el grafico se ve horizontal y quiero que lo muestre vertical.", [
       { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 100 },

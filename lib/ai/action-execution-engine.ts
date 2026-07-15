@@ -127,10 +127,11 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
     dashboardSpec: input.dashboardSpec,
     viewState: input.viewState
   });
-  const requiresPlanValidation = Boolean(analysisPlan.userIntent.xAxisIntent || analysisPlan.userIntent.yAxisIntent || analysisPlan.userIntent.seriesIntent);
+  const { envelopes, baseReply } = envelopesFromInput(input);
+  const nonAnalyticalActions = envelopes.length > 0 && envelopes.every((envelope) => ["ask_clarification", "explain_limitation", "explain_widget", "undo_last_action"].includes(envelope.action.type));
+  const requiresPlanValidation = !nonAnalyticalActions && Boolean(analysisPlan.userIntent.xAxisIntent || analysisPlan.userIntent.yAxisIntent || analysisPlan.userIntent.seriesIntent);
   const planValidation = requiresPlanValidation ? validateAnalysisPlan(analysisPlan, catalog) : { success: true, errors: [], warnings: [] };
   const contextualPlan = buildActionPlan({ prompt: input.userMessage, dashboardSpec: input.dashboardSpec, viewState: input.viewState });
-  const { envelopes, baseReply } = envelopesFromInput(input);
   let nextDashboard = input.dashboardSpec;
   let nextViewState = input.focusedWidgetId ? { ...input.viewState, highlightedWidgetId: input.focusedWidgetId } : input.viewState;
   let nextPresentation = input.presentationSpec;
@@ -205,6 +206,12 @@ export function executeCopilotActions(input: ActionExecutionInput): ActionExecut
     nextDashboard = applied.spec;
     nextViewState = applied.viewState;
     const producedChange = !sameJson(previousDashboard, nextDashboard) || !sameJson(previousViewState, nextViewState);
+    if (action.type === "explain_widget") {
+      appliedActions.push(action);
+      appliedEnvelopes.push(withConfirmation);
+      messages.push(applied.message);
+      continue;
+    }
     if (!producedChange) {
       errors.push("La accion validada no produjo cambios reales.");
       continue;

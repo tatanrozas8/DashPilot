@@ -128,6 +128,26 @@ function fieldLabel(profile: DatasetProfile, field?: string) {
   return profile.columns.find((column) => column.normalizedName === field)?.displayName ?? field ?? "campo";
 }
 
+function widgetExplanation(widget: DashboardWidget | undefined, profile: DatasetProfile) {
+  if (!widget) return "Selecciona un grafico y te explico como leerlo.";
+  const metric = fieldLabel(profile, widget.query?.metric?.field);
+  const dimension = fieldLabel(profile, widget.query?.x?.field ?? widget.query?.groupBy?.[0]);
+  const seriesField = widget.query?.seriesBy ?? (typeof widget.config.seriesBy === "string" ? widget.config.seriesBy : undefined);
+  const series = fieldLabel(profile, seriesField);
+  const granularity = widget.query?.seriesGranularity;
+  const chartType = widget.type === "bar_chart" ? "grafico de barras" : widget.type === "line_chart" ? "grafico de lineas" : widget.type === "donut_chart" ? "grafico de dona" : "widget";
+  const base = `${widget.title} es un ${chartType}. Mide ${metric}${dimension ? ` por ${dimension}` : ""}.`;
+  if (seriesField) {
+    const seriesText = granularity === "year"
+      ? `Cada color representa un ano calculado desde ${series}.`
+      : granularity
+        ? `Cada color representa una serie de ${series} con granularidad ${granularity}.`
+        : `Cada color representa un valor distinto de ${series}.`;
+    return `${base} ${seriesText} La altura de cada barra o punto muestra el valor agregado de ${metric}.`;
+  }
+  return `${base} Este grafico no tiene una serie adicional: el color se usa como estilo visual, no como ano o categoria separada.`;
+}
+
 function chartWidgets(spec: DashboardSpec) {
   return spec.widgets.filter((widget) => compatibleWidgetTypes(widget).length > 1);
 }
@@ -803,7 +823,12 @@ export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotR
     return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: "No pude convertir la instruccion anterior en un reemplazo seguro para el grafico seleccionado." }, actionPlan.reason, 0.78)], source, "No aplique cambios porque la instruccion anterior no genero un plan ejecutable seguro.");
   }
   if (actionPlan.action) {
-    return applyValidatedActions(input, [actionEnvelope(actionPlan.action, actionPlan.reason, actionPlan.confidence)], source, actionPlan.action.type === "undo_last_action" ? "Voy a deshacer el ultimo cambio del Copiloto." : "Aplique el plan contextual validado.");
+    const reply = actionPlan.action.type === "undo_last_action"
+      ? "Voy a deshacer el ultimo cambio del Copiloto."
+      : actionPlan.action.type === "explain_widget"
+        ? widgetExplanation(actionPlan.target, input.datasetProfile)
+        : "Aplique el plan contextual validado.";
+    return applyValidatedActions(input, [actionEnvelope(actionPlan.action, actionPlan.reason, actionPlan.confidence)], source, reply);
   }
   if (actionPlan.messageKind === "correction") {
     return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: "Entendido: no aplicare filtros ni cambiare columnas. Indica si quieres deshacer, cambiar solo lo visual o reemplazar el grafico seleccionado." }, actionPlan.reason, 0.86)], source, "No aplique cambios porque tu mensaje es una correccion, no una nueva orden de datos.");

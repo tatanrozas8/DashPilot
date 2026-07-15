@@ -13,6 +13,7 @@ export type CopilotIntent =
   | "select_columns"
   | "sort_table"
   | "search_table"
+  | "explain_widget"
   | "update_dashboard"
   | "create_presentation"
   | "update_presentation"
@@ -60,6 +61,7 @@ export function classifyIntent(message: string): IntentClassification {
   const undo = includesAny(text, ["deshaz", "vuelve atras", "vuelve al anterior", "restaura", "revertir", "revierte"]);
   const previous = includesAny(text, ["instrucciones anteriores", "instruccion anterior", "instrucciones que te di", "lo que te dije", "lo anterior", "previas"]);
   const visual = includesAny(text, ["vertical", "horizontal", "orientacion", "color", "colores", "leyenda", "titulo", "tipo de grafico", "barras", "linea", "dona"]);
+  const explain = includesAny(text, ["explica", "explicame", "describe", "que significa", "a que se refiere", "como leer"]);
   const dataLogic = includesAny(text, ["eje x", "eje y", "metrica", "ventas", "margen", "region", "regiones", "canal", "fecha", "anos", "agregacion", "serie"]);
   const create = includesAny(text, ["crea", "crear", "agrega un grafico", "nuevo grafico", "nuevo widget", "uno nuevo"]);
   const replace = includesAny(text, ["reemplaza", "reemplazalo", "reemplazarlo", "sustituye", "sustituyelo"]);
@@ -87,6 +89,10 @@ export function classifyIntent(message: string): IntentClassification {
   if (!create && !replace && includesAny(text, ["este grafico", "este widget", "seleccion", "cambialo", "muestalo", "muestralo"])) {
     intents.push("update_selected_widget");
     actionTypes.push("update_widget");
+  }
+  if (explain) {
+    intents.push("explain_widget");
+    actionTypes.push("explain_widget");
   }
   if (visual) {
     intents.push("update_visual_only");

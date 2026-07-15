@@ -51,8 +51,6 @@ const paletteMap: Record<Required<DashboardDesignSettings>["chartPalette"], stri
   business: ["#334155", "#3d35ff", "#0f766e", "#0284c7", "#7c3aed", "#475569"],
   contrast: ["#111827", "#2563eb", "#dc2626", "#f59e0b", "#059669", "#7c3aed"]
 };
-const EMPTY_CAPABILITIES: string[] = [];
-
 function copilotActionLabel(type: string) {
   if (type === "add_widget") return "create_widget";
   if (type === "add_or_update_filter") return "add_filter";
@@ -642,7 +640,6 @@ export function CopilotPanel() {
   const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
   const selectedTargetType = useDashPilotStore((state) => state.viewState.selectedTargetType ?? "none");
   const selectedTargetTitle = useDashPilotStore((state) => state.viewState.selectedTargetTitle);
-  const selectedTargetCapabilities = useDashPilotStore((state) => state.viewState.selectedTargetCapabilities);
   const copilotIntent = useDashPilotStore((state) => state.viewState.copilotIntent);
   const setCopilotIntent = useDashPilotStore((state) => state.setCopilotIntent);
   const clearSelectedTarget = useDashPilotStore((state) => state.clearSelectedTarget);
@@ -674,6 +671,9 @@ export function CopilotPanel() {
   }, [messages, isCopilotThinking]);
 
   const effectiveIntent = copilotIntent ?? (selectedTargetType !== "none" ? "modify_selection" : "create_chart");
+  const hiddenMessageCount = Math.max(0, messages.length - 8);
+  const visibleMessages = hiddenMessageCount ? messages.slice(-8) : messages;
+  const targetLabel = selectedTargetType !== "none" && selectedTargetTitle ? selectedTargetTitle : "Sin objetivo seleccionado";
 
   function submitPrompt(value: string) {
     const trimmed = value.trim();
@@ -717,13 +717,33 @@ export function CopilotPanel() {
         </div>
       )}
       <div className="shrink-0 border-b border-[#edf1fa] px-5 py-3">
-        {undoCount > 0 && (
-          <button type="button" onClick={undoCopilotChange} disabled={isCopilotThinking} className="mb-3 inline-flex items-center gap-2 text-xs font-bold text-[#3d35ff] disabled:opacity-50">
-            <RotateCcw className="size-3.5" /> Deshacer ultimo cambio
-          </button>
-        )}
+        <div className="mb-3 rounded-xl border border-[#e2e7f6] bg-[#fbfcff] p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Contexto operativo</p>
+              <p className="mt-1 truncate text-sm font-bold text-[#1c2748]">{targetLabel}</p>
+              <p className="mt-1 text-xs leading-5 text-[#697597]">
+                {selectedTargetType !== "none" ? "Las instrucciones se aplican a la seleccion actual." : "Pide un nuevo grafico o selecciona un widget para editarlo."}
+              </p>
+            </div>
+            <span className={cn("shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold", selectedTargetType !== "none" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600")}>
+              {selectedTargetType !== "none" ? "Listo" : "General"}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <button type="button" onClick={() => submitPrompt("Explica este grafico y su leyenda.")} disabled={selectedTargetType === "none" || isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Explicar
+            </button>
+            <button type="button" onClick={() => setCopilotIntent("create_chart")} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
+              Nuevo
+            </button>
+            <button type="button" onClick={clearSelectedTarget} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
+              Limpiar
+            </button>
+          </div>
+        </div>
         <label className="block text-xs font-bold text-[#697597]">
-          Modo actual
+          Que quieres que haga
           <select
             className="mt-1 h-9 w-full rounded-lg border border-[#dfe5f0] bg-white px-3 text-sm font-semibold text-[#1c2748]"
             value={effectiveIntent}
@@ -737,25 +757,7 @@ export function CopilotPanel() {
             <option value="presentation">Trabajar con presentacion</option>
           </select>
         </label>
-        {selectedTargetType !== "none" && selectedTargetTitle && (
-          <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-[#dfe5fb] bg-[#f8f9ff] px-3 py-2">
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold uppercase text-[#697597]">{selectedTargetType === "widget" ? "Editando este grafico" : "Objetivo seleccionado"}</p>
-              <p className="truncate text-sm font-bold text-[#1c2748]">{selectedTargetTitle}</p>
-              <p className="truncate text-[11px] font-semibold text-[#697597]">{(selectedTargetCapabilities ?? EMPTY_CAPABILITIES).slice(0, 4).join(" · ")}</p>
-            </div>
-            <button type="button" onClick={clearSelectedTarget} className="grid size-8 shrink-0 place-items-center rounded-md text-[#697597] hover:bg-white" aria-label="Deseleccionar objetivo">
-              <X className="size-4" />
-            </button>
-          </div>
-        )}
-        <div className="mt-2 grid grid-cols-3 gap-2">
-          <button type="button" onClick={clearSelectedTarget} className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
-            <X className="size-3.5" /> Limpiar
-          </button>
-          <button type="button" onClick={() => setCopilotIntent("create_chart")} className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
-            <Sparkles className="size-3.5" /> Nuevo
-          </button>
+        <div className="mt-2 grid grid-cols-2 gap-2">
           <button
             type="button"
             disabled={selectedTargetType === "none"}
@@ -766,6 +768,9 @@ export function CopilotPanel() {
             className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45"
           >
             <RotateCw className="size-3.5" /> Reemplazar
+          </button>
+          <button type="button" onClick={undoCopilotChange} disabled={!undoCount || isCopilotThinking} className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-[#dfe5f0] bg-white px-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+            <RotateCcw className="size-3.5" /> Deshacer
           </button>
         </div>
         {effectiveIntent === "create_chart" && (
@@ -784,7 +789,12 @@ export function CopilotPanel() {
         )}
       </div>
       <div className="scrollbar-soft min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
-        {messages.map((message) => (
+        {hiddenMessageCount > 0 && (
+          <div className="rounded-xl border border-[#edf1fa] bg-[#fbfcff] px-3 py-2 text-center text-xs font-semibold text-[#697597]">
+            Mostrando las ultimas 8 respuestas. El contexto anterior sigue disponible para el Copiloto.
+          </div>
+        )}
+        {visibleMessages.map((message) => (
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>
             <p className="mb-1 text-xs font-bold text-[#697597]">{message.role === "user" ? "Tu" : "Copiloto IA"}</p>
             {message.content}

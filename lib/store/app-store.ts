@@ -760,9 +760,16 @@ export const useDashPilotStore = create<DashPilotState>()(
             : current.currentProject
         })),
       setViewState: (viewState) =>
-        set({
-          viewState: { ...get().viewState, ...viewState },
-          filters: { ...get().viewState, ...viewState }
+        set((current) => {
+          const nextViewState = {
+            ...current.viewState,
+            ...viewState,
+            filters: viewState.filters ?? current.viewState.filters ?? [],
+            dataExplorer: viewState.dataExplorer
+              ? { ...current.viewState.dataExplorer, ...viewState.dataExplorer }
+              : current.viewState.dataExplorer
+          };
+          return { viewState: nextViewState, filters: nextViewState };
         }),
       selectDashboardTarget: (targetType, targetId) => {
         const viewState = targetViewState(get().dashboard, get().viewState, targetType, targetId);

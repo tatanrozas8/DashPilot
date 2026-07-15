@@ -91,6 +91,23 @@ describe("query engine", () => {
     expect(result.rows.every((row) => String(row.Vendedor).includes("Maria"))).toBe(true);
   });
 
+  it("ignores empty table column searches", () => {
+    const result = queryTableRows(demoRows, { columnSearch: { field: "Vendedor", query: " " }, columns: ["Vendedor", "Region"] });
+
+    expect(result.filteredRows).toBe(demoRows.length);
+    expect(result.rows).toHaveLength(demoRows.length);
+  });
+
+  it("ignores incomplete dashboard filters instead of hiding all rows", () => {
+    const filtered = applyDashboardFilters(demoRows, [
+      { field: "Region", operator: "in", value: [] },
+      { field: "Fecha", operator: "between", value: ["", ""] },
+      { field: "Producto", operator: "contains", value: "" }
+    ]);
+
+    expect(filtered).toHaveLength(demoRows.length);
+  });
+
   it("handles LatAm money and day-first date ranges", () => {
     const rows = [
       { Fecha: "01/04/2024", Ventas: "$1.200,50", Region: "Norte" },

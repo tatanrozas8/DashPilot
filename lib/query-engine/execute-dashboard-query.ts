@@ -65,6 +65,16 @@ function matchesFilter(row: DataRow, filter: DashboardFilter) {
   return true;
 }
 
+function isActiveFilter(filter: DashboardFilter) {
+  if (!filter.field) return false;
+  if (filter.operator === "in") return Array.isArray(filter.value) && filter.value.length > 0;
+  if (filter.operator === "between" || filter.operator === "range") {
+    return Array.isArray(filter.value) && filter.value.length >= 2 && filter.value[0] !== "" && filter.value[1] !== "";
+  }
+  if (filter.operator === "contains") return String(filter.value ?? "").trim().length > 0;
+  return filter.value !== undefined && filter.value !== null && String(filter.value).trim().length > 0;
+}
+
 function aggregate(values: unknown[], aggregation: Aggregation) {
   if (aggregation === "count") return values.length;
   if (aggregation === "count_distinct") return new Set(values.map((value) => String(value ?? ""))).size;
@@ -77,7 +87,9 @@ function aggregate(values: unknown[], aggregation: Aggregation) {
 }
 
 export function applyDashboardFilters(rows: DataRow[], filters: DashboardFilter[] = []) {
-  return rows.filter((row) => filters.every((filter) => matchesFilter(row, filter)));
+  const activeFilters = filters.filter(isActiveFilter);
+  if (!activeFilters.length) return rows;
+  return rows.filter((row) => activeFilters.every((filter) => matchesFilter(row, filter)));
 }
 
 export function executeDashboardQuery(rows: DataRow[], query: DashboardQuerySpec = {}, viewState: DashboardViewState = { filters: [] }): QueryResultRow[] {

@@ -49,7 +49,8 @@ export function sortRows(rows: DataRow[], sort?: TableQueryState["sort"]) {
 
 export function queryTableRows(rows: DataRow[], state: TableQueryState) {
   const globallyFiltered = searchRows(applyDashboardFilters(rows, state.filters ?? []), state.search);
-  const filtered = state.columnSearch?.query ? searchRows(globallyFiltered, state.columnSearch.query, [state.columnSearch.field]) : globallyFiltered;
+  const columnSearch = state.columnSearch?.field && state.columnSearch.query.trim() ? state.columnSearch : undefined;
+  const filtered = columnSearch ? searchRows(globallyFiltered, columnSearch.query, [columnSearch.field]) : globallyFiltered;
   const sorted = sortRows(filtered, state.sort);
   return {
     rows: selectColumns(sorted, state.columns ?? []),

@@ -128,6 +128,14 @@ function fieldLabel(profile: DatasetProfile, field?: string) {
   return profile.columns.find((column) => column.normalizedName === field)?.displayName ?? field ?? "campo";
 }
 
+function wantsYearColorLegend(prompt: string) {
+  const text = normalize(prompt);
+  const mentionsYear = /\b(ano|anos|anio|anios|year|years)\b/.test(text);
+  const mentionsColorOrLegend = /\b(color|colores|leyenda)\b/.test(text);
+  const wantsApply = /\b(agrega|agregar|anade|anadir|muestra|mostrar|representa|representar|identifica|indica|poner|pon)\b/.test(text);
+  return mentionsYear && mentionsColorOrLegend && wantsApply && !/\b(no|deshaz|vuelve atras|revertir|revierte)\b/.test(text);
+}
+
 function widgetExplanation(widget: DashboardWidget | undefined, profile: DatasetProfile) {
   if (!widget) return "Selecciona un grafico y te explico como leerlo.";
   const metric = fieldLabel(profile, widget.query?.metric?.field);
@@ -356,6 +364,60 @@ function noColumnAction(label: string, context: CopilotRequestContext) {
   return { reply: missingColumnMessage(label, context.datasetProfile), envelopes: [] };
 }
 
+function yearColorLegendPlan(context: CopilotRequestContext, target: DashboardWidget | undefined): { reply: string; envelopes: CopilotActionEnvelope[]; warnings?: string[] } | undefined {
+  if (!wantsYearColorLegend(context.prompt)) return undefined;
+  if (!target || !["bar_chart", "line_chart", "area_chart"].includes(target.type)) {
+    return {
+      reply: "Selecciona primero el grafico al que quieres agregar la leyenda por ano.",
+      envelopes: [actionEnvelope({ type: "ask_clarification", question: "Selecciona primero el grafico al que quieres agregar la leyenda por ano." }, "La solicitud de colores por ano necesita un grafico objetivo.", 0.88)]
+    };
+  }
+
+  const currentSeriesField = target.query?.seriesBy;
+  const currentSeries = currentSeriesField ? columnProfile(context.datasetProfile, currentSeriesField) : undefined;
+  const alreadyYearSeries = Boolean(currentSeriesField && target.query?.seriesGranularity === "year" && (currentSeries?.semanticType === "time" || currentSeries?.inferredType === "date"));
+  if (alreadyYearSeries) {
+    const dimension = fieldLabel(context.datasetProfile, target.query?.x?.field ?? target.query?.groupBy?.[0]);
+    return {
+      reply: `Active la leyenda del grafico seleccionado para que cada color identifique un ano de ${fieldLabel(context.datasetProfile, currentSeriesField)}. No cambie metrica, ${dimension}, filtros ni datos.`,
+      envelopes: [actionEnvelope({ type: "update_widget_visual_config", widgetId: target.id, visualConfig: { legend: true } }, "El grafico ya tenia anos como serie; solo faltaba mostrar la leyenda.", 0.94)]
+    };
+  }
+
+  const date = resolveColumn("fecha ano periodo tiempo", availableContext(context), "date").matchedColumn
+    ?? context.datasetProfile.detectedDateColumns.map((field) => columnProfile(context.datasetProfile, field)).find(Boolean);
+  const dimension = target.query?.x?.field ?? target.query?.groupBy?.[0];
+  if (!date || !dimension || !target.query?.metric?.field) {
+    return {
+      reply: "Puedo agregar colores por ano, pero este grafico no tiene metrica, dimension y fecha suficientes para hacerlo sin inventar datos.",
+      envelopes: [actionEnvelope({ type: "explain_limitation", message: "Falta metrica, dimension o fecha para agregar colores por ano sin cambiar la logica del grafico." }, "No se puede construir una serie anual segura con el grafico seleccionado.", 0.82)]
+    };
+  }
+
+  const query = {
+    ...target.query,
+    x: { ...(target.query.x ?? {}), field: dimension },
+    groupBy: target.query.groupBy?.length ? target.query.groupBy : [dimension],
+    seriesBy: date.normalizedName,
+    seriesGranularity: "year" as const
+  };
+  const visualConfig = { ...(target.config.visualConfig ?? {}), legend: true };
+  const action: DashboardAction = {
+    type: "update_widget",
+    widgetId: target.id,
+    changes: {
+      type: "bar_chart",
+      title: target.title.includes("Ano") || target.title.includes("ano") ? target.title : `${target.title} por Ano`,
+      query,
+      config: { ...target.config, seriesBy: date.normalizedName, visualConfig }
+    }
+  };
+  return {
+    reply: `Agregue anos como colores usando ${date.displayName} y active la leyenda. Mantengo ${fieldLabel(context.datasetProfile, dimension)} como eje X y ${fieldLabel(context.datasetProfile, target.query.metric.field)} como metrica.`,
+    envelopes: [actionEnvelope(action, "El usuario pidio que los colores representen anos en el grafico seleccionado.", 0.9)]
+  };
+}
+
 function designFromPrompt(prompt: string): DashboardAction | null {
   const design: Extract<DashboardAction, { type: "update_dashboard_design" }>["design"] = {};
 
@@ -381,6 +443,8 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
   const prompt = normalize(context.prompt);
   const actionPlan = buildActionPlan({ prompt: context.prompt, dashboardSpec: context.dashboardSpec, viewState: context.viewState });
   const target = actionPlan.target ?? preferredWidget(context.dashboardSpec, context.prompt, context.viewState);
+  const yearLegend = yearColorLegendPlan(context, target);
+  if (yearLegend) return yearLegend;
 
   if (actionPlan.createNewWidget) {
     const dimensionIntent = prompt.includes("producto") ? "product" : prompt.includes("categoria") || prompt.includes("categorÃ­a") ? "category" : prompt.includes("region") || prompt.includes("pais") || prompt.includes("zona") ? "geography" : "dimension";
@@ -832,6 +896,10 @@ export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotR
   }
   if (actionPlan.messageKind === "correction") {
     return applyValidatedActions(input, [actionEnvelope({ type: "ask_clarification", question: "Entendido: no aplicare filtros ni cambiare columnas. Indica si quieres deshacer, cambiar solo lo visual o reemplazar el grafico seleccionado." }, actionPlan.reason, 0.86)], source, "No aplique cambios porque tu mensaje es una correccion, no una nueva orden de datos.");
+  }
+  const yearLegend = yearColorLegendPlan(input, actionPlan.target ?? preferredWidget(input.dashboardSpec, input.prompt, input.viewState));
+  if (yearLegend) {
+    return applyValidatedActions(input, yearLegend.envelopes, source, yearLegend.reply, yearLegend.warnings ?? []);
   }
   const analyticalPlan = actionPlan.createNewWidget ? { handled: false as const, reply: "", actions: [], confidence: 0 } : planAnalyticalChart(input);
   if (analyticalPlan.handled) {

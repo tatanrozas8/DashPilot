@@ -289,6 +289,92 @@ describe("copilot service", () => {
     expect(result.updatedViewState?.highlightedWidgetId).toBe("sales_by_region");
   });
 
+  it("adds a year color legend without replacing the selected chart data logic", () => {
+    const ctx = selectedCustomContext("Agrega al grafico que color representa cada ano", [
+      { fecha: "2024-01-01", region: "RM", canal: "Mayoristas", venta_bruta_clp: 100, forecast_venta_clp: 120 },
+      { fecha: "2025-01-01", region: "RM", canal: "Supermercados", venta_bruta_clp: 160, forecast_venta_clp: 170 },
+      { fecha: "2024-01-01", region: "Biobio", canal: "Foodservice", venta_bruta_clp: 120, forecast_venta_clp: 130 }
+    ]);
+    const current = ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+    const seriesWidget = {
+      ...current!,
+      title: "venta_bruta_clp por region por Ano",
+      type: "bar_chart" as const,
+      query: {
+        metric: { field: "venta_bruta_clp", aggregation: "sum" as const },
+        x: { field: "region" },
+        groupBy: ["region"],
+        seriesBy: "fecha",
+        seriesGranularity: "year" as const
+      },
+      config: { ...current!.config, visualConfig: { orientation: "vertical" as const } }
+    };
+    const result = createMockCopilotResponse({
+      ...ctx,
+      dashboardSpec: {
+        ...ctx.dashboardSpec,
+        widgets: ctx.dashboardSpec.widgets.map((widget) => widget.id === seriesWidget.id ? seriesWidget : widget)
+      },
+      viewState: {
+        ...ctx.viewState,
+        selectedTargetSpec: seriesWidget,
+        selectedTargetTitle: seriesWidget.title
+      }
+    });
+    const updated = result.updatedDashboardSpec?.widgets.find((widget) => widget.id === "sales_by_region");
+
+    expect(result.actions?.[0]?.type).toBe("update_widget_visual_config");
+    expect(updated?.query).toEqual(seriesWidget.query);
+    expect(updated?.config.visualConfig?.legend).toBe(true);
+    expect(updated?.query?.x?.field).toBe("region");
+    expect(updated?.query?.metric?.field).toBe("venta_bruta_clp");
+    expect(updated?.query?.seriesBy).toBe("fecha");
+    expect(updated?.query?.x?.field).not.toBe("canal");
+    expect(updated?.query?.metric?.field).not.toBe("forecast_venta_clp");
+  });
+
+  it("adds years as color series to the selected chart without choosing channel", () => {
+    const ctx = selectedCustomContext("Agrega al grafico colores para que cada color represente un ano", [
+      { fecha: "2024-01-01", region: "RM", canal: "Mayoristas", venta_bruta_clp: 100, forecast_venta_clp: 120 },
+      { fecha: "2025-01-01", region: "RM", canal: "Supermercados", venta_bruta_clp: 160, forecast_venta_clp: 170 },
+      { fecha: "2024-01-01", region: "Biobio", canal: "Foodservice", venta_bruta_clp: 120, forecast_venta_clp: 130 }
+    ]);
+    const current = ctx.dashboardSpec.widgets.find((widget) => widget.id === "sales_by_region");
+    const baseWidget = {
+      ...current!,
+      title: "venta_bruta_clp por region",
+      type: "bar_chart" as const,
+      query: {
+        metric: { field: "venta_bruta_clp", aggregation: "sum" as const },
+        groupBy: ["region"]
+      }
+    };
+    const result = createMockCopilotResponse({
+      ...ctx,
+      dashboardSpec: {
+        ...ctx.dashboardSpec,
+        widgets: ctx.dashboardSpec.widgets.map((widget) => widget.id === baseWidget.id ? baseWidget : widget)
+      },
+      viewState: {
+        ...ctx.viewState,
+        selectedTargetSpec: baseWidget,
+        selectedTargetTitle: baseWidget.title
+      }
+    });
+    const updated = result.updatedDashboardSpec?.widgets.find((widget) => widget.id === "sales_by_region");
+
+    expect(result.actions?.[0]?.type).toBe("update_widget");
+    expect(updated?.type).toBe("bar_chart");
+    expect(updated?.query?.x?.field).toBe("region");
+    expect(updated?.query?.groupBy).toEqual(["region"]);
+    expect(updated?.query?.metric?.field).toBe("venta_bruta_clp");
+    expect(updated?.query?.seriesBy).toBe("fecha");
+    expect(updated?.query?.seriesGranularity).toBe("year");
+    expect(updated?.config.visualConfig?.legend).toBe(true);
+    expect(updated?.query?.x?.field).not.toBe("canal");
+    expect(updated?.query?.metric?.field).not.toBe("forecast_venta_clp");
+  });
+
   it("changes only selected bar chart orientation when requested", () => {
     const ctx = selectedCustomContext("Actualmente el grafico se ve horizontal y quiero que lo muestre vertical.", [
       { fecha: "2024-01-01", region: "RM", canal: "Retail", ventas: 100 },

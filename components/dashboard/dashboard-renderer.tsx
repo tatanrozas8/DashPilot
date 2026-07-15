@@ -6,6 +6,7 @@ import {
   BarChart,
   Cell,
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   Pie,
@@ -249,6 +250,9 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
             <XAxis type={isHorizontal ? "number" : "category"} dataKey={isHorizontal ? undefined : "label"} hide={isHorizontal} axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
             <YAxis type={isHorizontal ? "category" : "number"} dataKey={isHorizontal ? "label" : undefined} axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={isHorizontal ? 82 : 54} tickFormatter={(value) => isHorizontal ? String(value) : formatCurrency(Number(value))} />
             <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+            {seriesKeys.length > 0 && widget.config.visualConfig?.legend !== false && (
+              <Legend verticalAlign="top" align="center" iconType="circle" wrapperStyle={{ color: "#34405f", fontSize: 12, fontWeight: 600, paddingBottom: 8 }} />
+            )}
             {seriesKeys.length ? (
               seriesKeys.map((key, index) => (
                 <Bar key={key} dataKey={key} radius={barRadius} fill={colors.palette[index % colors.palette.length]} barSize={compact ? 12 : 18} />

@@ -9,13 +9,17 @@ export type ExportType =
 export interface ShareLink {
   id: string;
   dashboardId: string;
-  token: string;
+  token?: string;
   access: "public" | "private" | "password";
   expiresAt?: string;
   allowFilters: boolean;
   allowDownload: boolean;
+  scopes?: PublicShareScope[];
+  passwordRequired?: boolean;
   createdAt: string;
 }
+
+export type PublicShareScope = "view_dashboard" | "use_filters" | "export_snapshot";
 
 export interface ImportJob {
   id: string;

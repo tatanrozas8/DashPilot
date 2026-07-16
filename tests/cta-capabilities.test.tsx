@@ -49,8 +49,8 @@ describe("visible capability CTAs", () => {
     useDashPilotStore.getState().loadDemo();
     renderWithToast(<ShareExportPage />);
 
-    expect(screen.queryByText("Requerir contrasena")).not.toBeInTheDocument();
-    expect(screen.getByText(/contrasena esta desactivada/)).toBeInTheDocument();
+    expect(screen.getByText("Requerir contrasena")).toBeInTheDocument();
+    expect(screen.getByText(/resultados agregados por widget/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abrir vista previa" })).toBeDisabled();
 
     for (const title of ["Manifest interactivo", "Exportar PDF", "Exportar PNG", "Exportar PowerPoint"]) {

@@ -110,8 +110,29 @@ describe("data access", () => {
 
   it("creates a local share url without Supabase", async () => {
     vi.stubGlobal("crypto", crypto);
+    const spec: DashboardSpec = {
+      id: "dashboard_test",
+      title: "Test",
+      datasetId: "dataset_test",
+      globalFilters: [],
+      widgets: [
+        {
+          id: "sales_kpi",
+          type: "kpi_card",
+          title: "Ventas",
+          query: { metric: { field: "sales", aggregation: "sum" } },
+          config: {},
+          position: { x: 0, y: 0, w: 3, h: 2 }
+        }
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
     const result = await persistShareLink({
       dashboardId: "dashboard_test",
+      dashboard: spec,
+      viewState: { filters: [] },
+      rows: [{ sales: 100 }],
       access: "public",
       expiresAt: "2099-01-01",
       allowFilters: true,

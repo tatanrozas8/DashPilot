@@ -2,6 +2,7 @@ import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
 import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { ShareLink } from "@/types/export";
 import type { ObservableOperation } from "@/lib/observability/modes";
+import type { PublicWidgetResult } from "@/lib/share/public-snapshot";
 
 export type PersistenceMode = "supabase" | "local" | "degraded";
 
@@ -53,6 +54,6 @@ export interface PublicSharedDashboard {
   link: ShareLink;
   dashboard: DashboardSpec;
   viewState: DashboardViewState;
-  rows: DataRow[];
-  profile?: DatasetProfile;
+  widgetResults: PublicWidgetResult[];
+  allowedFilters: DashboardSpec["globalFilters"];
 }

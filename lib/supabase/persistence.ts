@@ -29,10 +29,14 @@ export async function saveShareLink(link: ShareLink) {
 
 export async function createInteractiveShareLink(input: {
   dashboardId: string;
+  dashboard: DashboardSpec;
+  viewState: DashboardViewState;
+  rows: DataRow[];
   access: ShareLink["access"];
   expiresAt?: string;
   allowFilters: boolean;
   allowDownload: boolean;
+  password?: string;
   origin: string;
 }) {
   return persistShareLink(input);

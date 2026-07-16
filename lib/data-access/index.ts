@@ -39,6 +39,7 @@ import { createShareLink, createShareLinkToken, getPublicSharedDashboard } from 
 import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { nameFromFile } from "@/lib/utils/name-from-file";
+import { buildPublicDashboardSnapshot, publicShareScopes } from "@/lib/share/public-snapshot";
 
 export function localModeWarning() {
   return "Supabase no esta configurado. Sandbox local en memoria; los datos sensibles no se guardan en storage del navegador.";
@@ -255,13 +256,19 @@ export async function persistPresentation(spec: PresentationSpec): Promise<Prese
 
 export async function persistShareLink(input: {
   dashboardId: string;
+  dashboard: DashboardSpec;
+  viewState: DashboardViewState;
+  rows: DataRow[];
   access: ShareLink["access"];
   expiresAt?: string;
   allowFilters: boolean;
   allowDownload: boolean;
+  password?: string;
   origin: string;
 }): Promise<SharePersistResult> {
   const token = createShareLinkToken();
+  const scopes = publicShareScopes({ allowFilters: input.allowFilters, allowDownload: input.allowDownload });
+  const snapshot = buildPublicDashboardSnapshot({ dashboard: input.dashboard, viewState: input.viewState, rows: input.rows });
   const link: ShareLink = {
     id: token,
     dashboardId: input.dashboardId,
@@ -270,21 +277,43 @@ export async function persistShareLink(input: {
     expiresAt: input.expiresAt,
     allowFilters: input.allowFilters,
     allowDownload: input.allowDownload,
+    scopes,
+    passwordRequired: Boolean(input.password),
     createdAt: new Date().toISOString()
   };
   try {
-    const result = await createShareLink(link);
+    const result = await createShareLink(link, {
+      password: input.password,
+      snapshot,
+      payload: {
+        dashboard: input.dashboard,
+        viewState: input.viewState,
+        widgetResults: snapshot.widgetResults,
+        allowedFilters: snapshot.allowedFilters
+      }
+    });
     const observable = result.mode === "supabase" ? providerResult() : localResult();
     const url = `${input.origin}/share/${token}`;
     return { ...observable, token: result.token, url, link };
   } catch (error) {
     const degraded = degradedResult(error, "No se pudo crear el enlace en Supabase.");
-    enqueueOutbox({ kind: "share", link }, degraded.correlationId);
+    enqueueOutbox({
+      kind: "share",
+      link,
+      snapshot,
+      publicPayload: {
+        dashboard: input.dashboard,
+        viewState: input.viewState,
+        widgetResults: snapshot.widgetResults,
+        allowedFilters: snapshot.allowedFilters
+      },
+      password: input.password
+    }, degraded.correlationId);
     const url = `${input.origin}/share/${token}`;
     return { ...degraded, token, url, link };
   }
 }
 
-export async function loadPublicShare(token: string): Promise<PublicSharedDashboard | null> {
-  return getPublicSharedDashboard(token);
+export async function loadPublicShare(token: string, password?: string): Promise<PublicSharedDashboard | null> {
+  return getPublicSharedDashboard(token, password);
 }

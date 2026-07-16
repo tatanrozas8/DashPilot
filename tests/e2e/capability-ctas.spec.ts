@@ -14,8 +14,8 @@ test("main capability CTAs reflect real, beta and disabled behavior", async ({ p
   await page.getByRole("link", { name: "Compartir" }).click();
   await expect(page).toHaveURL(/\/compartir$/);
   await expect(page.getByText("Compartir enlace interactivo")).toBeVisible();
-  await expect(page.getByText("Requerir contrasena")).toHaveCount(0);
-  await expect(page.getByText(/La proteccion con contrasena esta desactivada/)).toBeVisible();
+  await expect(page.getByText("Requerir contrasena")).toBeVisible();
+  await expect(page.getByText(/resultados agregados por widget/)).toBeVisible();
 
   await expect(page.getByRole("button", { name: "No disponible" })).toHaveCount(4);
   for (const title of ["Manifest interactivo", "Exportar PDF", "Exportar PNG", "Exportar PowerPoint"]) {

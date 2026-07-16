@@ -620,3 +620,58 @@ Debt remaining:
 - Add database-level tests with a real Supabase/Postgres harness to execute RLS, trigger and RPC behavior end to end.
 - Consider a server-side import worker before production-scale multi-tenant uploads.
 - Add a visible dashboard metadata panel that displays `datasetVersionId`, checksum and activated timestamp for business users.
+
+## 2026-07-16 - public-sharing-aggregated-results-2026-07-16
+
+Commit: `security: redesign public sharing around aggregated results`
+
+Prompt ID: `public-sharing-aggregated-results-2026-07-16`
+
+Objective:
+
+- Redesign public share links so visual authorization is not confused with data security.
+- Ensure a normal public link receives dashboard snapshots, not source rows or dataset profiles.
+- Validate token, expiration, revocation, password, scopes, filters and downloads server-side.
+
+Changes:
+
+- Added hashed public share tokens and password salts/hashes; newly created links no longer persist recoverable tokens.
+- Added public share scopes: `view_dashboard`, `use_filters`, `export_snapshot`.
+- Added immutable per-link `share_widget_results` snapshots and `public_share_access_logs`.
+- Replaced the public RPC contract so it returns `dashboard`, `viewState`, `widgetResults` and `allowedFilters`, with no `rows` or `profile`.
+- Added rate limiting by token hash prefix and hashed client IP, generic denial responses to avoid resource enumeration, immediate revocation checks and filter allowlist validation.
+- Replaced the public page renderer with a snapshot renderer that cannot hydrate the private dashboard store with source rows.
+- Updated share/export settings so password protection is real server-side behavior and downloads map to aggregated snapshot scope.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test`: passed, 29 files and 188 tests.
+- `npm run lint`: passed.
+- `npm run build`: passed, 23 app routes generated.
+- `npx playwright test tests/e2e/capability-ctas.spec.ts --reporter=line --timeout=30000`: passed, 1 Chromium E2E test.
+- `npx playwright test --reporter=line --timeout=30000`: passed, 1 Chromium E2E test.
+
+Known failures:
+
+- `npm run test:e2e` failed before Playwright because PowerShell blocks `npm.ps1` execution on this machine.
+- `npm.cmd run test:e2e` launched Playwright but twice hung after marking an initial `x`; the same full E2E suite completed and passed through `npx playwright test --reporter=line`.
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- Added `supabase/migrations/0004_public_share_security.sql`.
+- Existing share tokens are backfilled to `token_hash` and the recoverable `token` value is nulled.
+- No environment variables changed.
+
+Security/privacy notes:
+
+- Public DevTools payload is intentionally limited to aggregate widget results and allowlisted filters.
+- `allowDownload=false` is enforced by absence of `export_snapshot` scope in server response.
+- Access logs store link id plus token hash prefix and hashed request metadata, not raw tokens, raw IPs or source rows.
+
+Debt remaining:
+
+- Add executable Supabase/Postgres tests for the security-definer RPC, RLS policies and rate-limit windows.
+- Add a first-class public snapshot export endpoint for `export_snapshot` instead of only preparing the scope contract.
+- Add owner-facing audit UI for public share access logs and revocation history.

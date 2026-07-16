@@ -49,6 +49,7 @@ function escapeCsvCell(value: unknown) {
 export function ShareExportPage() {
   const toast = useToast();
   const [generatedUrl, setGeneratedUrl] = useState("");
+  const [sharePassword, setSharePassword] = useState("");
   const shareSettings = useDashPilotStore((state) => state.shareSettings);
   const setShareSettings = useDashPilotStore((state) => state.setShareSettings);
   const dashboard = useDashPilotStore((state) => state.dashboard);
@@ -68,12 +69,20 @@ export function ShareExportPage() {
         toast("Sube un dataset para crear un enlace.");
         return;
       }
+      if (shareSettings.requirePassword && sharePassword.trim().length < 8) {
+        toast("La contrasena debe tener al menos 8 caracteres.");
+        return;
+      }
       const result = await persistShareLink({
         dashboardId: activeDashboardId || dashboard.id,
-        access: shareSettings.access,
+        dashboard,
+        viewState,
+        rows,
+        access: shareSettings.requirePassword ? "password" : shareSettings.access,
         expiresAt: shareSettings.expiresAt,
         allowFilters: shareSettings.allowFilters,
         allowDownload: shareSettings.allowDownload,
+        password: shareSettings.requirePassword ? sharePassword.trim() : undefined,
         origin: window.location.origin
       });
       setGeneratedUrl(result.url);
@@ -174,8 +183,9 @@ export function ShareExportPage() {
             </div>
             <div className="mt-6 space-y-5">
               {[
-                ["Permitir usar filtros e interacciones", "Los usuarios podran filtrar, ordenar y explorar los datos.", shareSettings.allowFilters, "allowFilters"],
-                ["Permitir descarga de datos", "Los usuarios podran descargar los datos visibles.", shareSettings.allowDownload, "allowDownload"]
+                ["Permitir usar filtros e interacciones", "Solo se aceptan filtros declarados en el dashboard y validados en servidor.", shareSettings.allowFilters, "allowFilters"],
+                ["Permitir descarga de snapshot", "Permite exportar el resultado agregado permitido, no las filas fuente.", shareSettings.allowDownload, "allowDownload"],
+                ["Requerir contrasena", "La contrasena se valida en servidor antes de devolver el snapshot.", shareSettings.requirePassword, "requirePassword"]
               ].map(([title, copy, enabled, key]) => (
                 <div key={String(title)} className="flex items-center justify-between gap-5">
                   <div>
@@ -191,9 +201,22 @@ export function ShareExportPage() {
                   </button>
                 </div>
               ))}
+              {shareSettings.requirePassword && (
+                <label className="block">
+                  <span className="text-sm font-bold">Contrasena del enlace</span>
+                  <input
+                    type="password"
+                    value={sharePassword}
+                    onChange={(event) => setSharePassword(event.target.value)}
+                    minLength={8}
+                    className="mt-2 h-11 w-full rounded-lg border border-[#dfe5f0] px-4 text-[#34405f]"
+                    autoComplete="new-password"
+                  />
+                </label>
+              )}
             </div>
-            <p className="mt-6 rounded-lg bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-              La proteccion con contrasena esta desactivada hasta contar con validacion server-side. No se simula seguridad en el cliente.
+            <p className="mt-6 rounded-lg bg-[#f6f7ff] p-4 text-sm font-semibold text-[#34405f]">
+              El enlace publico recibe resultados agregados por widget. Token, expiracion, revocacion, scopes y contrasena se validan en servidor.
             </p>
           </section>
 

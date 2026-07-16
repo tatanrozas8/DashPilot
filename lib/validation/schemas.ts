@@ -189,11 +189,13 @@ export const presentationSpecSchema = z.object({
 export const shareLinkSchema = z.object({
   id: z.string(),
   dashboardId: z.string(),
-  token: z.string(),
+  token: z.string().optional(),
   access: z.enum(["public", "private", "password"]),
   expiresAt: z.string().optional(),
   allowFilters: z.boolean(),
   allowDownload: z.boolean(),
+  scopes: z.array(z.enum(["view_dashboard", "use_filters", "export_snapshot"])).optional(),
+  passwordRequired: z.boolean().optional(),
   createdAt: z.string()
 });
 

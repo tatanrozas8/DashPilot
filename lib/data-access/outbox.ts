@@ -14,6 +14,7 @@ import { createPresentation } from "@/lib/supabase/presentations";
 import { createShareLink } from "@/lib/supabase/share-links";
 import { nameFromFile } from "@/lib/utils/name-from-file";
 import { purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
+import type { PublicDashboardSnapshot, PublicSharePayload } from "@/lib/share/public-snapshot";
 
 const OUTBOX_KEY = "dashpilot:sync-outbox:v2";
 const MAX_ATTEMPTS = 5;
@@ -22,7 +23,7 @@ export type OutboxPayload =
   | { kind: "dataset"; parsed: FileParseResult; profile: DatasetProfile; rows: DataRow[] }
   | { kind: "dashboard"; projectId?: string; spec: DashboardSpec; viewState: DashboardViewState; rows?: DataRow[]; profile?: DatasetProfile; updateDashboardId?: string }
   | { kind: "presentation"; spec: PresentationSpec }
-  | { kind: "share"; link: ShareLink }
+  | { kind: "share"; link: ShareLink; snapshot?: PublicDashboardSnapshot; publicPayload?: PublicSharePayload; password?: string }
   | { kind: "chat"; projectId: string; dashboardId?: string; message: ChatMessage }
   | { kind: "dashboard-version"; dashboardId: string; spec: DashboardSpec; reason?: string };
 
@@ -163,7 +164,7 @@ async function replayPayload(payload: OutboxPayload) {
     return;
   }
   if (payload.kind === "share") {
-    await createShareLink(payload.link);
+    await createShareLink(payload.link, { snapshot: payload.snapshot, payload: payload.publicPayload, password: payload.password });
     return;
   }
   if (payload.kind === "chat") {

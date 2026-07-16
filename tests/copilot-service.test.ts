@@ -66,11 +66,11 @@ describe("copilot service", () => {
     if (!result.success) expect(result.error).toContain("columna_inventada");
   });
 
-  it("creates advanced mock actions using semantic context", () => {
+  it("creates advanced deterministic actions using semantic context", () => {
     const ctx = context("agrega un nuevo grafico por producto");
     const result = createMockCopilotResponse(ctx);
 
-    expect(result.source).toBe("mock");
+    expect(result.source).toBe("deterministic");
     expect(result.action?.type).toBe("add_widget");
     if (result.action?.type === "add_widget") {
       expect(result.action.widget.query?.metric?.field).toBeTruthy();
@@ -98,7 +98,7 @@ describe("copilot service", () => {
     ]);
     const result = createMockCopilotResponse(ctx);
 
-    expect(result.source).toBe("mock");
+    expect(result.source).toBe("deterministic");
     expect(result.reply).toContain("Pais");
     expect(result.actions?.some((action) => action.type === "add_widget" || action.type === "focus_widget")).toBe(true);
     expect(result.updatedDashboardSpec?.widgets.some((widget) => widget.query?.groupBy?.includes("Pais"))).toBe(true);

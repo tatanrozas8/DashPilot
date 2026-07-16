@@ -31,7 +31,11 @@ export function LandingPage() {
         activeDatasetId: result.datasetId,
         activeProjectId: result.projectId ?? "local-project",
         persistenceMode: result.mode,
-        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Guardado en Supabase" : "Modo local")
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Guardado en Supabase" : "Modo local"),
+        executionMode: result.executionMode,
+        syncStatus: result.syncStatus,
+        lastSyncCorrelationId: result.correlationId,
+        lastSyncError: result.warning
       });
       router.push(`/app/datasets/${result.datasetId}/preview`);
     } catch (err) {

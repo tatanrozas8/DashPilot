@@ -29,6 +29,9 @@ import { profileDataset } from "@/lib/profiling/profile-dataset";
 import { createDashboardVersion } from "@/lib/supabase/dashboards";
 import { saveChatMessage } from "@/lib/supabase/chat";
 import { nameFromFile } from "@/lib/utils/name-from-file";
+import { enqueueOutbox, flushOutboxDueItems, outboxCount } from "@/lib/data-access/outbox";
+import { DomainError, logDomainError, toDomainError } from "@/lib/observability/domain-error";
+import type { ExecutionMode, SyncStatus } from "@/lib/observability/modes";
 
 export interface PresentationOptions {
   theme: PresentationTheme;
@@ -91,8 +94,13 @@ interface DashPilotState {
   activeDatasetId: string;
   activeDashboardId: string;
   activePresentationId: string;
-  persistenceMode: "local" | "supabase";
+  persistenceMode: "local" | "supabase" | "degraded";
   persistenceStatus: string;
+  executionMode: ExecutionMode;
+  syncStatus: SyncStatus;
+  lastSyncCorrelationId?: string;
+  lastSyncError?: string;
+  outboxCount: number;
   messages: ChatMessage[];
   chatMessages: ChatMessage[];
   versions: DashboardSpec[];
@@ -131,7 +139,8 @@ interface DashPilotState {
   removeDashboardDraftWidget: (widgetId: string) => void;
   setDashboardDraftWidgetHidden: (widgetId: string, hidden: boolean) => void;
   commitDashboardEditing: () => DashboardSpec | null;
-  setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus">>) => void;
+  setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus" | "executionMode" | "syncStatus" | "lastSyncCorrelationId" | "lastSyncError" | "outboxCount">>) => void;
+  retryPendingSync: () => Promise<void>;
   setViewState: (viewState: Partial<DashboardViewState>) => void;
   selectDashboardTarget: (targetType: DashboardTargetType, targetId?: string) => void;
   clearSelectedTarget: () => void;
@@ -280,14 +289,6 @@ function targetViewState(dashboard: DashboardSpec, viewState: DashboardViewState
   };
 }
 
-function runBackgroundTask(task: () => Promise<unknown>) {
-  try {
-    void task().catch(() => undefined);
-  } catch {
-    // Background sync must never break the active dashboard flow.
-  }
-}
-
 function withColumnDictionary(profile: DatasetProfile, field: string, changes: ColumnDictionaryChanges): DatasetProfile {
   const columns = profile.columns.map((column) => {
     if (column.normalizedName !== field) return column;
@@ -341,6 +342,11 @@ function createInitialState() {
     activePresentationId: "",
     persistenceMode: "local" as const,
     persistenceStatus: "Sube un dataset para comenzar",
+    executionMode: "offline/local" as const,
+    syncStatus: "idle" as const,
+    lastSyncCorrelationId: undefined,
+    lastSyncError: undefined,
+    outboxCount: 0,
     messages: baseMessages(),
     chatMessages: baseMessages(),
     versions: [],
@@ -439,6 +445,10 @@ export const useDashPilotStore = create<DashPilotState>()(
           activePresentationId: presentation.id,
           persistenceMode: "local",
           persistenceStatus: "Dataset listo en modo local",
+          executionMode: "offline/local",
+          syncStatus: "saved",
+          lastSyncError: undefined,
+          outboxCount: outboxCount(),
           messages,
           chatMessages: messages,
           versions: [dashboard],
@@ -520,6 +530,10 @@ export const useDashPilotStore = create<DashPilotState>()(
           activePresentationId: presentation.id,
           persistenceMode: "local",
           persistenceStatus: "Datos de ejemplo cargados",
+          executionMode: "deterministic",
+          syncStatus: "saved",
+          lastSyncError: undefined,
+          outboxCount: outboxCount(),
           messages,
           chatMessages: messages,
           versions: [dashboard],
@@ -757,8 +771,21 @@ export const useDashPilotStore = create<DashPilotState>()(
           ...state,
           currentProject: state.activeProjectId
             ? { ...current.currentProject, id: state.activeProjectId }
-            : current.currentProject
+            : current.currentProject,
+          outboxCount: state.outboxCount ?? outboxCount()
         })),
+      retryPendingSync: async () => {
+        set({ syncStatus: "pending", persistenceStatus: "Reintentando sincronizacion pendiente...", outboxCount: outboxCount() });
+        const results = await flushOutboxDueItems();
+        const failed = results.find((result) => !result.success);
+        set({
+          syncStatus: failed ? "retrying" : "saved",
+          persistenceStatus: failed ? `Sincronizacion pendiente. ID: ${failed.correlationId}` : "Cambios pendientes sincronizados.",
+          lastSyncCorrelationId: failed?.correlationId,
+          lastSyncError: failed && "error" in failed ? failed.error.userMessage : undefined,
+          outboxCount: outboxCount()
+        });
+      },
       setViewState: (viewState) =>
         set((current) => {
           const nextViewState = {
@@ -889,15 +916,55 @@ export const useDashPilotStore = create<DashPilotState>()(
             presentationOptions: presentationChanged ? { ...get().presentationOptions, generated: true } : get().presentationOptions,
             isCopilotThinking: false
           });
-          runBackgroundTask(() => saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage));
-          runBackgroundTask(() => saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage));
-          if (dashboardChanged) runBackgroundTask(() => createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot"));
+          const syncTasks = [
+            { label: "chat:user", run: () => saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage), outbox: () => enqueueOutbox({ kind: "chat", projectId: before.activeProjectId, dashboardId: before.activeDashboardId, message: userMessage }) },
+            { label: "chat:assistant", run: () => saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage), outbox: () => enqueueOutbox({ kind: "chat", projectId: before.activeProjectId, dashboardId: before.activeDashboardId, message: botMessage }) },
+            ...(dashboardChanged ? [{ label: "dashboard-version", run: () => createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot"), outbox: () => enqueueOutbox({ kind: "dashboard-version", dashboardId: before.activeDashboardId, spec: nextDashboard, reason: "accion de copilot" }) }] : [])
+          ];
+          if (syncTasks.length) set({ syncStatus: "pending", persistenceStatus: "Sincronizando cambios del Copiloto..." });
+          for (const task of syncTasks) {
+            void task.run()
+              .then(() => set({ syncStatus: "saved", persistenceStatus: "Cambios del Copiloto sincronizados.", outboxCount: outboxCount(), lastSyncError: undefined }))
+              .catch((error) => {
+                const domainError = toDomainError(error, {
+                  code: "supabase_unavailable",
+                  fallbackMessage: `No se pudo sincronizar ${task.label}.`,
+                  executionMode: "degraded",
+                  syncStatus: "retrying"
+                });
+                logDomainError(domainError, `store.${task.label}`);
+                task.outbox();
+                set({
+                  executionMode: "degraded",
+                  syncStatus: "retrying",
+                  persistenceMode: "degraded",
+                  persistenceStatus: `${domainError.userMessage} Reintentaremos automaticamente. ID: ${domainError.correlationId}`,
+                  lastSyncCorrelationId: domainError.correlationId,
+                  lastSyncError: domainError.userMessage,
+                  outboxCount: outboxCount()
+                });
+              });
+          }
         } catch (error) {
-          const botMessage = assistantMessage(error instanceof Error ? `No pude completar la accion: ${error.message}` : "No pude completar la accion. Revisa la conexion o intenta con una instruccion mas simple.");
+          const domainError = error instanceof DomainError
+            ? error
+            : toDomainError(error, {
+                code: "ai_provider_unavailable",
+                fallbackMessage: "No pude completar la accion. No se aplicaron cambios.",
+                executionMode: "provider",
+                syncStatus: "failed"
+              });
+          logDomainError(domainError, "store.copilot");
+          const botMessage = assistantMessage(`No pude completar la accion: ${domainError.userMessage} ID: ${domainError.correlationId}`);
           set({
             messages: [...get().messages, botMessage],
             chatMessages: [...get().messages, botMessage],
-            isCopilotThinking: false
+            isCopilotThinking: false,
+            executionMode: domainError.executionMode ?? get().executionMode,
+            syncStatus: domainError.syncStatus ?? "failed",
+            lastSyncCorrelationId: domainError.correlationId,
+            lastSyncError: domainError.userMessage,
+            persistenceStatus: `${domainError.userMessage} ID: ${domainError.correlationId}`
           });
         }
       },
@@ -1049,6 +1116,11 @@ export const useDashPilotStore = create<DashPilotState>()(
         activePresentationId: state.activePresentationId,
         persistenceMode: state.persistenceMode,
         persistenceStatus: state.persistenceStatus,
+        executionMode: state.executionMode,
+        syncStatus: state.syncStatus,
+        lastSyncCorrelationId: state.lastSyncCorrelationId,
+        lastSyncError: state.lastSyncError,
+        outboxCount: state.outboxCount,
         profile: state.profile,
         datasetProfile: state.datasetProfile,
         dashboard: state.dashboard,

@@ -121,8 +121,8 @@ export function DatasetPreview() {
               <p className="mt-3 text-lg text-[#536088]">Sube un dataset para comenzar.</p>
             )}
             {parsedDataset && (
-              <p className={`mt-2 rounded-lg px-3 py-2 text-sm font-semibold ${persistenceMode === "supabase" ? "bg-emerald-50 text-emerald-700" : "bg-[#fff8e6] text-[#8a5a00]"}`}>
-                {persistenceMode === "supabase" ? "Guardado en Supabase." : "Modo local."} {persistenceStatus}
+              <p className={`mt-2 rounded-lg px-3 py-2 text-sm font-semibold ${persistenceMode === "supabase" ? "bg-emerald-50 text-emerald-700" : persistenceMode === "degraded" ? "bg-rose-50 text-rose-700" : "bg-[#fff8e6] text-[#8a5a00]"}`}>
+                {persistenceMode === "supabase" ? "Guardado en Supabase." : persistenceMode === "degraded" ? "Sincronizacion degradada." : "Modo local."} {persistenceStatus}
               </p>
             )}
           </div>

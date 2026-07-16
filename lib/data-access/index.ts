@@ -13,6 +13,8 @@ import type {
   PublicSharedDashboard,
   SharePersistResult
 } from "@/lib/data-access/types";
+import { enqueueOutbox } from "@/lib/data-access/outbox";
+import { createCorrelationId, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import {
   buildDatasetProfile,
   createDataset,
@@ -37,6 +39,43 @@ export function localModeWarning() {
   return "Supabase no esta configurado. DashPilot esta funcionando en modo local.";
 }
 
+function localResult(correlationId = createCorrelationId("local")) {
+  return {
+    mode: "local" as const,
+    executionMode: "offline/local" as const,
+    syncStatus: "saved" as const,
+    correlationId
+  };
+}
+
+function providerResult(correlationId = createCorrelationId("sync")) {
+  return {
+    mode: "supabase" as const,
+    executionMode: "provider" as const,
+    syncStatus: "saved" as const,
+    correlationId
+  };
+}
+
+function degradedResult(error: unknown, fallbackMessage: string, correlationId = createCorrelationId("sync")) {
+  const domainError = toDomainError(error, {
+    code: "supabase_unavailable",
+    fallbackMessage,
+    correlationId,
+    executionMode: "degraded",
+    syncStatus: "retrying"
+  });
+  logDomainError(domainError, "data-access.persist");
+  return {
+    mode: "degraded" as const,
+    executionMode: "degraded" as const,
+    syncStatus: "retrying" as const,
+    correlationId: domainError.correlationId,
+    recoverable: domainError.recoverable,
+    warning: `${domainError.userMessage} Reintentaremos automaticamente. ID: ${domainError.correlationId}`
+  };
+}
+
 export async function persistParsedDataset({ file, parsed }: ParsedDatasetPayload): Promise<DatasetPersistResult> {
   const { sheet, rows, profile } = buildDatasetProfile(parsed);
   const configured = isSupabaseConfigured();
@@ -45,7 +84,7 @@ export async function persistParsedDataset({ file, parsed }: ParsedDatasetPayloa
   if (!configured || !auth.user) {
     saveLocalDataset(profile.id, { parsed, profile, rows });
     return {
-      mode: "local",
+      ...localResult(),
       datasetId: profile.id,
       projectId: "local-project",
       profile,
@@ -62,16 +101,17 @@ export async function persistParsedDataset({ file, parsed }: ParsedDatasetPayloa
     await saveDatasetColumns(dataset.datasetId, profile);
     await saveDatasetRows(dataset.datasetId, rows);
     await saveDatasetProfile(dataset.datasetId, profile);
-    return { mode: "supabase", datasetId: dataset.datasetId, projectId: project.projectId, storagePath, profile, rows };
+    return { ...providerResult(), datasetId: dataset.datasetId, projectId: project.projectId, storagePath, profile, rows };
   } catch (error) {
+    const degraded = degradedResult(error, "No se pudo guardar en Supabase.");
     saveLocalDataset(profile.id, { parsed, profile, rows });
+    enqueueOutbox({ kind: "dataset", parsed, profile, rows }, degraded.correlationId);
     return {
-      mode: "local",
+      ...degraded,
       datasetId: profile.id,
       projectId: "local-project",
       profile,
-      rows,
-      warning: error instanceof Error ? `Error guardando en Supabase. Se uso modo local: ${error.message}` : "Error guardando en Supabase. Se uso modo local."
+      rows
     };
   }
 }
@@ -80,18 +120,17 @@ export async function persistDashboard(payload: PersistedDashboardPayload, proje
   const auth = await getCurrentAuthState();
   if (!isSupabaseConfigured() || !auth.user || !projectId) {
     saveLocalDashboard(payload.spec, payload.viewState, payload.rows, payload.profile);
-    return { mode: "local", dashboardId: payload.spec.id, warning: !isSupabaseConfigured() ? localModeWarning() : "Inicia sesion para guardar el dashboard en Supabase." };
+    return { ...localResult(), dashboardId: payload.spec.id, warning: !isSupabaseConfigured() ? localModeWarning() : "Inicia sesion para guardar el dashboard en Supabase." };
   }
 
   try {
-    return await createDashboardSpec(payload.spec, payload.viewState, projectId);
+    const result = await createDashboardSpec(payload.spec, payload.viewState, projectId);
+    return { ...providerResult(), dashboardId: result.dashboardId };
   } catch (error) {
+    const degraded = degradedResult(error, "No se pudo guardar el dashboard en Supabase.");
     saveLocalDashboard(payload.spec, payload.viewState, payload.rows, payload.profile);
-    return {
-      mode: "local",
-      dashboardId: payload.spec.id,
-      warning: error instanceof Error ? `Error guardando dashboard en Supabase. Se uso modo local: ${error.message}` : "Error guardando dashboard en Supabase. Se uso modo local."
-    };
+    enqueueOutbox({ kind: "dashboard", projectId, spec: payload.spec, viewState: payload.viewState, rows: payload.rows, profile: payload.profile }, degraded.correlationId);
+    return { ...degraded, dashboardId: payload.spec.id };
   }
 }
 
@@ -100,21 +139,20 @@ export async function updatePersistedDashboard(dashboardId: string, spec: Dashbo
   if (!isSupabaseConfigured() || !auth.user) {
     saveLocalDashboard(spec, viewState, rows, profile);
     return {
-      mode: "local" as const,
+      ...localResult(),
       dashboardId: spec.id,
       warning: !isSupabaseConfigured() ? localModeWarning() : "Inicia sesion para guardar el dashboard en Supabase."
     };
   }
 
   try {
-    return await updateDashboardSpec(dashboardId, spec, viewState);
+    const result = await updateDashboardSpec(dashboardId, spec, viewState);
+    return { ...providerResult(), dashboardId: result.dashboardId };
   } catch (error) {
+    const degraded = degradedResult(error, "No se pudo actualizar el dashboard en Supabase.");
     saveLocalDashboard(spec, viewState, rows, profile);
-    return {
-      mode: "local" as const,
-      dashboardId: spec.id,
-      warning: error instanceof Error ? `Error actualizando en Supabase. Se guardo localmente: ${error.message}` : "Error actualizando en Supabase. Se guardo localmente."
-    };
+    enqueueOutbox({ kind: "dashboard", spec, viewState, rows, profile, updateDashboardId: dashboardId }, degraded.correlationId);
+    return { ...degraded, dashboardId: spec.id };
   }
 }
 
@@ -130,14 +168,15 @@ export async function loadPersistedDataset(datasetId: string) {
 
 export async function persistPresentation(spec: PresentationSpec): Promise<PresentationPersistResult> {
   try {
-    return await createPresentation(spec);
+    const result = await createPresentation(spec);
+    return result.mode === "supabase"
+      ? { ...providerResult(), presentationId: result.presentationId }
+      : { ...localResult(), presentationId: result.presentationId, warning: localModeWarning() };
   } catch (error) {
+    const degraded = degradedResult(error, "No se pudo guardar la presentacion en Supabase.");
     window.localStorage.setItem(`dashpilot:presentation:${spec.id}`, JSON.stringify(spec));
-    return {
-      mode: "local",
-      presentationId: spec.id,
-      warning: error instanceof Error ? `Error guardando presentacion en Supabase. Se uso modo local: ${error.message}` : "Error guardando presentacion en Supabase. Se uso modo local."
-    };
+    enqueueOutbox({ kind: "presentation", spec }, degraded.correlationId);
+    return { ...degraded, presentationId: spec.id };
   }
 }
 
@@ -160,9 +199,18 @@ export async function persistShareLink(input: {
     allowDownload: input.allowDownload,
     createdAt: new Date().toISOString()
   };
-  const result = await createShareLink(link);
-  const url = `${input.origin}/share/${token}`;
-  return { ...result, url, link };
+  try {
+    const result = await createShareLink(link);
+    const observable = result.mode === "supabase" ? providerResult() : localResult();
+    const url = `${input.origin}/share/${token}`;
+    return { ...observable, token: result.token, url, link };
+  } catch (error) {
+    const degraded = degradedResult(error, "No se pudo crear el enlace en Supabase.");
+    window.localStorage.setItem(`dashpilot:share:${token}`, JSON.stringify(link));
+    enqueueOutbox({ kind: "share", link }, degraded.correlationId);
+    const url = `${input.origin}/share/${token}`;
+    return { ...degraded, token, url, link };
+  }
 }
 
 export async function loadPublicShare(token: string): Promise<PublicSharedDashboard | null> {

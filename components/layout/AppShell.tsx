@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bell, Boxes, ChartNoAxesCombined, FileStack, Home, MonitorPlay, Search, Settings, Share2 } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { useAuth } from "@/components/shared/auth-provider";
@@ -11,6 +11,7 @@ import { useToast } from "@/components/shared/toast";
 import { signOut } from "@/lib/supabase/auth";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
+import { modeLabel, syncStatusLabel } from "@/lib/observability/modes";
 
 const nav = [
   { href: "/app", label: "Inicio", icon: Home },
@@ -38,12 +39,29 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const persistenceStatus = useDashPilotStore((state) => state.persistenceStatus);
+  const executionMode = useDashPilotStore((state) => state.executionMode);
+  const syncStatus = useDashPilotStore((state) => state.syncStatus);
+  const lastSyncCorrelationId = useDashPilotStore((state) => state.lastSyncCorrelationId);
+  const outboxCount = useDashPilotStore((state) => state.outboxCount);
+  const retryPendingSync = useDashPilotStore((state) => state.retryPendingSync);
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const [globalSearch, setGlobalSearch] = useState("");
   const hasProject = Boolean(activeDatasetId && rows.length);
   const projectName = hasProject ? currentProject.name : "Sin proyecto activo";
   const projectStatus = hasProject ? persistenceStatus || currentProject.updatedAt : "Sube un dataset para comenzar";
   const notificationCount = profile.qualityWarnings.length + (hasProject && persistenceStatus ? 1 : 0);
+  const hasCriticalUnsavedChanges = ["pending", "retrying", "failed", "conflict"].includes(syncStatus);
+  const syncTone = syncStatus === "saved" ? "bg-emerald-50 text-emerald-700" : syncStatus === "failed" || syncStatus === "conflict" ? "bg-rose-50 text-rose-700" : syncStatus === "retrying" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600";
+
+  useEffect(() => {
+    if (!hasCriticalUnsavedChanges) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "Hay cambios pendientes de sincronizar.";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasCriticalUnsavedChanges]);
 
   async function logout() {
     try {
@@ -137,6 +155,15 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
               <Link href="/login" className="rounded-lg border border-[#dce3f4] px-3 py-2 text-sm font-semibold text-[#3d35ff]">
                 Iniciar sesion
               </Link>
+            )}
+            {hasProject && (
+              <button
+                onClick={() => hasCriticalUnsavedChanges ? void retryPendingSync() : toast(`${syncStatusLabel(syncStatus)} via ${modeLabel(executionMode)}${lastSyncCorrelationId ? ` · ID ${lastSyncCorrelationId}` : ""}`)}
+                className={cn("hidden rounded-full px-3 py-1 text-xs font-semibold md:inline", syncTone)}
+                title={lastSyncCorrelationId ? `Correlation ID: ${lastSyncCorrelationId}` : undefined}
+              >
+                {syncStatusLabel(syncStatus)} · {modeLabel(executionMode)}{outboxCount ? ` · ${outboxCount} pendiente(s)` : ""}
+              </button>
             )}
             <button onClick={() => toast(notificationCount ? [...profile.qualityWarnings, persistenceStatus].filter(Boolean).slice(0, 3).join(" ") : "No hay notificaciones pendientes.")} className="relative" aria-label="Ver notificaciones">
               <Bell className="size-5 text-[#536088]" />

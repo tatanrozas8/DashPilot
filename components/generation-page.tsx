@@ -41,7 +41,11 @@ export function GenerationPage() {
       setPersistenceState({
         activeDashboardId: result.dashboardId,
         persistenceMode: result.mode,
-        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Dashboard guardado" : "Dashboard guardado localmente")
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Dashboard guardado" : "Dashboard guardado localmente"),
+        executionMode: result.executionMode,
+        syncStatus: result.syncStatus,
+        lastSyncCorrelationId: result.correlationId,
+        lastSyncError: result.warning
       });
       setStatus(result.warning ?? (result.mode === "supabase" ? "Dashboard guardado en Supabase." : "Dashboard guardado en modo local."));
       window.setTimeout(() => router.push(`/app/dashboards/${result.dashboardId}`), 700);

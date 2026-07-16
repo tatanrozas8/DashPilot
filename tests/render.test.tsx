@@ -1,10 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CopilotPanel, DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { ToastProvider } from "@/components/shared/toast";
 import { barOrientation } from "@/lib/dashboard-spec/visual-config";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import type { DashboardWidget } from "@/types/dashboard";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("DashboardRenderer", () => {
   it("renders core dashboard widgets", () => {
@@ -22,6 +26,15 @@ describe("DashboardRenderer", () => {
 
   it("keeps the copilot input visible and sends prompts", async () => {
     useDashPilotStore.getState().loadDemo();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      reply: "Simplifique la vista ejecutiva, priorice KPIs y destaque el resumen para una lectura directiva.",
+      actions: [],
+      updatedDashboardSpec: useDashPilotStore.getState().dashboard,
+      updatedViewState: useDashPilotStore.getState().viewState,
+      updatedPresentationSpec: useDashPilotStore.getState().presentation,
+      source: "deterministic",
+      executionMode: "deterministic"
+    })));
 
     render(<CopilotPanel />);
 

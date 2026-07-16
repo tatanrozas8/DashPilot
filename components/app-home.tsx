@@ -46,7 +46,11 @@ export function AppHome() {
         activeDatasetId: result.datasetId,
         activeProjectId: result.projectId ?? "local-project",
         persistenceMode: result.mode,
-        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Guardado en Supabase" : "Modo local")
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Guardado en Supabase" : "Modo local"),
+        executionMode: result.executionMode,
+        syncStatus: result.syncStatus,
+        lastSyncCorrelationId: result.correlationId,
+        lastSyncError: result.warning
       });
       toast(result.warning ?? (result.mode === "supabase" ? "Dataset guardado en Supabase." : "Dataset guardado localmente."));
       router.push(`/app/datasets/${result.datasetId}/preview`);

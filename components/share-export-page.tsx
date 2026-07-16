@@ -38,7 +38,7 @@ export function ShareExportPage() {
         origin: window.location.origin
       });
       setGeneratedUrl(result.url);
-      setPersistenceState({ persistenceMode: result.mode, persistenceStatus: result.mode === "supabase" ? "Enlace compartido creado" : "Enlace compartido local" });
+      setPersistenceState({ persistenceMode: result.mode, persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Enlace compartido creado" : "Enlace compartido local"), executionMode: result.executionMode, syncStatus: result.syncStatus, lastSyncCorrelationId: result.correlationId, lastSyncError: result.warning });
       await navigator.clipboard?.writeText(result.url);
       toast(result.mode === "supabase" ? "Enlace compartido creado y copiado." : "Enlace local creado y copiado.");
     } catch (error) {

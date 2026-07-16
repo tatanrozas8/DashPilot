@@ -3,12 +3,22 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "@/lib/supabase/auth";
+import { logDomainError, toDomainError } from "@/lib/observability/domain-error";
 
 export default function LogoutPage() {
   const router = useRouter();
 
   useEffect(() => {
-    void signOut().catch(() => undefined).finally(() => router.replace("/"));
+    void signOut()
+      .catch((error) => {
+        logDomainError(toDomainError(error, {
+          code: "supabase_unavailable",
+          fallbackMessage: "No se pudo cerrar la sesion de Supabase.",
+          executionMode: "degraded",
+          syncStatus: "failed"
+        }), "auth.logout");
+      })
+      .finally(() => router.replace("/"));
   }, [router]);
 
   return (

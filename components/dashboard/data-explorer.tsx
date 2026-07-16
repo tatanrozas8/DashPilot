@@ -498,7 +498,7 @@ export function DataExplorerPanel() {
           <ColumnStatsPanel
             column={selectedColumn}
             onShowOnly={() => selectedColumn && patchExplorer({ visibleColumns: [selectedColumn.normalizedName] })}
-            onAskCopilot={() => selectedColumn && void sendPrompt(`Explica la columna ${selectedColumn.displayName}`).catch(() => undefined)}
+            onAskCopilot={() => selectedColumn && void sendPrompt(`Explica la columna ${selectedColumn.displayName}`)}
             onCreateWidget={() => selectedColumn && createWidgetFromColumn(selectedColumn)}
             onUseAsFilter={() => selectedColumn && selectedColumn.sampleValues[0] !== undefined && setColumnSearch(selectedColumn.normalizedName, String(selectedColumn.sampleValues[0]))}
             onUpdateDictionary={(changes) => selectedColumn && updateColumnDictionary(selectedColumn.normalizedName, changes)}

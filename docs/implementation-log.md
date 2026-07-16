@@ -214,3 +214,81 @@ Debt remaining:
 
 - Persist parse audit in dedicated database columns/tables if tenant audit requirements expand beyond local parsed payloads.
 - Add per-column locale override UI if users need to resolve ambiguous numeric/date conventions manually.
+
+## 2026-07-16 - observable-failures-2026-07-16
+
+Commit: `fix: make persistence and ai failures observable`
+
+Objective:
+
+- Eliminate silent fallbacks that made failed AI and persistence operations look successful.
+- Distinguish provider, deterministic, offline/local and degraded execution modes.
+- Surface sync states, correlation IDs and actionable errors to users.
+
+Files changed:
+
+- `app/api/copilot/route.ts`
+- `app/error.tsx`
+- `app/logout/page.tsx`
+- `components/app-home.tsx`
+- `components/dashboard/dashboard-renderer.tsx`
+- `components/dashboard/dashboard-workspace.tsx`
+- `components/dataset-preview.tsx`
+- `components/generation-page.tsx`
+- `components/landing-page.tsx`
+- `components/layout/AppShell.tsx`
+- `components/presentation/presentation-builder.tsx`
+- `components/share-export-page.tsx`
+- `components/shared/auth-provider.tsx`
+- `lib/ai/action-execution-engine.ts`
+- `lib/ai/copilot-client.ts`
+- `lib/ai/copilot-service.ts`
+- `lib/data-access/index.ts`
+- `lib/data-access/outbox.ts`
+- `lib/data-access/types.ts`
+- `lib/observability/domain-error.ts`
+- `lib/observability/modes.ts`
+- `lib/store/app-store.ts`
+- `tests/observable-failures.test.ts`
+- `tests/copilot-service.test.ts`
+- `tests/render.test.tsx`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- AI provider failures now return structured errors instead of deterministic fallback responses.
+- Local deterministic Copilot mode is explicit when no provider key is configured.
+- Persistence results include `executionMode`, `syncStatus`, `correlationId` and recoverability metadata.
+- Supabase failures save local state, enqueue typed outbox payloads and report `degraded` / `retrying`.
+- Background chat/version sync failures now update observable store state and outbox.
+- App shell warns before unload when pending, retrying, failed or conflict sync states exist.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test -- tests/observable-failures.test.ts tests/copilot-service.test.ts tests/data-access.test.ts`: passed, 3 files and 39 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 22 files and 163 tests.
+- `npm run build`: passed, 23 app routes generated.
+
+Known failures:
+
+- `git status` continues to emit permission warnings for `C:\Users\Cristián\.config\git\ignore`.
+- A previously interrupted performance task left unrelated worktree changes; they were not intended for this commit.
+
+Migrations/env vars:
+
+- No database migrations changed.
+- No environment variables changed.
+- `AI_API_KEY` absence now means explicit deterministic mode; provider failures no longer fall back silently.
+
+Security/privacy notes:
+
+- Correlation IDs are exposed to users; raw provider/Supabase errors are sanitized before display/logging.
+- Service-role keys and bearer tokens are redacted from domain error messages.
+- Outbox payloads are stored in localStorage and should be treated as tenant-local sensitive state.
+
+Debt remaining:
+
+- Add server-side durable outbox/audit storage before multi-device production sync.
+- Add conflict resolution UI if Supabase writes fail because remote state diverged.

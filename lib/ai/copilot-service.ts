@@ -2,6 +2,7 @@ import type { ChatMessage } from "@/types/ai";
 import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardAction, DashboardSpec, DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
 import type { PresentationSpec } from "@/types/presentation";
+import type { ExecutionMode } from "@/lib/observability/modes";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { executeCopilotActions } from "@/lib/ai/action-execution-engine";
 import { buildActionPlan } from "@/lib/ai/action-plan";
@@ -36,11 +37,13 @@ export interface CopilotResult {
   updatedDashboardSpec?: DashboardSpec;
   updatedViewState?: DashboardViewState;
   updatedPresentationSpec?: PresentationSpec;
-  source: "mock" | "provider";
+  source: ExecutionMode;
+  executionMode: ExecutionMode;
+  correlationId?: string;
 }
 
 export interface HandleCopilotMessageInput extends CopilotRequestContext {
-  source?: "mock" | "provider";
+  source?: ExecutionMode;
   proposedActions?: DashboardAction[];
   providerReply?: string;
 }
@@ -804,7 +807,7 @@ function planLocalActions(context: CopilotRequestContext): { reply: string; enve
   };
 }
 
-function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotActionEnvelope[], source: "mock" | "provider", baseReply: string, warnings: string[] = []): CopilotResult {
+function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotActionEnvelope[], source: ExecutionMode, baseReply: string, warnings: string[] = []): CopilotResult {
   const execution = executeCopilotActions({
     userMessage: input.prompt,
     datasetProfile: input.datasetProfile,
@@ -831,7 +834,8 @@ function applyValidatedActions(input: CopilotRequestContext, envelopes: CopilotA
     updatedDashboardSpec: execution.updatedDashboardSpec,
     updatedViewState: execution.updatedViewState,
     updatedPresentationSpec: execution.updatedPresentationSpec,
-    source
+    source,
+    executionMode: source
   };
 }
 
@@ -873,7 +877,7 @@ function previousInstructionReplacement(input: CopilotRequestContext, previousIn
 }
 
 export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotResult {
-  const source = input.source ?? "mock";
+  const source = input.source ?? "deterministic";
   const agentLoop = buildCopilotAgentLoop(input);
   const actionPlan = agentLoop.actionPlan;
   if (actionPlan.needsClarification) {
@@ -919,15 +923,15 @@ export function handleCopilotMessage(input: HandleCopilotMessageInput): CopilotR
 }
 
 export function createMockCopilotResponse(context: CopilotRequestContext): CopilotResult {
-  return handleCopilotMessage({ ...context, source: "mock" });
+  return handleCopilotMessage({ ...context, source: "deterministic" });
 }
 
 export function parseCopilotProviderOutput(raw: unknown, context: CopilotRequestContext): CopilotResult {
   const parsed = copilotOutputSchema.safeParse(raw);
   if (!parsed.success) {
-    return { reply: "La respuesta del proveedor no paso la validacion estructurada.", rejectedActionReason: "output_schema", warnings: ["output_schema"], source: "provider" };
+    return { reply: "La respuesta del proveedor no paso la validacion estructurada.", rejectedActionReason: "output_schema", warnings: ["output_schema"], source: "provider", executionMode: "provider" };
   }
-  if (!parsed.data.action) return { reply: parsed.data.reply, actions: [], updatedDashboardSpec: context.dashboardSpec, updatedViewState: context.viewState, updatedPresentationSpec: context.presentationSpec, source: "provider" };
+  if (!parsed.data.action) return { reply: parsed.data.reply, actions: [], updatedDashboardSpec: context.dashboardSpec, updatedViewState: context.viewState, updatedPresentationSpec: context.presentationSpec, source: "provider", executionMode: "provider" };
   return handleCopilotMessage({ ...context, source: "provider", providerReply: parsed.data.reply, proposedActions: [parsed.data.action as DashboardAction] });
 }
 

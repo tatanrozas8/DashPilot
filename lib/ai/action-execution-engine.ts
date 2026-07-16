@@ -2,6 +2,7 @@ import type { ChatMessage } from "@/types/ai";
 import type { DataRow, DatasetCatalog, DatasetProfile } from "@/types/dataset";
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { PresentationSpec } from "@/types/presentation";
+import type { ExecutionMode } from "@/lib/observability/modes";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { buildActionPlan } from "@/lib/ai/action-plan";
@@ -27,7 +28,7 @@ export interface ActionExecutionInput {
   actions?: DashboardAction[];
   envelopes?: CopilotActionEnvelope[];
   assistantMessage?: string;
-  source?: "mock" | "provider";
+  source?: ExecutionMode;
 }
 
 export interface ActionExecutionResult {

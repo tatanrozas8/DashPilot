@@ -81,7 +81,7 @@ export function DashboardWorkspace() {
     try {
       const result = await updatePersistedDashboard(activeDashboardId, dashboard, viewState, rows, profile);
       const warning = "warning" in result ? result.warning : undefined;
-      setPersistenceState({ activeDashboardId: result.dashboardId, persistenceMode: result.mode, persistenceStatus: warning ?? "Dashboard guardado" });
+      setPersistenceState({ activeDashboardId: result.dashboardId, persistenceMode: result.mode, persistenceStatus: warning ?? "Dashboard guardado", executionMode: result.executionMode, syncStatus: result.syncStatus, lastSyncCorrelationId: result.correlationId, lastSyncError: warning });
       toast(warning ?? (result.mode === "local" ? "Dashboard guardado localmente." : "Dashboard guardado correctamente."));
     } catch (error) {
       toast(error instanceof Error ? error.message : "No se pudo guardar el dashboard.");
@@ -95,7 +95,7 @@ export function DashboardWorkspace() {
       const result = await updatePersistedDashboard(activeDashboardId, draft, viewState, rows, profile);
       const warning = "warning" in result ? result.warning : undefined;
       const committed = commitDashboardEditing();
-      setPersistenceState({ activeDashboardId: result.dashboardId, persistenceMode: result.mode, persistenceStatus: warning ?? "Dashboard guardado" });
+      setPersistenceState({ activeDashboardId: result.dashboardId, persistenceMode: result.mode, persistenceStatus: warning ?? "Dashboard guardado", executionMode: result.executionMode, syncStatus: result.syncStatus, lastSyncCorrelationId: result.correlationId, lastSyncError: warning });
       toast(warning ?? (result.mode === "local" ? "Cambios guardados localmente." : "Cambios guardados correctamente."));
       if (!committed) toast("No habia cambios pendientes para confirmar.");
     } catch (error) {

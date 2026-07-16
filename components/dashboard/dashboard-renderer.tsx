@@ -159,7 +159,7 @@ function WidgetHeader({ widget }: { widget: DashboardWidget }) {
   }
 
   function explainWidget() {
-    void sendPrompt(`Explica el widget ${widget.title}`).catch(() => undefined);
+    void sendPrompt(`Explica el widget ${widget.title}`);
     setOpen(false);
   }
 
@@ -742,7 +742,7 @@ export function CopilotPanel() {
   function submitPrompt(value: string) {
     const trimmed = value.trim();
     if (!trimmed || isCopilotThinking) return;
-    void sendPrompt(trimmed).catch(() => undefined);
+    void sendPrompt(trimmed);
     setPrompt("");
   }
 

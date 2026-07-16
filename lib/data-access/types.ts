@@ -1,13 +1,14 @@
 import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
 import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
-import type { PresentationSpec } from "@/types/presentation";
 import type { ShareLink } from "@/types/export";
+import type { ObservableOperation } from "@/lib/observability/modes";
 
-export type PersistenceMode = "supabase" | "local";
+export type PersistenceMode = "supabase" | "local" | "degraded";
 
-export interface PersistenceResult {
+export interface PersistenceResult extends ObservableOperation {
   mode: PersistenceMode;
   warning?: string;
+  recoverable?: boolean;
 }
 
 export interface DatasetPersistResult extends PersistenceResult {

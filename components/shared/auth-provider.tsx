@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { logDomainError, toDomainError } from "@/lib/observability/domain-error";
 
 interface AuthContextValue {
   configured: boolean;
@@ -22,13 +23,12 @@ const AuthContext = createContext<AuthContextValue>({
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const configured = isSupabaseConfigured();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(configured);
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
-      setLoading(false);
       return;
     }
 
@@ -36,7 +36,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then(({ data }) => {
         setSession(data.session);
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        logDomainError(toDomainError(error, {
+          code: "supabase_unavailable",
+          fallbackMessage: "No se pudo obtener la sesion de Supabase.",
+          executionMode: "degraded",
+          syncStatus: "failed"
+        }), "auth.session");
+      })
       .finally(() => setLoading(false));
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {

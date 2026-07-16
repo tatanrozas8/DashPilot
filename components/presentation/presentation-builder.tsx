@@ -44,7 +44,11 @@ export function PresentationBuilder() {
       setPersistenceState({
         activePresentationId: result.presentationId,
         persistenceMode: result.mode,
-        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Presentacion guardada" : "Presentacion local")
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Presentacion guardada" : "Presentacion local"),
+        executionMode: result.executionMode,
+        syncStatus: result.syncStatus,
+        lastSyncCorrelationId: result.correlationId,
+        lastSyncError: result.warning
       });
       toast(result.warning ?? (result.mode === "supabase" ? "Presentacion guardada correctamente." : "Presentacion guardada localmente."));
       router.push(`/app/present/${result.presentationId}`);
@@ -62,7 +66,11 @@ export function PresentationBuilder() {
       setPersistenceState({
         activePresentationId: result.presentationId,
         persistenceMode: result.mode,
-        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Borrador de presentacion guardado" : "Borrador local")
+        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Borrador de presentacion guardado" : "Borrador local"),
+        executionMode: result.executionMode,
+        syncStatus: result.syncStatus,
+        lastSyncCorrelationId: result.correlationId,
+        lastSyncError: result.warning
       });
       toast(result.warning ?? (result.mode === "supabase" ? "Borrador guardado correctamente." : "Borrador guardado localmente."));
     } catch (error) {

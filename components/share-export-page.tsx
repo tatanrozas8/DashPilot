@@ -87,7 +87,10 @@ export function ShareExportPage() {
       });
 
       try {
-        await navigator.clipboard?.writeText(result.url);
+        if (!navigator.clipboard) {
+          throw new Error("Clipboard API unavailable");
+        }
+        await navigator.clipboard.writeText(result.url);
         toast(result.mode === "supabase" ? "Enlace compartido creado y copiado." : "Enlace local creado y copiado.");
       } catch {
         toast("Enlace creado. No se pudo copiar automaticamente; copialo desde el campo.");

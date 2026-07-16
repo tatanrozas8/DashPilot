@@ -66,6 +66,17 @@ describe("visible capability CTAs", () => {
     expect(await screen.findByText("Dataset CSV descargado.")).toBeInTheDocument();
   });
 
+  it("does not claim a share link was copied when clipboard access is unavailable", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    useDashPilotStore.getState().loadDemo();
+
+    renderWithToast(<ShareExportPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Crear y copiar" }));
+
+    expect(await screen.findByText("Enlace creado. No se pudo copiar automaticamente; copialo desde el campo.")).toBeInTheDocument();
+    expect(screen.queryByText(/copiado\./)).not.toBeInTheDocument();
+  });
+
   it("labels deterministic presentation controls honestly and disables present until saved", () => {
     renderWithToast(<PresentationBuilder />);
 

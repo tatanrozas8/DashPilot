@@ -48,7 +48,7 @@ Current MVP limits:
 
 Visible controls must match implemented behavior:
 
-- Real: upload CSV/XLS/XLSX, demo dataset, virtualized preview, deterministic dashboard generation, DashboardSpec JSON export, dataset CSV export, interactive presentation generation, presentation mode.
+- Real: upload CSV/XLS/XLSX, demo dataset, bounded dataset preview, deterministic dashboard generation, DashboardSpec JSON export, dataset CSV export, interactive presentation generation, presentation mode.
 - Beta/partial: Supabase/local sandbox persistence, interactive share links, provider-backed Copilot when configured.
 - Future/disabled: password-protected sharing, static PDF export, PNG export, PPTX export, and interactive manifest export.
 

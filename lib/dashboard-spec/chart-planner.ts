@@ -305,7 +305,7 @@ export function planAnalyticalChart(context: ChartPlanningContext): PlannedChart
       };
     }
     const seriesField = analysisPlan.seriesBy.normalizedName;
-    const seriesGranularity = analysisPlan.seriesBy.semanticType === "time" || analysisPlan.seriesBy.inferredType === "date" ? analysisPlan.timeGranularity ?? "year" : undefined;
+    const seriesGranularity = analysisPlan.seriesBy.semanticType === "time" || analysisPlan.seriesBy.inferredType === "date" || analysisPlan.seriesBy.inferredType === "datetime" ? analysisPlan.timeGranularity ?? "year" : undefined;
     const title = `${fieldLabel(context.datasetProfile, analysisPlan.metric.normalizedName)} por ${fieldLabel(context.datasetProfile, analysisPlan.xAxis.normalizedName)}${seriesGranularity ? ` por ${timeLabel(seriesGranularity)}` : ""}`;
     const query = {
       metric: { field: analysisPlan.metric.normalizedName, aggregation: analysisPlan.aggregation },

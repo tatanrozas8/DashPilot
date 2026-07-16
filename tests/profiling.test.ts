@@ -23,4 +23,52 @@ describe("profileDataset", () => {
     expect(profile.detectedMetricColumns).toContain("Ventas");
     expect(profile.columns.find((column) => column.normalizedName === "Ventas")?.max).toBe(2300.25);
   });
+
+  it("marks mixed and ambiguous parsed columns with actionable warnings", () => {
+    const profile = profileDataset([
+      { fecha: "2024-04-15", monto: 1200 },
+      { fecha: "01/02/2024", monto: "sin dato" }
+    ], "mixto.csv", [
+      {
+        id: "fecha",
+        rawHeader: "Fecha",
+        originalName: "Fecha",
+        canonicalName: "fecha",
+        normalizedName: "fecha",
+        displayName: "Fecha",
+        position: 0,
+        parseSummary: {
+          totalCount: 2,
+          emptyCount: 0,
+          parsedCount: 1,
+          ambiguousCount: 1,
+          invalidCount: 0,
+          typeCounts: { date: 2 },
+          warnings: ["Fecha ambigua"]
+        }
+      },
+      {
+        id: "monto",
+        rawHeader: "Monto",
+        originalName: "Monto",
+        canonicalName: "monto",
+        normalizedName: "monto",
+        displayName: "Monto",
+        position: 1,
+        parseSummary: {
+          totalCount: 2,
+          emptyCount: 0,
+          parsedCount: 1,
+          ambiguousCount: 0,
+          invalidCount: 1,
+          typeCounts: { number: 1, string: 1 },
+          warnings: ["Valor no compatible"]
+        }
+      }
+    ]);
+
+    expect(profile.columns.find((column) => column.normalizedName === "fecha")?.parseWarnings?.join(" ")).toContain("ambigua");
+    expect(profile.columns.find((column) => column.normalizedName === "monto")?.mixedType).toBe(true);
+    expect(profile.qualityWarnings.join(" ")).toContain("Corrige el tipo");
+  });
 });

@@ -4,11 +4,36 @@ export type InferredColumnType =
   | "string"
   | "number"
   | "date"
+  | "datetime"
   | "boolean"
   | "currency"
   | "percentage"
   | "geography"
   | "unknown";
+
+export type CellParseStatus = "empty" | "raw" | "parsed" | "ambiguous" | "invalid";
+export type ParsedCellType = "string" | "number" | "date" | "datetime" | "boolean" | "currency" | "percentage" | "empty" | "unknown";
+
+export interface ParsedCellAudit {
+  rowIndex: number;
+  columnId: string;
+  originalName: string;
+  rawValue: string;
+  normalizedValue: string | number | boolean | null;
+  status: CellParseStatus;
+  detectedType: ParsedCellType;
+  message: string;
+}
+
+export interface ColumnParseSummary {
+  totalCount: number;
+  emptyCount: number;
+  parsedCount: number;
+  ambiguousCount: number;
+  invalidCount: number;
+  typeCounts: Partial<Record<ParsedCellType, number>>;
+  warnings: string[];
+}
 
 export type SemanticColumnType =
   | "metric"
@@ -29,6 +54,11 @@ export interface DatasetCatalogColumn {
   normalizedName: string;
   displayName: string;
   inferredType: InferredColumnType;
+  parseSummary?: ColumnParseSummary;
+  parseWarnings?: string[];
+  mixedType?: boolean;
+  canonicalName?: string;
+  rawHeader?: string;
   semanticType: SemanticColumnType;
   role: SemanticColumnType | DimensionRole | MetricRole;
   geoRole?: GeoRole;
@@ -79,6 +109,11 @@ export interface DatasetColumnProfile {
   synonyms?: string[];
   isHidden?: boolean;
   inferredType: InferredColumnType;
+  parseSummary?: ColumnParseSummary;
+  parseWarnings?: string[];
+  mixedType?: boolean;
+  canonicalName?: string;
+  rawHeader?: string;
   semanticType: SemanticColumnType;
   userSemanticType?: SemanticColumnType;
   semanticConfidence?: number;
@@ -118,10 +153,15 @@ export interface DatasetRecord {
 }
 
 export interface NormalizedColumn {
+  id: string;
+  rawHeader: string;
   originalName: string;
+  canonicalName: string;
   normalizedName: string;
   displayName: string;
   position: number;
+  warnings?: string[];
+  parseSummary?: ColumnParseSummary;
 }
 
 export interface SheetInfo {
@@ -135,6 +175,7 @@ export interface SheetInfo {
 export interface ParsedSheet extends SheetInfo {
   rows: DataRow[];
   previewRows: DataRow[];
+  parseAudit?: ParsedCellAudit[];
 }
 
 export interface FileParseResult {

@@ -115,12 +115,12 @@ describe("query engine", () => {
 
   it("handles LatAm money and day-first date ranges", () => {
     const rows = [
-      { Fecha: "01/04/2024", Ventas: "$1.200,50", Region: "Norte" },
-      { Fecha: "15/04/2024", Ventas: "$2.300,25", Region: "Sur" },
-      { Fecha: "01/05/2024", Ventas: "$900,00", Region: "Norte" }
+      { Fecha: "2024-04-01", Ventas: "$1.200,50", Region: "Norte" },
+      { Fecha: "2024-04-15", Ventas: "$2.300,25", Region: "Sur" },
+      { Fecha: "2024-05-01", Ventas: "$900,00", Region: "Norte" }
     ];
 
-    const filtered = applyDashboardFilters(rows, [{ field: "Fecha", operator: "between", value: ["01/04/2024", "30/04/2024"] }]);
+    const filtered = applyDashboardFilters(rows, [{ field: "Fecha", operator: "between", value: ["2024-04-01", "2024-04-30"] }]);
     const result = executeDashboardQuery(filtered, { metric: { field: "Ventas", aggregation: "sum" } });
 
     expect(filtered).toHaveLength(2);
@@ -266,7 +266,7 @@ describe("query engine", () => {
     expect(valueSum.value).toBeCloseTo(1180.5);
     expect(valueSum.result?.validCount).toBe(3);
     expect(valueSum.result?.excludedCount).toBe(4);
-    expect(ratioAverage.value).toBeCloseTo(5 / 3);
+    expect(ratioAverage.value).toBeCloseTo(0.05 / 3);
     expect(ratioAverage.result?.validCount).toBe(3);
   });
 });

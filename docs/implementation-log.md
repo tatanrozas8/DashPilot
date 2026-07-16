@@ -144,3 +144,73 @@ Debt remaining:
 
 - Add a real DuckDB/SQL comparison if DashPilot adopts a local analytical engine dependency.
 - Consider persisted query-result schema versioning if query outputs are later stored server-side.
+
+
+## 2026-07-16 - dataset-parsing-normalization-2026-07-16
+
+Commit: `fix: harden dataset parsing and type normalization`
+
+Objective:
+
+- Harden CSV/XLS/XLSX parsing for real business files without silently degrading values.
+- Preserve canonical column IDs, parse warnings and auditable normalization samples before dashboard generation.
+
+Files changed:
+
+- `types/dataset.ts`
+- `lib/files/parse-cell.ts`
+- `lib/files/normalize-columns.ts`
+- `lib/files/parse-csv.ts`
+- `lib/files/parse-excel.ts`
+- `lib/data/parse-values.ts`
+- `lib/profiling/profile-dataset.ts`
+- `lib/validation/schemas.ts`
+- `lib/semantic-layer/infer-semantic-layer.ts`
+- `lib/semantic-layer/dataset-catalog.ts`
+- `lib/dashboard-spec/chart-planner.ts`
+- `components/dataset-preview.tsx`
+- `components/dashboard/data-explorer.tsx`
+- `tests/files.test.ts`
+- `tests/parse-values.test.ts`
+- `tests/profiling.test.ts`
+- `tests/query-engine.test.ts`
+- `tests/data-access.test.ts`
+- `tests/fixtures/enterprise_formats_latam.csv`
+
+Architecture notes:
+
+- CSV parsing now disables parser-level dynamic typing and normalizes cells through DashPilot's locale-aware parser.
+- Imported percentages normalize to decimal ratios, while raw query-engine parsing remains backward compatible for direct values.
+- Ambiguous slash dates are preserved as text with warnings; ISO and unambiguous DD/MM or MM/DD dates normalize deterministically.
+- Excel serial dates and datetimes normalize to business date strings without local timezone shifts.
+- Column metadata now includes canonical IDs, raw headers, parse summaries, warnings and bounded cell-level parse audit.
+- Preview exposes type-correction controls before dashboard generation through the existing column dictionary path.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test -- tests/files.test.ts tests/profiling.test.ts tests/parse-values.test.ts tests/real-pipeline.test.ts tests/dataset-understanding.test.ts`: passed, 5 files and 32 tests.
+- `npm run test`: passed, 21 files and 156 tests.
+- `npm run lint`: passed.
+- `npm run build`: passed, 23 app routes generated.
+
+Known failures:
+
+- `git status` continues to emit permission warnings for the user-level git ignore file.
+- No browser E2E harness exists in the repo; preview behavior is covered by parser/profile tests and build.
+
+Migrations/env vars:
+
+- No database migrations changed.
+- No environment variables changed.
+- No dependency changes.
+
+Security/privacy notes:
+
+- Excel parsing now limits processed sheets and sheet dimensions to reduce risk from anomalous compressed workbooks.
+- Parse audit is bounded to 500 cells and stores only raw/normalized cell samples needed for user review.
+
+Debt remaining:
+
+- Persist parse audit in dedicated database columns/tables if tenant audit requirements expand beyond local parsed payloads.
+- Add per-column locale override UI if users need to resolve ambiguous numeric/date conventions manually.

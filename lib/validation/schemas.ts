@@ -10,7 +10,7 @@ export const datasetColumnProfileSchema = z.object({
   description: z.string().optional(),
   synonyms: z.array(z.string()).optional(),
   isHidden: z.boolean().optional(),
-  inferredType: z.enum(["string", "number", "date", "boolean", "currency", "percentage", "geography", "unknown"]),
+  inferredType: z.enum(["string", "number", "date", "datetime", "boolean", "currency", "percentage", "geography", "unknown"]),
   semanticType: z.enum(["metric", "dimension", "time", "geo", "identifier", "category", "measure", "unknown"]),
   userSemanticType: z.enum(["metric", "dimension", "time", "geo", "identifier", "category", "measure", "unknown"]).optional(),
   semanticConfidence: z.number().optional(),

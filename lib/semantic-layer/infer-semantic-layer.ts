@@ -117,7 +117,7 @@ function geoRoleScore(column: DatasetColumnProfile) {
 
 function typeScore(column: DatasetColumnProfile, role: SemanticRole) {
   const numeric = ["number", "currency", "percentage"].includes(column.inferredType);
-  if (role === "date") return column.inferredType === "date" || column.semanticType === "time" ? 0.38 : 0;
+  if (role === "date") return column.inferredType === "date" || column.inferredType === "datetime" || column.semanticType === "time" ? 0.38 : 0;
   if (role === "geography") return (column.inferredType === "geography" || column.semanticType === "geo" ? 0.24 : 0) + geoRoleScore(column);
   if (["metric", "revenue", "cost", "margin", "quantity"].includes(role)) return numeric || column.semanticType === "metric" ? 0.32 : 0;
   if (role === "order") return column.semanticType === "identifier" ? 0.24 : 0;

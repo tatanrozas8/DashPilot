@@ -12,6 +12,7 @@ describe("parse-values", () => {
   it("parses Chilean day-first dates", () => {
     expect(parseDateValue("15/04/2024")?.toISOString().slice(0, 10)).toBe("2024-04-15");
     expect(parseDateValue("2024-04-15")?.toISOString().slice(0, 10)).toBe("2024-04-15");
+    expect(parseDateValue("01/02/2024")).toBeNull();
   });
 
   it("compares dates and numbers using real data semantics", () => {

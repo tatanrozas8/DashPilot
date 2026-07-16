@@ -76,7 +76,7 @@ export function buildDatasetCatalog(profile: DatasetProfile): DatasetCatalog {
       ? firstHintRole<MetricRole>(corpus, metricHints, column.inferredType === "percentage" ? "percentage" : "measure")
       : "unknown";
     const dimensionRole: DimensionRole =
-      column.semanticType === "time" || column.inferredType === "date"
+      column.semanticType === "time" || column.inferredType === "date" || column.inferredType === "datetime"
         ? "time"
         : column.semanticType === "geo" || column.geoRole
           ? "geography"

@@ -33,7 +33,7 @@ function groupColumns(columns: DatasetColumnProfile[]) {
   return {
     Metricas: columns.filter((column) => column.semanticType === "metric"),
     Dimensiones: columns.filter((column) => column.semanticType === "dimension" || column.semanticType === "category"),
-    Fechas: columns.filter((column) => column.semanticType === "time" || column.inferredType === "date"),
+    Fechas: columns.filter((column) => column.semanticType === "time" || column.inferredType === "date" || column.inferredType === "datetime"),
     Geografia: columns.filter((column) => column.semanticType === "geo" || column.inferredType === "geography"),
     Identificadores: columns.filter((column) => column.semanticType === "identifier"),
     Texto: columns.filter((column) => column.inferredType === "string" && !["dimension", "category", "identifier"].includes(column.semanticType)),

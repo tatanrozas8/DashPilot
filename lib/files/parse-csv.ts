@@ -10,7 +10,7 @@ export async function parseCsvFile(file: File): Promise<FileParseResult> {
 
   const parsed = Papa.parse<string[]>(text, {
     skipEmptyLines: true,
-    dynamicTyping: true
+    dynamicTyping: false
   });
   if (parsed.errors.length) throw new Error(parsed.errors[0]?.message ?? "No se pudo leer el CSV.");
 
@@ -21,18 +21,19 @@ export async function parseCsvFile(file: File): Promise<FileParseResult> {
 
   const columns = normalizeColumns(headers);
   const body = detected.bodyRows;
-  const { rows, warnings } = normalizeRows(body, columns);
+  const { rows, warnings, columns: parsedColumns, parseAudit } = normalizeRows(body, columns);
   warnings.unshift(...detected.warnings);
   if (!rows.length) warnings.push("El archivo no contiene filas de datos despues de los encabezados.");
 
   const sheet: ParsedSheet = {
     name: "CSV",
     rowCount: rows.length,
-    columnCount: columns.length,
+    columnCount: parsedColumns.length,
     isSelected: true,
-    columns,
+    columns: parsedColumns,
     rows,
-    previewRows: rows.slice(0, 100)
+    previewRows: rows.slice(0, 100),
+    parseAudit
   };
 
   return {

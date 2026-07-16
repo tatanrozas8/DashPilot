@@ -16,10 +16,25 @@ function isDateLike(value: unknown) {
   return parseDateValue(value) !== null;
 }
 
-function inferType(name: string, values: unknown[]): InferredColumnType {
+function inferType(name: string, values: unknown[], metadata?: NormalizedColumn): InferredColumnType {
   const normalized = slugify(name);
   const populated = values.filter((value) => !isEmpty(value));
   if (populated.length === 0) return "unknown";
+  const typeCounts = metadata?.parseSummary?.typeCounts;
+  const parsedTotal = Object.values(typeCounts ?? {}).reduce((total, count) => total + (count ?? 0), 0);
+  if (typeCounts && parsedTotal > 0) {
+    const typedEntries = Object.entries(typeCounts)
+      .filter(([type, count]) => type !== "empty" && (count ?? 0) > 0)
+      .sort((left, right) => (right[1] ?? 0) - (left[1] ?? 0));
+    const [dominantType, dominantCount] = typedEntries[0] ?? [];
+    const dominance = dominantCount && populated.length ? dominantCount / populated.length : 0;
+    if (dominantType === "datetime" && dominance >= 0.7) return "datetime";
+    if (dominantType === "date" && dominance >= 0.7) return "date";
+    if (dominantType === "percentage" && dominance >= 0.7) return "percentage";
+    if (dominantType === "currency" && dominance >= 0.7) return "currency";
+    if (dominantType === "number" && dominance >= 0.7) return "number";
+    if (dominantType === "boolean" && dominance >= 0.8) return "boolean";
+  }
   const dateRatio = populated.filter(isDateLike).length / populated.length;
   const numberRatio = populated.filter((value) => parseLocaleNumber(value) !== null).length / populated.length;
   const booleanRatio = populated.filter((value) => typeof value === "boolean" || ["true", "false", "si", "no"].includes(String(value).toLowerCase())).length / populated.length;
@@ -51,7 +66,7 @@ export function detectGeoRole(name: string): { geoRole?: GeoRole; confidence: nu
 
 function semanticType(name: string, inferredType: InferredColumnType, uniqueCount: number, rowCount: number, geoRole?: GeoRole): SemanticColumnType {
   const normalized = slugify(name);
-  if (inferredType === "date") return "time";
+  if (inferredType === "date" || inferredType === "datetime") return "time";
   if (geoRole || inferredType === "geography") return "geo";
   if (idHints.some((hint) => normalized.includes(hint))) return "identifier";
   if (["currency", "number", "percentage"].includes(inferredType)) return "metric";
@@ -73,16 +88,29 @@ export function profileDataset(rows: DataRow[], fileName = "Datos de ejemplo.xls
     const nullCount = values.filter(isEmpty).length;
     const populated = values.filter((value) => !isEmpty(value));
     const unique = new Set(populated.map((value) => String(value)));
-    const inferredType = inferType(metadata?.originalName ?? column, values);
+    const inferredType = inferType(metadata?.originalName ?? column, values, metadata);
     const geo = detectGeoRole(`${metadata?.originalName ?? column} ${metadata?.displayName ?? ""} ${column}`);
     const resolvedSemanticType = semanticType(metadata?.originalName ?? column, inferredType, unique.size, rowCount, geo.geoRole);
     const numeric = populated.map(parseLocaleNumber).filter((value): value is number => value !== null);
     const numericRatio = populated.length ? numeric.length / populated.length : 0;
+    const parseSummary = metadata?.parseSummary;
+    const concreteTypes = Object.entries(parseSummary?.typeCounts ?? {})
+      .filter(([type, count]) => type !== "empty" && (count ?? 0) > 0)
+      .map(([type]) => type);
+    const mixedType = concreteTypes.length > 1;
+    const parseWarnings = [
+      ...(metadata?.warnings ?? []),
+      mixedType ? `${metadata?.displayName ?? column} mezcla tipos detectados (${concreteTypes.join(", ")}). Corrige el tipo antes de generar el dashboard si no coincide con el dato de negocio.` : undefined,
+      parseSummary?.ambiguousCount ? `${metadata?.displayName ?? column} tiene ${parseSummary.ambiguousCount} fecha(s) ambiguas no resueltas.` : undefined,
+      parseSummary?.invalidCount ? `${metadata?.displayName ?? column} tiene ${parseSummary.invalidCount} valor(es) que no pudieron normalizarse.` : undefined
+    ].filter((warning): warning is string => Boolean(warning));
 
     return {
       originalName: metadata?.originalName ?? column,
       normalizedName: column,
       displayName: metadata?.displayName ?? displayName(column),
+      canonicalName: metadata?.canonicalName ?? column,
+      rawHeader: metadata?.rawHeader,
       inferredType,
       semanticType: resolvedSemanticType,
       semanticConfidence: resolvedSemanticType === "geo" ? geo.confidence : undefined,
@@ -94,14 +122,21 @@ export function profileDataset(rows: DataRow[], fileName = "Datos de ejemplo.xls
       sampleValues: populated.slice(0, 5),
       min: numeric.length ? Math.min(...numeric) : undefined,
       max: numeric.length ? Math.max(...numeric) : undefined,
+      parseSummary,
+      parseWarnings,
+      mixedType,
       statistics: {
         numericRatio: Number(numericRatio.toFixed(2)),
-        cardinalityRatio: rowCount ? Number((unique.size / rowCount).toFixed(2)) : 0
+        cardinalityRatio: rowCount ? Number((unique.size / rowCount).toFixed(2)) : 0,
+        mixedType,
+        ambiguousCount: parseSummary?.ambiguousCount ?? 0,
+        invalidCount: parseSummary?.invalidCount ?? 0
       }
     };
   });
 
   const qualityWarnings = [
+    ...profiles.flatMap((profile) => profile.parseWarnings ?? []),
     ...profiles
       .filter((profile) => profile.nullPercentage > 10)
       .map((profile) => `${profile.displayName} tiene ${profile.nullPercentage}% de valores nulos.`),

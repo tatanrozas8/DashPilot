@@ -10,6 +10,16 @@ import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { loadPersistedDataset } from "@/lib/data-access";
 import { createDatasetDiagnostics, logDatasetDiagnostics } from "@/lib/debug/dataset-diagnostics";
 import { useDashPilotStore } from "@/lib/store/app-store";
+import type { SemanticColumnType } from "@/types/dataset";
+
+const correctionOptions: Array<{ label: string; value: SemanticColumnType }> = [
+  { label: "Metrica", value: "metric" },
+  { label: "Dimension", value: "dimension" },
+  { label: "Fecha / tiempo", value: "time" },
+  { label: "Geografia", value: "geo" },
+  { label: "Identificador", value: "identifier" },
+  { label: "Texto / desconocido", value: "unknown" }
+];
 
 export function DatasetPreview() {
   const params = useParams<{ datasetId?: string }>();
@@ -19,6 +29,7 @@ export function DatasetPreview() {
   const parsedDataset = useDashPilotStore((state) => state.parsedDataset);
   const selectedSheetName = useDashPilotStore((state) => state.selectedSheetName);
   const selectSheet = useDashPilotStore((state) => state.selectSheet);
+  const updateColumnDictionary = useDashPilotStore((state) => state.updateColumnDictionary);
   const importWarnings = useDashPilotStore((state) => state.importWarnings);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
@@ -34,6 +45,9 @@ export function DatasetPreview() {
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<string | null>(null);
   const visibleColumns = profile.columns.length ? profile.columns.map((column) => column.normalizedName) : Object.keys(rows[0] ?? {});
   const hasRows = rows.length > 0;
+  const selectedSheet = parsedDataset?.sheets.find((sheet) => sheet.name === selectedSheetName);
+  const parseAudit = selectedSheet?.parseAudit ?? [];
+  const columnsWithParseWarnings = profile.columns.filter((column) => (column.parseWarnings?.length ?? 0) > 0 || column.mixedType);
   const diagnostics = useMemo(() => {
     const copilotContext = process.env.NODE_ENV === "development" && hasRows
       ? buildCopilotContext({ rows, datasetProfile: profile, dashboardSpec: dashboard, viewState })
@@ -168,6 +182,66 @@ export function DatasetPreview() {
             <h2 className="font-bold text-amber-900">Advertencias de calidad</h2>
             <div className="mt-2 grid gap-2 text-sm text-amber-800">
               {[...importWarnings, ...profile.qualityWarnings].slice(0, 5).map((warning) => <p key={warning}>{warning}</p>)}
+            </div>
+          </section>
+        )}
+
+        {hasRows && columnsWithParseWarnings.length > 0 && (
+          <section className="mt-5 rounded-xl border border-[#d9dcff] bg-[#fbfbff] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="font-bold text-[#1c2748]">Correccion de tipos antes del dashboard</h2>
+                <p className="mt-1 text-sm text-[#536088]">Revisa columnas mixtas, fechas ambiguas o valores que no pudieron normalizarse. Los cambios ajustan el rol usado para generar el dashboard.</p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#3d35ff]">{columnsWithParseWarnings.length} columnas para revisar</span>
+            </div>
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {columnsWithParseWarnings.slice(0, 6).map((column) => (
+                <article key={column.normalizedName} className="rounded-xl border border-[#e3e8f5] bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-bold text-[#1c2748]">{column.displayName}</p>
+                      <p className="mt-1 text-xs font-semibold text-[#697597]">ID canonico: {column.canonicalName ?? column.normalizedName}</p>
+                    </div>
+                    <select
+                      className="h-9 rounded-lg border border-[#dfe5f0] bg-white px-2 text-xs font-semibold"
+                      value={column.userSemanticType ?? column.semanticType}
+                      onChange={(event) => updateColumnDictionary(column.normalizedName, { userSemanticType: event.target.value as SemanticColumnType })}
+                    >
+                      {correctionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="mt-3 space-y-2 text-xs leading-5 text-[#697597]">
+                    {(column.parseWarnings ?? []).slice(0, 3).map((warning) => <p key={warning}>{warning}</p>)}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {hasRows && parseAudit.length > 0 && (
+          <section className="mt-5 rounded-xl border border-[#e3e8f5] bg-white p-5">
+            <h2 className="font-bold text-[#1c2748]">Valores no normalizados automaticamente</h2>
+            <p className="mt-1 text-sm text-[#536088]">Muestra auditable de celdas convertidas, ambiguas o invalidas. Las fechas ambiguas se conservan como texto hasta que corrijas el formato o el tipo.</p>
+            <div className="mt-4 overflow-x-auto rounded-xl border border-[#edf1fa]">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead className="bg-[#fbfcff] text-[#536088]">
+                  <tr>{["Fila", "Columna", "Raw", "Normalizado", "Estado", "Mensaje"].map((header) => <th key={header} className="border-b border-[#edf1fa] px-3 py-2 font-bold">{header}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {parseAudit.slice(0, 12).map((item) => (
+                    <tr key={`${item.rowIndex}-${item.columnId}-${item.rawValue}`} className="border-b border-[#edf1fa] last:border-0">
+                      <td className="px-3 py-2">{item.rowIndex + 1}</td>
+                      <td className="px-3 py-2 font-semibold">{item.originalName}</td>
+                      <td className="max-w-[160px] truncate px-3 py-2">{item.rawValue || "-"}</td>
+                      <td className="max-w-[160px] truncate px-3 py-2">{String(item.normalizedValue ?? "-")}</td>
+                      <td className="px-3 py-2">{item.status}</td>
+                      <td className="max-w-[300px] truncate px-3 py-2">{item.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
         )}

@@ -93,8 +93,8 @@ describe("data access", () => {
           columnCount: 2,
           isSelected: true,
           columns: [
-            { originalName: "Region", normalizedName: "region", displayName: "Region", position: 0 },
-            { originalName: "Ventas", normalizedName: "ventas", displayName: "Ventas", position: 1 }
+            { id: "region", rawHeader: "Region", originalName: "Region", canonicalName: "region", normalizedName: "region", displayName: "Region", position: 0 },
+            { id: "ventas", rawHeader: "Ventas", originalName: "Ventas", canonicalName: "ventas", normalizedName: "ventas", displayName: "Ventas", position: 1 }
           ],
           rows,
           previewRows: rows

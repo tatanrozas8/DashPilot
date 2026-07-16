@@ -49,9 +49,12 @@ export function parseDateValue(value: unknown): Date | null {
 
   const latam = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
   if (latam) {
+    if (Number(latam[1]) <= 12 && Number(latam[2]) <= 12) return null;
     const year = Number(latam[3].length === 2 ? `20${latam[3]}` : latam[3]);
-    const day = Number(latam[1]);
-    const month = Number(latam[2]);
+    const first = Number(latam[1]);
+    const second = Number(latam[2]);
+    const day = first > 12 ? first : second;
+    const month = first > 12 ? second : first;
     const date = new Date(Date.UTC(year, month - 1, day));
     return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date : null;
   }

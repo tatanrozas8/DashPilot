@@ -1,5 +1,6 @@
 import type { DataRow, DatasetProfile } from "@/types/dataset";
 import type { DashboardFilterConfig, DashboardSpec, DashboardWidget } from "@/types/dashboard";
+import { parseLocaleNumber } from "@/lib/data/parse-values";
 import { DEFAULT_DASHBOARD_DESIGN } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { inferSemanticLayer, type SemanticField } from "@/lib/semantic-layer";
@@ -25,14 +26,13 @@ function fieldFormat(field?: SemanticField) {
   return "number";
 }
 
-function toNumber(value: unknown) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (typeof value !== "string") return 0;
-  return Number(value.replace(/[$,%\s]/g, "").replace(/\./g, "").replace(",", ".")) || 0;
-}
-
 function unique<T>(items: (T | undefined)[]) {
   return Array.from(new Set(items.filter(Boolean))) as T[];
+}
+
+function sumValidNumbers(rows: DataRow[], metricField: string) {
+  const values = rows.map((row) => parseLocaleNumber(row[metricField])).filter((value): value is number => value !== null);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
 }
 
 function growthByTime(rows: DataRow[], dateField?: string, metricField?: string) {
@@ -43,13 +43,14 @@ function growthByTime(rows: DataRow[], dateField?: string, metricField?: string)
     .sort((left, right) => left.time - right.time);
   if (datedRows.length < 4) return null;
   const midpoint = Math.floor(datedRows.length / 2);
-  const previous = datedRows.slice(0, midpoint).reduce((sum, item) => sum + toNumber(item.row[metricField]), 0);
-  const current = datedRows.slice(midpoint).reduce((sum, item) => sum + toNumber(item.row[metricField]), 0);
-  if (previous <= 0) return null;
+  const previous = sumValidNumbers(datedRows.slice(0, midpoint).map((item) => item.row), metricField);
+  const current = sumValidNumbers(datedRows.slice(midpoint).map((item) => item.row), metricField);
+  if (previous === null || current === null || previous === 0) return null;
   return ((current - previous) / previous) * 100;
 }
 
-function metricSentence(label: string, value: number, format: string) {
+function metricSentence(label: string, value: number | null, format: string) {
+  if (value === null) return `${label} no esta disponible por falta de valores numericos validos.`;
   if (format === "currency") return `${label} alcanza ${formatCurrency(value)}.`;
   if (format === "percentage") return `${label} promedio se ubica en ${(value * 100).toFixed(1)}%.`;
   return `${label} suma ${formatNumber(value)}.`;
@@ -82,11 +83,12 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
   const metricFormat = fieldFormat(primaryMetric);
   const secondaryFormat = fieldFormat(semantic.marginMetrics[0] ?? secondaryMetric);
 
-  const salesTotal = salesField ? executeDashboardQuery(rows, { metric: { field: salesField, aggregation: "sum" } })[0]?.value ?? 0 : rows.length;
+  const salesResult = salesField ? executeDashboardQuery(rows, { metric: { field: salesField, aggregation: "sum" } })[0]?.result : undefined;
+  const salesTotal = salesField ? salesResult?.value ?? null : rows.length;
   const avgSecondary = marginField
-    ? executeDashboardQuery(rows, { metric: { field: marginField, aggregation: "avg" } })[0]?.value ?? 0
+    ? executeDashboardQuery(rows, { metric: { field: marginField, aggregation: "avg" } })[0]?.value ?? null
     : secondaryMetric
-      ? executeDashboardQuery(rows, { metric: { field: secondaryMetric.field, aggregation: "avg" } })[0]?.value ?? 0
+      ? executeDashboardQuery(rows, { metric: { field: secondaryMetric.field, aggregation: "avg" } })[0]?.value ?? null
       : profile.columnCount;
   const tickets = orderField ? new Set(rows.map((row) => row[orderField])).size : rows.length;
   const growth = growthByTime(rows, dateField, salesField);
@@ -109,7 +111,7 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
       title: isSalesDomain ? "Ventas Totales" : salesField ? `${metricLabel} Total` : "Registros",
       description: salesField ? `${Math.round((primaryMetric?.confidence ?? 0) * 100)}% confianza semantica` : "Conteo de filas",
       query: salesField ? { metric: { field: salesField, aggregation: "sum" } } : {},
-      config: { icon: "trend", format: metricFormat, tone: "blue", comparison: salesField ? `${Math.round((primaryMetric?.confidence ?? 0) * 100)}% confianza` : "", fallbackValue: salesTotal },
+      config: { icon: "trend", format: metricFormat, tone: "blue", comparison: salesField ? `${Math.round((primaryMetric?.confidence ?? 0) * 100)}% confianza` : "", fallbackValue: salesTotal, queryWarnings: salesResult?.warnings ?? [] },
       position: { x: 0, y: 0, w: 3, h: 1 }
     }),
     widget("kpi_margin", {
@@ -168,7 +170,7 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
       config: {
         bullets: [
           salesField ? metricSentence(isSalesDomain ? "Ventas totales" : metricLabel, salesTotal, metricFormat) : `Se analizaron ${rows.length} registros y ${profile.columnCount} columnas para construir una vista exploratoria.`,
-          marginField ? `El margen bruto promedio se ubica en ${(avgSecondary * 100).toFixed(1)}%.` : secondaryMetric ? metricSentence(`Promedio de ${fieldLabel(secondaryMetric)}`, avgSecondary, secondaryFormat) : `El dominio detectado es ${semantic.domain.name} con ${Math.round(semantic.domain.confidence * 100)}% de confianza.`,
+          marginField && avgSecondary !== null ? `El margen bruto promedio se ubica en ${(avgSecondary * 100).toFixed(1)}%.` : marginField ? "El margen bruto no esta disponible por falta de valores numericos validos." : secondaryMetric ? metricSentence(`Promedio de ${fieldLabel(secondaryMetric)}`, avgSecondary, secondaryFormat) : `El dominio detectado es ${semantic.domain.name} con ${Math.round(semantic.domain.confidence * 100)}% de confianza.`,
           dateField ? `La columna ${fieldLabel(semantic.primaryDate)} permite revisar evolucion temporal.` : "No se detecto una columna temporal confiable.",
           secondaryDimension ? `${fieldLabel(semantic.primaryDimension)} permite segmentar el desempeno sin inventar campos externos.` : "No se detectaron dimensiones confiables para segmentacion.",
           sellerField ? "El ranking por vendedor permite identificar concentracion del resultado comercial." : productField ? "El ranking por producto muestra concentracion y mix del resultado." : "El dashboard prioriza las columnas con mayor confianza semantica."

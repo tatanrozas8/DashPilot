@@ -18,7 +18,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { Check, ChevronDown, ChevronUp, Copy, Eye, Filter, GripVertical, Highlighter, MoreVertical, Pencil, Presentation, RotateCcw, RotateCw, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Eye, Filter, GripVertical, Highlighter, MoreVertical, Pencil, Presentation, RotateCcw, RotateCw, Search, Send, SlidersHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
@@ -29,13 +29,53 @@ import { buildDatasetCatalog, inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
-import type { DashboardDesignSettings, DashboardViewState, DashboardWidget } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardViewState, DashboardWidget, QueryMetricResult, QueryResultCellValue, QueryResultRow } from "@/types/dashboard";
 
 function formatValue(value: number, format: unknown) {
   if (format === "currency") return formatCurrency(value);
   if (format === "percentage") return `${(value * 100).toFixed(1)}%`;
   if (format === "percentageWhole") return `${value.toFixed(1)}%`;
   return formatNumber(value);
+}
+
+function isFiniteNumber(value: QueryResultCellValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatNullableValue(value: number | null | undefined, format: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? formatValue(value, format) : "No disponible";
+}
+
+function formatChartValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? formatCurrency(value) : "No disponible";
+}
+
+function configNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function qualityText(result?: QueryMetricResult) {
+  if (!result) return "";
+  if (result.state === "ok") return "";
+  if (result.state === "empty") return "Sin datos para el calculo.";
+  if (result.state === "invalid") return "No hay valores numericos validos.";
+  if (result.state === "indeterminate") return "Resultado indeterminado.";
+  return `Cobertura ${Math.round(result.coverage * 100)}% (${result.validCount}/${result.totalCount}).`;
+}
+
+function QualityNote({ result }: { result?: QueryMetricResult }) {
+  const text = qualityText(result);
+  if (!text) return null;
+  return (
+    <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+      {text}
+    </p>
+  );
+}
+
+function hasRenderableValues(data: QueryResultRow[], seriesKeys: string[]) {
+  return data.some((row) => isFiniteNumber(row.value) || seriesKeys.some((key) => isFiniteNumber(row[key])));
 }
 
 const DashboardDesignContext = createContext<Required<DashboardDesignSettings>>(normalizeDashboardDesign());
@@ -172,7 +212,9 @@ function EmptyWidget({ message }: { message?: string }) {
 function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
   const viewState = useDashPilotStore((state) => state.viewState);
   const colors = chartColors(useDashboardDesign());
-  const result = widget.query ? executeDashboardQuery(rows, widget.query, viewState)[0]?.value ?? 0 : Number(widget.config.fallbackValue ?? 0);
+  const queryRow = widget.query ? executeDashboardQuery(rows, widget.query, viewState)[0] : undefined;
+  const result = queryRow?.result;
+  const value = widget.query ? queryRow?.value ?? null : configNumber(widget.config.fallbackValue);
   const tone = String(widget.config.tone ?? "blue") as "blue" | "violet" | "green" | "sky" | "orange";
   return (
     <Card className="min-h-[150px]">
@@ -181,7 +223,8 @@ function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
         <span className="text-xs font-semibold text-emerald-600">{String(widget.config.comparison ?? "")}</span>
       </div>
       <p className="mt-4 text-sm font-semibold text-[#1c2748]">{widget.title}</p>
-      <p className="mt-1 text-3xl font-bold tracking-[-0.04em]">{formatValue(result, widget.config.format)}</p>
+      <p className="mt-1 text-3xl font-bold tracking-[-0.04em]">{formatNullableValue(value, widget.config.format)}</p>
+      <QualityNote result={result} />
       <div className="mt-4 h-9">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={[12, 18, 15, 22, 17, 26, 28].map((value, index) => ({ index, value }))}>
@@ -198,32 +241,36 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
   const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
   const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
-  const comparison = data.map((item) => ({ ...item, previous: Math.round(Number(item.value) * 0.72) }));
+  const comparison = data.map((item) => ({ ...item, previous: isFiniteNumber(item.value) ? Math.round(item.value * 0.72) : null }));
+  const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
 
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 ? (
+      {data.length === 0 || !hasRenderableValues(data, seriesKeys) ? (
         <EmptyWidget message={String(widget.config.emptyMessage ?? "No hay datos suficientes para esta serie.")} />
       ) : (
-        <ResponsiveContainer width="100%" height={230}>
-          <LineChart data={seriesKeys.length ? data : comparison} margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
-            <CartesianGrid stroke={colors.grid} vertical={false} />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={(value) => formatCurrency(Number(value))} />
-            <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            {seriesKeys.length ? (
-              seriesKeys.map((key, index) => (
-                <Line key={key} type="monotone" dataKey={key} name={key} stroke={colors.palette[index % colors.palette.length]} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-              ))
-            ) : (
-              <>
-                <Line type="monotone" dataKey="value" name="Actual" stroke={colors.primary} strokeWidth={3} dot={{ r: 4 }} />
-                <Line type="monotone" dataKey="previous" name="Comparativo" stroke={colors.muted} strokeDasharray="5 5" strokeWidth={2} dot={false} />
-              </>
-            )}
-          </LineChart>
-        </ResponsiveContainer>
+        <>
+          <ResponsiveContainer width="100%" height={230}>
+            <LineChart data={seriesKeys.length ? data : comparison} margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
+              <CartesianGrid stroke={colors.grid} vertical={false} />
+              <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={formatChartValue} />
+              <Tooltip formatter={formatChartValue} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+              {seriesKeys.length ? (
+                seriesKeys.map((key, index) => (
+                  <Line key={key} type="monotone" dataKey={key} name={key} stroke={colors.palette[index % colors.palette.length]} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                ))
+              ) : (
+                <>
+                  <Line type="monotone" dataKey="value" name="Actual" stroke={colors.primary} strokeWidth={3} dot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="previous" name="Comparativo" stroke={colors.muted} strokeDasharray="5 5" strokeWidth={2} dot={false} />
+                </>
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+          <QualityNote result={firstWarning} />
+        </>
       )}
     </Card>
   );
@@ -234,6 +281,7 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
   const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
+  const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
   const compact = Boolean(widget.config.compact);
   const orientation = barOrientation(widget);
   const isHorizontal = orientation === "horizontal";
@@ -241,27 +289,30 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 ? (
+      {data.length === 0 || !hasRenderableValues(data, seriesKeys) ? (
         <EmptyWidget />
       ) : (
-        <ResponsiveContainer width="100%" height={compact ? 220 : 230}>
-          <BarChart data={data} layout={isHorizontal ? "vertical" : "horizontal"} margin={isHorizontal ? { left: 16, right: 28, top: 4, bottom: 0 } : { left: 4, right: 18, top: 10, bottom: 24 }}>
-            <CartesianGrid stroke={colors.grid} horizontal={!isHorizontal} vertical={isHorizontal} />
-            <XAxis type={isHorizontal ? "number" : "category"} dataKey={isHorizontal ? undefined : "label"} hide={isHorizontal} axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
-            <YAxis type={isHorizontal ? "category" : "number"} dataKey={isHorizontal ? "label" : undefined} axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={isHorizontal ? 82 : 54} tickFormatter={(value) => isHorizontal ? String(value) : formatCurrency(Number(value))} />
-            <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            {seriesKeys.length > 0 && widget.config.visualConfig?.legend !== false && (
-              <Legend verticalAlign="top" align="center" iconType="circle" wrapperStyle={{ color: "#34405f", fontSize: 12, fontWeight: 600, paddingBottom: 8 }} />
-            )}
-            {seriesKeys.length ? (
-              seriesKeys.map((key, index) => (
-                <Bar key={key} dataKey={key} radius={barRadius} fill={colors.palette[index % colors.palette.length]} barSize={compact ? 12 : 18} />
-              ))
-            ) : (
-              <Bar dataKey="value" radius={barRadius} fill={colors.primary} barSize={compact ? 16 : 24} />
-            )}
-          </BarChart>
-        </ResponsiveContainer>
+        <>
+          <ResponsiveContainer width="100%" height={compact ? 220 : 230}>
+            <BarChart data={data} layout={isHorizontal ? "vertical" : "horizontal"} margin={isHorizontal ? { left: 16, right: 28, top: 4, bottom: 0 } : { left: 4, right: 18, top: 10, bottom: 24 }}>
+              <CartesianGrid stroke={colors.grid} horizontal={!isHorizontal} vertical={isHorizontal} />
+              <XAxis type={isHorizontal ? "number" : "category"} dataKey={isHorizontal ? undefined : "label"} hide={isHorizontal} axisLine={false} tickLine={false} tick={{ fill: "#697597", fontSize: 12 }} />
+              <YAxis type={isHorizontal ? "category" : "number"} dataKey={isHorizontal ? "label" : undefined} axisLine={false} tickLine={false} tick={{ fill: "#34405f", fontSize: 12 }} width={isHorizontal ? 82 : 54} tickFormatter={(value) => isHorizontal ? String(value) : formatChartValue(value)} />
+              <Tooltip formatter={formatChartValue} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+              {seriesKeys.length > 0 && widget.config.visualConfig?.legend !== false && (
+                <Legend verticalAlign="top" align="center" iconType="circle" wrapperStyle={{ color: "#34405f", fontSize: 12, fontWeight: 600, paddingBottom: 8 }} />
+              )}
+              {seriesKeys.length ? (
+                seriesKeys.map((key, index) => (
+                  <Bar key={key} dataKey={key} radius={barRadius} fill={colors.palette[index % colors.palette.length]} barSize={compact ? 12 : 18} />
+                ))
+              ) : (
+                <Bar dataKey="value" radius={barRadius} fill={colors.primary} barSize={compact ? 16 : 24} />
+              )}
+            </BarChart>
+          </ResponsiveContainer>
+          <QualityNote result={firstWarning} />
+        </>
       )}
     </Card>
   );
@@ -271,20 +322,25 @@ function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
   const viewState = useDashPilotStore((state) => state.viewState);
   const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const chartData = data.filter((row) => isFiniteNumber(row.value));
+  const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 ? (
+      {chartData.length === 0 ? (
         <EmptyWidget />
       ) : (
-        <ResponsiveContainer width="100%" height={230}>
-          <PieChart>
-            <Pie data={data} dataKey="value" nameKey="label" innerRadius={58} outerRadius={92} paddingAngle={2}>
-              {data.map((item, index) => <Cell key={String(item.label ?? index)} fill={colors.palette[index % colors.palette.length]} />)}
-            </Pie>
-            <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-          </PieChart>
-        </ResponsiveContainer>
+        <>
+          <ResponsiveContainer width="100%" height={230}>
+            <PieChart>
+              <Pie data={chartData} dataKey="value" nameKey="label" innerRadius={58} outerRadius={92} paddingAngle={2}>
+                {chartData.map((item, index) => <Cell key={String(item.label ?? index)} fill={colors.palette[index % colors.palette.length]} />)}
+              </Pie>
+              <Tooltip formatter={formatChartValue} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <QualityNote result={firstWarning} />
+        </>
       )}
     </Card>
   );
@@ -294,21 +350,25 @@ function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRo
   const viewState = useDashPilotStore((state) => state.viewState);
   const colors = chartColors(useDashboardDesign());
   const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState).map((row, index) => ({ ...row, index: index + 1 })) : [];
+  const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 ? (
+      {data.length === 0 || !data.some((row) => isFiniteNumber(row.value)) ? (
         <EmptyWidget />
       ) : (
-        <ResponsiveContainer width="100%" height={230}>
-          <ScatterChart margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
-            <CartesianGrid stroke={colors.grid} />
-            <XAxis dataKey="index" tick={{ fill: "#697597", fontSize: 12 }} />
-            <YAxis dataKey="value" tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={(value) => formatCurrency(Number(value))} />
-            <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
-            <Scatter data={data} fill={colors.primary} />
-          </ScatterChart>
-        </ResponsiveContainer>
+        <>
+          <ResponsiveContainer width="100%" height={230}>
+            <ScatterChart margin={{ left: 4, right: 18, top: 10, bottom: 0 }}>
+              <CartesianGrid stroke={colors.grid} />
+              <XAxis dataKey="index" tick={{ fill: "#697597", fontSize: 12 }} />
+              <YAxis dataKey="value" tick={{ fill: "#697597", fontSize: 12 }} tickFormatter={formatChartValue} />
+              <Tooltip formatter={formatChartValue} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
+              <Scatter data={data} fill={colors.primary} />
+            </ScatterChart>
+          </ResponsiveContainer>
+          <QualityNote result={firstWarning} />
+        </>
       )}
     </Card>
   );

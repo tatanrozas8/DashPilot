@@ -21,5 +21,6 @@ describe("real CSV pipeline QA", () => {
     expect(profile.detectedDateColumns).toContain("fecha");
     expect(dashboard.widgets.length).toBeGreaterThan(4);
     expect(queryResult.length).toBeGreaterThan(1);
+    expect(queryResult.every((row) => typeof row.value === "number" && row.result?.state === "ok")).toBe(true);
   });
 });

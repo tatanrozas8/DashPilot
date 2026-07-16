@@ -41,6 +41,10 @@ function groupColumns(columns: DatasetColumnProfile[]) {
   };
 }
 
+function previewValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? formatNumber(value) : "No disponible";
+}
+
 function FieldRow({ column, selected, active, onToggle, onFilter, onInspect }: { column: DatasetColumnProfile; selected: boolean; active: boolean; onToggle: () => void; onFilter: () => void; onInspect: () => void }) {
   return (
     <div className={cn("rounded-lg border p-3", active ? "border-[#9aa0ff] bg-[#fbfbff]" : "border-[#edf1fa]")}>
@@ -274,7 +278,10 @@ function ChartBuilder() {
         </select>
         <input className="h-10 rounded-lg border border-[#dfe5f0] px-3 text-sm" type="number" min={1} max={100} value={limit} onChange={(event) => setLimit(Number(event.target.value) || 10)} />
       </div>
-      <p className="mt-3 text-xs text-[#697597]">Vista previa: {preview.slice(0, 3).map((row) => `${row.label}: ${formatNumber(Number(row.value ?? 0))}`).join(" · ") || "sin datos"}</p>
+      <p className="mt-3 text-xs text-[#697597]">
+        Vista previa: {preview.slice(0, 3).map((row) => `${row.label}: ${previewValue(row.value)}`).join(" · ") || "sin datos"}
+        {preview.some((row) => row.result?.state && row.result.state !== "ok") ? " · revisar cobertura de datos" : ""}
+      </p>
     </section>
   );
 }

@@ -13,4 +13,18 @@ describe("presentation spec", () => {
     expect(presentation.title).toBe(`Presentacion de ${dashboard.title}`);
     expect(presentation.slides.some((slide) => slide.widgetIds.some((widgetId) => dashboard.widgets.some((widget) => widget.id === widgetId)))).toBe(true);
   });
+
+  it("carries query quality warnings into presentation narrative", () => {
+    const profile = profileDataset([
+      { fecha: "2024-01-01", ventas: "100" },
+      { fecha: "2024-01-02", ventas: "sin dato" }
+    ], "ventas_con_alertas.csv");
+    const dashboard = generateDashboardSpec(profile, [
+      { fecha: "2024-01-01", ventas: "100" },
+      { fecha: "2024-01-02", ventas: "sin dato" }
+    ]);
+    const presentation = generatePresentationSpec(dashboard);
+
+    expect(presentation.slides.some((slide) => slide.narrative?.includes("advertencias de cobertura numerica"))).toBe(true);
+  });
 });

@@ -145,10 +145,48 @@ export interface DashboardViewState {
   copilotIntent?: "modify_selection" | "create_chart" | "modify_dashboard" | "filters" | "data_table" | "presentation";
 }
 
-export type QueryResultRow = DataRow & {
+export type QueryValueState = "ok" | "partial" | "empty" | "invalid" | "indeterminate";
+
+export type QueryWarningCode =
+  | "numeric_value_excluded"
+  | "null_value_excluded"
+  | "empty_value_excluded"
+  | "no_valid_numeric_values"
+  | "division_by_zero"
+  | "invalid_formula"
+  | "invalid_filter_value";
+
+export interface QueryWarning {
+  code: QueryWarningCode;
+  message: string;
+  field?: string;
+  aggregation?: NonNullable<DashboardQuerySpec["metric"]>["aggregation"];
+  count?: number;
+}
+
+export interface QueryMetricResult {
+  value: number | null;
+  state: QueryValueState;
+  totalCount: number;
+  validCount: number;
+  excludedCount: number;
+  coverage: number;
+  warnings: QueryWarning[];
+}
+
+export type QueryResultCellValue = DataRow[string] | QueryMetricResult | QueryWarning[] | undefined;
+
+export interface QueryResultRow {
+  [key: string]: QueryResultCellValue;
   label?: string;
-  value?: number;
-};
+  value?: number | null;
+  result?: QueryMetricResult;
+  state?: QueryValueState;
+  coverage?: number;
+  validCount?: number;
+  excludedCount?: number;
+  warnings?: QueryWarning[];
+}
 
 export type DashboardAction =
   | { type: "add_widget"; widget: DashboardWidget }

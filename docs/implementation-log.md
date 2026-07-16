@@ -84,3 +84,63 @@ Security/privacy notes:
 Debt remaining:
 
 - See `docs/known-gaps.md`.
+
+
+## 2026-07-16 - query-engine-semantic-calc-2026-07-16
+
+Commit: fix: make dashboard calculations semantically correct
+
+Objective:
+
+- Eliminate silently incorrect dashboard calculations in the query engine.
+- Preserve real zero while preventing null, empty, invalid, NaN, infinity and non-numeric values from becoming fake zeroes.
+
+Files changed:
+
+- types/dashboard.ts
+- lib/query-engine/execute-dashboard-query.ts
+- lib/dashboard-spec/generate-dashboard-spec.ts
+- lib/presentation-spec/generate-presentation-spec.ts
+- components/dashboard/dashboard-renderer.tsx
+- components/dashboard/data-explorer.tsx
+- tests/query-engine.test.ts
+- tests/real-pipeline.test.ts
+- tests/presentation.test.ts
+- tests/fixtures/query_semantics_golden.csv
+- docs/implementation-log.md
+
+Architecture notes:
+
+- Query results keep backward-compatible value fields and add non-enumerable metadata: result, state, coverage, validCount, excludedCount and structured warnings.
+- Numeric aggregation policy is explicit in the query engine: sum/avg/min/max use only valid numeric values; count includes all filtered rows; count_distinct excludes null, undefined and empty strings.
+- Division by zero in calculated metrics returns an indeterminate null result with a structured warning.
+- Dashboard and presentation generation now carry query warnings instead of converting unavailable metrics to zero.
+
+Validation:
+
+- npm run typecheck: passed.
+- npm run test -- tests/query-engine.test.ts tests/real-pipeline.test.ts tests/presentation.test.ts tests/dashboard-spec.test.ts tests/dataset-understanding.test.ts: passed, 5 files and 53 tests.
+- npm run lint: passed.
+- npm run test: passed, 21 files and 152 tests.
+- npm run build: passed, 23 app routes generated.
+
+Known failures:
+
+- git status continues to emit permission warnings for the user-level git ignore file.
+- DuckDB/SQL reference execution was not added because the project has no DuckDB dependency; tests include a SQL-style independent average reference over the same numeric policy.
+
+Migrations/env vars:
+
+- No database migrations changed.
+- No environment variables changed.
+- No dependency changes.
+
+Security/privacy notes:
+
+- No client exposure of service-role keys or sensitive rows was introduced.
+- Query warnings are aggregate-quality metadata only; they do not include raw row payloads.
+
+Debt remaining:
+
+- Add a real DuckDB/SQL comparison if DashPilot adopts a local analytical engine dependency.
+- Consider persisted query-result schema versioning if query outputs are later stored server-side.

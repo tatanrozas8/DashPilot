@@ -1,6 +1,10 @@
 import type { DashboardSpec } from "@/types/dashboard";
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
 
+function hasQueryWarnings(dashboard: DashboardSpec) {
+  return dashboard.widgets.some((widget) => Array.isArray(widget.config.queryWarnings) && widget.config.queryWarnings.length > 0);
+}
+
 export function generatePresentationSpec(dashboard: DashboardSpec, theme: PresentationTheme = "executive"): PresentationSpec {
   const kpis = dashboard.widgets.filter((widget) => widget.type === "kpi_card").map((widget) => widget.id);
   const charts = dashboard.widgets.filter((widget) => ["line_chart", "bar_chart", "area_chart", "donut_chart"].includes(widget.type));
@@ -9,6 +13,7 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
   const dashboardTitle = dashboard.title || "Dashboard";
   const presentationTitle = dashboard.widgets.length ? `Presentacion de ${dashboardTitle}` : "Aún no hay presentaciones";
   const primaryChart = charts[0];
+  const qualityNote = hasQueryWarnings(dashboard) ? " Hay advertencias de cobertura numerica; revisar antes de tomar decisiones." : "";
 
   return {
     id: `presentation_${dashboard.id}`,
@@ -32,8 +37,8 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
         id: "overview",
         title: "Panorama General",
         subtitle: "KPIs principales del dashboard",
-        narrative: "Los indicadores principales resumen el comportamiento del dataset cargado.",
-        speakerNotes: "Dedicar menos de un minuto a esta slide y pasar rapidamente al driver regional.",
+        narrative: `Los indicadores principales resumen el comportamiento del dataset cargado.${qualityNote}`,
+        speakerNotes: `Dedicar menos de un minuto a esta slide y pasar rapidamente al driver regional.${qualityNote}`,
         layout: "kpi_grid",
         widgetIds: kpis
       },
@@ -41,8 +46,8 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
         id: "commercial-summary",
         title: "Resumen Ejecutivo",
         subtitle: dashboard.subtitle,
-        narrative: dashboard.executiveSummary,
-        speakerNotes: "Explicar los hallazgos usando las dimensiones disponibles en el dashboard.",
+        narrative: `${dashboard.executiveSummary ?? ""}${qualityNote}`,
+        speakerNotes: `Explicar los hallazgos usando las dimensiones disponibles en el dashboard.${qualityNote}`,
         layout: "executive_summary",
         widgetIds: [...kpis, primaryChart?.id, insight?.id].filter(Boolean) as string[]
       },

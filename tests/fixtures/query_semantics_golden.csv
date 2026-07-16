@@ -1,0 +1,8 @@
+categoria,valor,ratio
+zero,0,0%
+currency,"$1.200,50",10%
+negative,-20,-5%
+empty,,
+text,abc,n/a
+nan_text,NaN,NaN
+infinity_text,Infinity,Infinity

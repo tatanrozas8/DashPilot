@@ -85,10 +85,75 @@ Debt remaining:
 
 - See `docs/known-gaps.md`.
 
+## 2026-07-15 - quality-gates-2026-07-15
+
+Commit: `chore: add production quality gates`
+
+Objective:
+
+- Add production-grade quality gates for lint, typecheck, tests, coverage, build, and dependency audit.
+- Pin Node/npm expectations and root dependency versions.
+- Add CI and conservative dependency update automation.
+
+Files changed:
+
+- `.github/workflows/quality-gates.yml`
+- `.github/dependabot.yml`
+- `.nvmrc`
+- `.node-version`
+- `eslint.config.mjs`
+- `package.json`
+- `package-lock.json`
+- `docs/dependency-management.md`
+- `docs/current-architecture.md`
+- `docs/implementation-log.md`
+- `docs/known-gaps.md`
+- Small lint-driven cleanup in dashboard/data/settings/auth/semantic/type placeholder files.
+
+Architecture notes:
+
+- `lint` now runs real ESLint with Next core web vitals and TypeScript rules.
+- `typecheck` remains a separate `tsc --noEmit` gate.
+- Root dependencies were pinned from the existing lockfile rather than upgraded blindly.
+- CI uses `npm ci` with npm cache keyed by `package-lock.json`, preserving reproducible installs while avoiding dependency install drift.
+- `audit:ci` blocks critical vulnerabilities. Known non-critical advisories remain documented in `docs/dependency-management.md`.
+
+Validation:
+
+- `npm.cmd ci`: passed outside sandbox after local npm cache `EPERM` in sandbox; installed 523 packages.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run test`: passed, 21 files and 134 tests.
+- `npm.cmd run test:coverage`: passed, statements 65.14%, branches 61.08%, functions 68.95%, lines 69.08%.
+- `npm.cmd run build`: passed, 23 app routes generated.
+- `npm.cmd run audit:ci`: passed outside sandbox; no critical vulnerabilities reported.
+
+Known failures:
+
+- Sandboxed `npm.cmd ci` still fails with local npm cache `EPERM` in `AppData`.
+- Sandboxed `npm.cmd run audit:ci` failed against the npm audit endpoint/log directory; rerun outside sandbox passed.
+- Full `npm audit` still reports `xlsx` high and `postcss` moderate advisories.
+
+Migrations/env vars:
+
+- No database migrations changed.
+- No runtime environment variables changed.
+- Node is now pinned to `24.14.0`.
+
+Security/privacy notes:
+
+- Critical dependency vulnerabilities block CI.
+- The current `xlsx@0.18.5` high-severity advisory is documented as a temporary exception with review date in `docs/dependency-management.md`.
+
+Debt remaining:
+
+- Add coverage thresholds after agreeing on initial minimums.
+- Replace or sandbox `xlsx` before production uploads for untrusted tenants.
+- Configure GitHub branch protection so the quality gate check is required before merge.
 
 ## 2026-07-16 - query-engine-semantic-calc-2026-07-16
 
-Commit: fix: make dashboard calculations semantically correct
+Commit: `fix: make dashboard calculations semantically correct`
 
 Objective:
 
@@ -97,36 +162,36 @@ Objective:
 
 Files changed:
 
-- types/dashboard.ts
-- lib/query-engine/execute-dashboard-query.ts
-- lib/dashboard-spec/generate-dashboard-spec.ts
-- lib/presentation-spec/generate-presentation-spec.ts
-- components/dashboard/dashboard-renderer.tsx
-- components/dashboard/data-explorer.tsx
-- tests/query-engine.test.ts
-- tests/real-pipeline.test.ts
-- tests/presentation.test.ts
-- tests/fixtures/query_semantics_golden.csv
-- docs/implementation-log.md
+- `types/dashboard.ts`
+- `lib/query-engine/execute-dashboard-query.ts`
+- `lib/dashboard-spec/generate-dashboard-spec.ts`
+- `lib/presentation-spec/generate-presentation-spec.ts`
+- `components/dashboard/dashboard-renderer.tsx`
+- `components/dashboard/data-explorer.tsx`
+- `tests/query-engine.test.ts`
+- `tests/real-pipeline.test.ts`
+- `tests/presentation.test.ts`
+- `tests/fixtures/query_semantics_golden.csv`
+- `docs/implementation-log.md`
 
 Architecture notes:
 
-- Query results keep backward-compatible value fields and add non-enumerable metadata: result, state, coverage, validCount, excludedCount and structured warnings.
+- Query results keep backward-compatible `value` fields and add non-enumerable metadata: `result`, `state`, `coverage`, `validCount`, `excludedCount` and structured `warnings`.
 - Numeric aggregation policy is explicit in the query engine: sum/avg/min/max use only valid numeric values; count includes all filtered rows; count_distinct excludes null, undefined and empty strings.
 - Division by zero in calculated metrics returns an indeterminate null result with a structured warning.
 - Dashboard and presentation generation now carry query warnings instead of converting unavailable metrics to zero.
 
 Validation:
 
-- npm run typecheck: passed.
-- npm run test -- tests/query-engine.test.ts tests/real-pipeline.test.ts tests/presentation.test.ts tests/dashboard-spec.test.ts tests/dataset-understanding.test.ts: passed, 5 files and 53 tests.
-- npm run lint: passed.
-- npm run test: passed, 21 files and 152 tests.
-- npm run build: passed, 23 app routes generated.
+- `npm run typecheck`: passed.
+- `npm run test -- tests/query-engine.test.ts tests/real-pipeline.test.ts tests/presentation.test.ts tests/dashboard-spec.test.ts tests/dataset-understanding.test.ts`: passed, 5 files and 53 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 21 files and 152 tests.
+- `npm run build`: passed, 23 app routes generated.
 
 Known failures:
 
-- git status continues to emit permission warnings for the user-level git ignore file.
+- `git status` continues to emit permission warnings for `C:\Users\Cristián\.config\git\ignore`.
 - DuckDB/SQL reference execution was not added because the project has no DuckDB dependency; tests include a SQL-style independent average reference over the same numeric policy.
 
 Migrations/env vars:
@@ -144,7 +209,6 @@ Debt remaining:
 
 - Add a real DuckDB/SQL comparison if DashPilot adopts a local analytical engine dependency.
 - Consider persisted query-result schema versioning if query outputs are later stored server-side.
-
 
 ## 2026-07-16 - dataset-parsing-normalization-2026-07-16
 
@@ -402,3 +466,78 @@ Debt remaining:
 - Implement real PDF/PNG/PPTX rendering pipelines before enabling those CTAs.
 - Implement server-side password validation before exposing password-protected share links.
 - Replace partial provider Copilot flag with runtime capability discovery if multiple providers are supported.
+
+## 2026-07-16 - e2e-harness-incident-2026-07-16
+
+Symptom:
+
+- The capability alignment gate required browser E2E coverage, but `npm.cmd run test:e2e` failed with `Missing script: "test:e2e"`.
+- After adding the runner, `npm.cmd run test` initially tried to execute `tests/e2e/capability-ctas.spec.ts` under Vitest and failed with `Playwright Test did not expect test() to be called here`.
+
+Root cause:
+
+- The phase added component tests for CTA behavior but did not add an executable browser E2E harness.
+- The first E2E spec was placed under `tests/e2e`, which matched Vitest's default test discovery until explicitly excluded.
+- Playwright also needed an explicit devDependency and installed browser binary to run reproducibly.
+
+Category:
+
+- prueba/configuracion/dependencia/entorno.
+
+Files affected:
+
+- `package.json`
+- `package-lock.json`
+- `playwright.config.ts`
+- `vitest.config.ts`
+- `.gitignore`
+- `tests/e2e/capability-ctas.spec.ts`
+- `docs/implementation-log.md`
+
+Correction applied:
+
+- Added `test:e2e` script backed by Playwright.
+- Added `@playwright/test` as an explicit pinned devDependency.
+- Added Playwright config with a local sandbox web server and empty public Supabase env vars so demo flows do not redirect to `/login`.
+- Added a real Chromium E2E covering demo upload flow, dashboard generation, share/export disabled future CTAs, real JSON/CSV downloads, and presentation navigation.
+- Excluded `tests/e2e/**` from Vitest using `configDefaults` so unit/component tests remain unchanged.
+- Ignored `playwright-report/` and `test-results/`.
+- Installed Playwright Chromium locally for this machine with `npx playwright install chromium`.
+
+Test added:
+
+- `tests/e2e/capability-ctas.spec.ts`
+
+Prevention future:
+
+- Keep browser E2E specs owned by Playwright and excluded from Vitest.
+- Require `npm.cmd run test:e2e` in any gate that claims E2E coverage.
+- Keep E2E server environment explicit about Supabase/local sandbox mode to avoid accidental auth redirects from developer `.env` files.
+
+Commands executed and validation:
+
+- `git status`: repository was dirty before the incident with unrelated changes in dashboard/data/docs/store/package files.
+- `npm run typecheck`: passed before E2E fix.
+- `npm run lint`: passed before E2E fix.
+- `npm run test`: passed before E2E fix, but no E2E was present.
+- `npm run build`: passed before E2E fix.
+- `npm.cmd run test:e2e`: failed with `Missing script: "test:e2e"`.
+- `npx playwright --version`: reported `Version 1.61.1`.
+- `npm.cmd install --save-dev @playwright/test@1.61.1`: passed; 3 packages added.
+- `npx playwright install chromium`: passed; Chromium and Chromium headless shell downloaded under the local Playwright cache.
+- `npm.cmd run test:e2e` inside sandbox: failed with `spawn EPERM` launching Chromium; rerun outside sandbox was required.
+- `npm.cmd run test:e2e` outside sandbox: initially failed because Supabase env redirected `/app/datasets/preview` to `/login`; fixed by explicit local E2E env.
+- `npm.cmd run test:e2e` outside sandbox: initially failed because the presentation CTA was a real link for demo data; test was corrected to assert real navigation instead of disabled state.
+- `npm.cmd ci` inside sandbox: failed with npm cache `EPERM` in `AppData`; rerun outside sandbox passed, 526 packages installed and 527 audited.
+- `npm.cmd install --package-lock-only`: passed, synced the pinned Playwright dependency in `package-lock.json`.
+- `npm.cmd run test`: passed after excluding E2E from Vitest, 25 files and 172 tests.
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run test`: passed again in the required validation sequence, 25 files and 172 tests.
+- `npm.cmd run build`: passed, 23 app routes generated.
+- `npm.cmd run test:e2e` outside sandbox: passed, 1 Chromium E2E test.
+
+Limitations:
+
+- `npm.cmd run test:e2e` requires an environment that can launch Chromium. In the managed sandbox it failed with `spawn EPERM`; outside the sandbox it passed.
+- Existing npm audit output still reports 3 known vulnerabilities (2 moderate, 1 high), unchanged by this incident.

@@ -7,13 +7,10 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { dashboardSpecSchema } from "@/lib/validation/schemas";
 import { getDatasetProfile, getDatasetRows } from "@/lib/supabase/datasets";
 
-function localDashboardKey(id: string) {
-  return `dashpilot:dashboard:${id}`;
-}
+const localDashboards = new Map<string, { spec: DashboardSpec; viewState: DashboardViewState; rows?: DataRow[]; profile?: DatasetProfile }>();
 
 export function saveLocalDashboard(spec: DashboardSpec, viewState: DashboardViewState, rows?: DataRow[], profile?: DatasetProfile) {
-  window.localStorage.setItem(localDashboardKey(spec.id), JSON.stringify({ spec, viewState, rows, profile }));
-  window.localStorage.setItem("dashpilot:last-dashboard-id", spec.id);
+  localDashboards.set(spec.id, { spec, viewState, rows, profile });
 }
 
 export async function createDashboardSpec(spec: DashboardSpec, viewState: DashboardViewState, projectId?: string) {
@@ -48,8 +45,7 @@ export async function createDashboardSpec(spec: DashboardSpec, viewState: Dashbo
 export async function getDashboardById(dashboardId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
-    const raw = window.localStorage.getItem(localDashboardKey(dashboardId));
-    return raw ? JSON.parse(raw) as { spec: DashboardSpec; viewState: DashboardViewState; rows?: DataRow[]; profile?: DatasetProfile } : null;
+    return localDashboards.get(dashboardId) ?? null;
   }
   const { data, error } = await supabase.from("dashboard_specs").select("*").eq("id", dashboardId).maybeSingle();
   if (error) throw new Error(`No se pudo cargar el dashboard: ${error.message}`);
@@ -102,7 +98,7 @@ export async function listDashboardsByProject(projectId: string) {
 export async function deleteDashboard(dashboardId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
-    window.localStorage.removeItem(localDashboardKey(dashboardId));
+    localDashboards.delete(dashboardId);
     return;
   }
   const { error } = await supabase.from("dashboard_specs").delete().eq("id", dashboardId);

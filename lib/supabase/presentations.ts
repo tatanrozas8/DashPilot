@@ -5,16 +5,14 @@ import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { presentationSpecSchema } from "@/lib/validation/schemas";
 
-function localPresentationKey(id: string) {
-  return `dashpilot:presentation:${id}`;
-}
+const localPresentations = new Map<string, PresentationSpec>();
 
 export async function createPresentation(spec: PresentationSpec) {
   presentationSpecSchema.parse(spec);
   const supabase = getSupabaseBrowserClient();
   const auth = await getCurrentAuthState();
   if (!supabase || !auth.user) {
-    window.localStorage.setItem(localPresentationKey(spec.id), JSON.stringify(spec));
+    localPresentations.set(spec.id, spec);
     return { mode: "local" as const, presentationId: spec.id };
   }
   const { data, error } = await supabase
@@ -36,8 +34,7 @@ export async function createPresentation(spec: PresentationSpec) {
 export async function getPresentationById(presentationId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
-    const raw = window.localStorage.getItem(localPresentationKey(presentationId));
-    return raw ? JSON.parse(raw) as PresentationSpec : null;
+    return localPresentations.get(presentationId) ?? null;
   }
   const { data, error } = await supabase.from("presentations").select("spec_json").eq("id", presentationId).maybeSingle();
   if (error) throw new Error(`No se pudo cargar la presentacion: ${error.message}`);
@@ -48,7 +45,7 @@ export async function updatePresentation(presentationId: string, spec: Presentat
   presentationSpecSchema.parse(spec);
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
-    window.localStorage.setItem(localPresentationKey(presentationId), JSON.stringify(spec));
+    localPresentations.set(presentationId, spec);
     return { mode: "local" as const, presentationId };
   }
   const { error } = await supabase.from("presentations").update({ spec_json: spec, title: spec.title }).eq("id", presentationId);

@@ -10,6 +10,7 @@ import { useAuth } from "@/components/shared/auth-provider";
 import { useToast } from "@/components/shared/toast";
 import { signOut } from "@/lib/supabase/auth";
 import { useDashPilotStore } from "@/lib/store/app-store";
+import { purgeDashPilotBrowserState } from "@/lib/security/browser-storage";
 import { cn } from "@/lib/utils";
 import { modeLabel, syncStatusLabel } from "@/lib/observability/modes";
 
@@ -45,6 +46,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const outboxCount = useDashPilotStore((state) => state.outboxCount);
   const retryPendingSync = useDashPilotStore((state) => state.retryPendingSync);
   const setViewState = useDashPilotStore((state) => state.setViewState);
+  const clearSensitiveWorkspace = useDashPilotStore((state) => state.clearSensitiveWorkspace);
   const [globalSearch, setGlobalSearch] = useState("");
   const hasProject = Boolean(activeDatasetId && rows.length);
   const projectName = hasProject ? currentProject.name : "Sin proyecto activo";
@@ -66,6 +68,8 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   async function logout() {
     try {
       await signOut();
+      purgeDashPilotBrowserState();
+      clearSensitiveWorkspace();
       toast("Sesion cerrada.");
     } catch (error) {
       toast(error instanceof Error ? error.message : "No se pudo cerrar sesion.");
@@ -143,7 +147,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
           <div className="flex items-center gap-4">
             {isLocalMode && (
               <span className="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 md:inline">
-                Modo local
+                Sandbox local
               </span>
             )}
             {configured && user && (
@@ -188,7 +192,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       <main className={cn("lg:ml-[268px]", right && "xl:mr-[360px]")}>
         {!configured && (
           <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-sm font-semibold text-amber-800 lg:px-8">
-            Supabase no esta configurado. DashPilot esta funcionando en modo local.
+            Sandbox local: los datos del dataset se mantienen en memoria y no se persisten como almacenamiento enterprise.
           </div>
         )}
         {configured && !user && (

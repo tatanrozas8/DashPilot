@@ -21,7 +21,7 @@ describe("data access", () => {
     expect(isShareLinkValid({ expiresAt: "2099-01-01", isActive: false })).toBe(false);
   });
 
-  it("falls back to local dashboard persistence without Supabase", async () => {
+  it("falls back to in-memory local dashboard persistence without Supabase", async () => {
     const spec: DashboardSpec = {
       id: "dashboard_test",
       title: "Test",
@@ -35,7 +35,7 @@ describe("data access", () => {
     const result = await persistDashboard({ spec, viewState: { filters: [] }, rows: [], profile: undefined });
 
     expect(result.mode).toBe("local");
-    expect(window.localStorage.getItem("dashpilot:dashboard:dashboard_test")).toBeTruthy();
+    expect(window.localStorage.getItem("dashpilot:dashboard:dashboard_test")).toBeNull();
   });
 
   it("loads locally saved dataset profile and rows", async () => {

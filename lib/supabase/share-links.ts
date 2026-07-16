@@ -15,16 +15,14 @@ export function isShareLinkValid(link: Pick<ShareLink, "expiresAt"> & { isActive
   return !link.expiresAt || new Date(link.expiresAt).getTime() > Date.now();
 }
 
-function localShareKey(token: string) {
-  return `dashpilot:share:${token}`;
-}
+const localShareLinks = new Map<string, ShareLink & { isActive?: boolean }>();
 
 export async function createShareLink(link: ShareLink) {
   shareLinkSchema.parse(link);
   const supabase = getSupabaseBrowserClient();
   const auth = await getCurrentAuthState();
   if (!supabase || !auth.user) {
-    window.localStorage.setItem(localShareKey(link.token), JSON.stringify(link));
+    localShareLinks.set(link.token, link);
     return { mode: "local" as const, token: link.token };
   }
 
@@ -45,8 +43,7 @@ export async function createShareLink(link: ShareLink) {
 export async function getShareLinkByToken(token: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
-    const raw = window.localStorage.getItem(localShareKey(token));
-    return raw ? JSON.parse(raw) as ShareLink : null;
+    return localShareLinks.get(token) ?? null;
   }
   const { data, error } = await supabase.from("share_links").select("*").eq("token", token).maybeSingle();
   if (error) throw new Error(`No se pudo cargar el enlace: ${error.message}`);
@@ -67,7 +64,7 @@ export async function updateShareLink(token: string, changes: Partial<ShareLink>
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
     const current = await getShareLinkByToken(token);
-    if (current) window.localStorage.setItem(localShareKey(token), JSON.stringify({ ...current, ...changes }));
+    if (current) localShareLinks.set(token, { ...current, ...changes });
     return { mode: "local" as const, token };
   }
   const { error } = await supabase
@@ -87,7 +84,7 @@ export async function disableShareLink(token: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
     const current = await getShareLinkByToken(token);
-    if (current) window.localStorage.setItem(localShareKey(token), JSON.stringify({ ...current, isActive: false }));
+    if (current) localShareLinks.set(token, { ...current, isActive: false });
     return;
   }
   const { error } = await supabase.from("share_links").update({ is_active: false }).eq("token", token);
@@ -99,16 +96,7 @@ export async function getPublicSharedDashboard(token: string): Promise<PublicSha
   if (!supabase) {
     const link = await getShareLinkByToken(token);
     if (!link || !isShareLinkValid(link)) return null;
-    const rawDashboard = window.localStorage.getItem(`dashpilot:dashboard:${link.dashboardId}`);
-    if (!rawDashboard) return null;
-    const payload = JSON.parse(rawDashboard) as Omit<PublicSharedDashboard, "link"> & { spec?: PublicSharedDashboard["dashboard"] };
-    return {
-      link,
-      dashboard: payload.dashboard ?? payload.spec,
-      viewState: payload.viewState,
-      rows: payload.rows ?? [],
-      profile: payload.profile
-    };
+    return null;
   }
 
   const { data, error } = await supabase.rpc("get_public_shared_dashboard", { share_token: token });

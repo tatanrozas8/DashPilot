@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "@/lib/supabase/auth";
 import { logDomainError, toDomainError } from "@/lib/observability/domain-error";
+import { purgeDashPilotBrowserState } from "@/lib/security/browser-storage";
+import { useDashPilotStore } from "@/lib/store/app-store";
 
 export default function LogoutPage() {
   const router = useRouter();
@@ -18,7 +20,11 @@ export default function LogoutPage() {
           syncStatus: "failed"
         }), "auth.logout");
       })
-      .finally(() => router.replace("/"));
+      .finally(() => {
+        purgeDashPilotBrowserState();
+        useDashPilotStore.getState().clearSensitiveWorkspace();
+        router.replace("/");
+      });
   }, [router]);
 
   return (

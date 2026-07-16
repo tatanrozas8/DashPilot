@@ -292,3 +292,59 @@ Debt remaining:
 
 - Add server-side durable outbox/audit storage before multi-device production sync.
 - Add conflict resolution UI if Supabase writes fail because remote state diverged.
+
+## 2026-07-16 - browser-storage-policy-2026-07-16
+
+Commit: `security: stop persisting raw datasets in browser storage`
+
+Objective:
+
+- Prevent enterprise rows, sensitive messages and full specs from remaining indefinitely in unsafe browser storage.
+- Keep normal recovery for non-sensitive preferences.
+- Make local/demo mode an explicit in-memory sandbox.
+
+Files changed:
+
+- `lib/store/app-store.ts`
+- `lib/security/browser-storage.ts`
+- `lib/data-access/index.ts`
+- `lib/data-access/outbox.ts`
+- `lib/supabase/datasets.ts`
+- `lib/supabase/dashboards.ts`
+- `lib/supabase/presentations.ts`
+- `lib/supabase/share-links.ts`
+- `app/logout/page.tsx`
+- `components/layout/AppShell.tsx`
+- `components/shared/auth-provider.tsx`
+- `docs/browser-storage-policy.md`
+- `tests/browser-storage-security.test.ts`
+- `tests/data-access.test.ts`
+- `tests/observable-failures.test.ts`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Zustand `partialize` now persists only IDs, sync metadata and non-sensitive UI preferences.
+- Legacy persisted rows, parsed workbooks, profiles, specs, messages and version history are dropped during migration.
+- Local fallback adapters keep raw rows/specs in memory only.
+- Persistent outbox storage contains sanitized metadata; sensitive retry payloads exist only in memory for the active session.
+- Logout and Supabase user changes purge DashPilot browser state.
+
+Validation:
+
+- `npm run test -- tests/browser-storage-security.test.ts tests/data-access.test.ts tests/observable-failures.test.ts`: passed, 3 files and 17 tests.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `npm run test`: passed, 23 files and 168 tests.
+- `npm run build`: passed, 23 app routes generated.
+
+Migrations/env vars:
+
+- No database migrations changed.
+- No environment variables changed.
+- Browser storage version moved to `3`; unsafe legacy keys are purged on migration/logout.
+
+Debt remaining:
+
+- Add server-side durable retry/audit storage before production multi-device offline support.
+- If IndexedDB is introduced later, gate it behind explicit sandbox opt-in with expiry and do not label it as secure enterprise storage.

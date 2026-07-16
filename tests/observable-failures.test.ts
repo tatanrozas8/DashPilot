@@ -118,7 +118,7 @@ describe("observable AI and persistence failures", () => {
       getCurrentAuthState: () => Promise.resolve({ configured: true, session: {}, user: { id: "user-1" } })
     }));
     vi.doMock("@/lib/supabase/dashboards", () => ({
-      saveLocalDashboard: vi.fn((spec: DashboardSpec) => window.localStorage.setItem(`dashpilot:dashboard:${spec.id}`, JSON.stringify({ spec }))),
+      saveLocalDashboard: vi.fn(),
       createDashboardSpec: vi.fn(() => Promise.reject(new Error("supabase down"))),
       updateDashboardSpec: vi.fn(() => Promise.reject(new Error("supabase down"))),
       getDashboardById: vi.fn(),
@@ -133,7 +133,9 @@ describe("observable AI and persistence failures", () => {
     expect(result.executionMode).toBe("degraded");
     expect(result.syncStatus).toBe("retrying");
     expect(result.correlationId).toBeTruthy();
-    expect(window.localStorage.getItem("dashpilot:sync-outbox")).toContain("dashboard");
+    const serializedOutbox = window.localStorage.getItem("dashpilot:sync-outbox:v2") ?? "";
+    expect(serializedOutbox).toContain("dashboard");
+    expect(serializedOutbox).not.toContain("ventas");
   });
 
   it("retries and clears outbox items after recovery", async () => {

@@ -31,20 +31,10 @@ export function chunkRows(rows: DataRow[], batchSize = DATASET_ROW_BATCH_SIZE) {
   return batches;
 }
 
-function localDatasetKey(datasetId: string) {
-  return `dashpilot:dataset:${datasetId}`;
-}
+const localDatasets = new Map<string, { profile: DatasetProfile; rows: DataRow[]; parsed: FileParseResult }>();
 
 function readLocalDataset(datasetId: string) {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(localDatasetKey(datasetId));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as { profile: DatasetProfile; rows: DataRow[]; parsed: FileParseResult };
-  } catch {
-    window.localStorage.removeItem(localDatasetKey(datasetId));
-    return null;
-  }
+  return localDatasets.get(datasetId) ?? null;
 }
 
 export async function createProjectIfNeeded(name = "DashPilot Workspace") {
@@ -247,7 +237,7 @@ export async function getDatasetProfile(datasetId: string) {
 export async function deleteDataset(datasetId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
-    window.localStorage.removeItem(localDatasetKey(datasetId));
+    localDatasets.delete(datasetId);
     return;
   }
   const { error } = await supabase.from("datasets").delete().eq("id", datasetId);
@@ -255,5 +245,5 @@ export async function deleteDataset(datasetId: string) {
 }
 
 export function saveLocalDataset(datasetId: string, payload: { parsed: FileParseResult; profile: DatasetProfile; rows: DataRow[] }) {
-  window.localStorage.setItem(localDatasetKey(datasetId), JSON.stringify(payload));
+  localDatasets.set(datasetId, payload);
 }

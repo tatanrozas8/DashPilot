@@ -36,7 +36,7 @@ import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { nameFromFile } from "@/lib/utils/name-from-file";
 
 export function localModeWarning() {
-  return "Supabase no esta configurado. DashPilot esta funcionando en modo local.";
+  return "Supabase no esta configurado. Sandbox local en memoria; los datos sensibles no se guardan en storage del navegador.";
 }
 
 function localResult(correlationId = createCorrelationId("local")) {
@@ -174,7 +174,6 @@ export async function persistPresentation(spec: PresentationSpec): Promise<Prese
       : { ...localResult(), presentationId: result.presentationId, warning: localModeWarning() };
   } catch (error) {
     const degraded = degradedResult(error, "No se pudo guardar la presentacion en Supabase.");
-    window.localStorage.setItem(`dashpilot:presentation:${spec.id}`, JSON.stringify(spec));
     enqueueOutbox({ kind: "presentation", spec }, degraded.correlationId);
     return { ...degraded, presentationId: spec.id };
   }
@@ -206,7 +205,6 @@ export async function persistShareLink(input: {
     return { ...observable, token: result.token, url, link };
   } catch (error) {
     const degraded = degradedResult(error, "No se pudo crear el enlace en Supabase.");
-    window.localStorage.setItem(`dashpilot:share:${token}`, JSON.stringify(link));
     enqueueOutbox({ kind: "share", link }, degraded.correlationId);
     const url = `${input.origin}/share/${token}`;
     return { ...degraded, token, url, link };

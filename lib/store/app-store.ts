@@ -32,6 +32,7 @@ import { nameFromFile } from "@/lib/utils/name-from-file";
 import { enqueueOutbox, flushOutboxDueItems, outboxCount } from "@/lib/data-access/outbox";
 import { DomainError, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import type { ExecutionMode, SyncStatus } from "@/lib/observability/modes";
+import { DASH_PILOT_PERSIST_TTL_MS, DASH_PILOT_PERSIST_VERSION, purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
 
 export interface PresentationOptions {
   theme: PresentationTheme;
@@ -65,6 +66,25 @@ interface PendingCopilotConfirmation {
 }
 
 type ColumnDictionaryChanges = Partial<Pick<DatasetColumnProfile, "businessName" | "description" | "displayName" | "synonyms" | "isHidden" | "userSemanticType" | "semanticType">>;
+type BrowserSafePersistedState = Pick<
+  DashPilotState,
+  | "activeProjectId"
+  | "activeDatasetId"
+  | "activeDashboardId"
+  | "activePresentationId"
+  | "persistenceMode"
+  | "persistenceStatus"
+  | "executionMode"
+  | "syncStatus"
+  | "lastSyncCorrelationId"
+  | "lastSyncError"
+  | "outboxCount"
+  | "isDemoMode"
+  | "presentationOptions"
+  | "shareSettings"
+  | "savedThemes"
+  | "isCopilotPanelOpen"
+> & { browserStorageExpiresAt: string };
 
 export interface ProjectSummary {
   id: string;
@@ -101,6 +121,7 @@ interface DashPilotState {
   lastSyncCorrelationId?: string;
   lastSyncError?: string;
   outboxCount: number;
+  browserStorageExpiresAt?: string;
   messages: ChatMessage[];
   chatMessages: ChatMessage[];
   versions: DashboardSpec[];
@@ -159,6 +180,7 @@ interface DashPilotState {
   applySavedDashboardTheme: (themeId: string) => void;
   deleteSavedDashboardTheme: (themeId: string) => void;
   toggleCopilotPanel: () => void;
+  clearSensitiveWorkspace: () => void;
 }
 
 function createProjectSummary(fileName: string, id = "local-project"): ProjectSummary {
@@ -347,6 +369,7 @@ function createInitialState() {
     lastSyncCorrelationId: undefined,
     lastSyncError: undefined,
     outboxCount: 0,
+    browserStorageExpiresAt: undefined,
     messages: baseMessages(),
     chatMessages: baseMessages(),
     versions: [],
@@ -375,8 +398,54 @@ function createInitialState() {
   };
 }
 
+function browserStorageExpiresAt() {
+  return new Date(Date.now() + DASH_PILOT_PERSIST_TTL_MS).toISOString();
+}
+
+function safePersistedState(state: Omit<BrowserSafePersistedState, "browserStorageExpiresAt"> & { browserStorageExpiresAt?: string }): BrowserSafePersistedState {
+  return {
+    activeProjectId: state.activeProjectId,
+    activeDatasetId: state.activeDatasetId,
+    activeDashboardId: state.activeDashboardId,
+    activePresentationId: state.activePresentationId,
+    persistenceMode: state.persistenceMode,
+    persistenceStatus: state.persistenceStatus,
+    executionMode: state.executionMode,
+    syncStatus: state.syncStatus,
+    lastSyncCorrelationId: state.lastSyncCorrelationId,
+    lastSyncError: state.lastSyncError,
+    outboxCount: state.outboxCount,
+    isDemoMode: state.isDemoMode,
+    presentationOptions: state.presentationOptions,
+    shareSettings: state.shareSettings,
+    savedThemes: state.savedThemes,
+    isCopilotPanelOpen: state.isCopilotPanelOpen,
+    browserStorageExpiresAt: browserStorageExpiresAt()
+  };
+}
+
+export function migratePersistedState(persistedState: unknown) {
+  purgeSensitiveBrowserStorage();
+  const state = persistedState as Partial<DashPilotState>;
+  if (state.browserStorageExpiresAt && new Date(state.browserStorageExpiresAt).getTime() <= Date.now()) {
+    return safePersistedState({ ...createInitialState(), browserStorageExpiresAt: browserStorageExpiresAt() });
+  }
+  const legacyProjectName = ["Analisis Comercial", "Q2", "2024"].join(" ");
+  const legacyProjectId = ["demo", "project"].join("-");
+  const legacyFileName = `${["Ventas", "Q2", "2024"].join("_")}.xlsx`;
+  const legacyProject = state.currentProject?.name === legacyProjectName || state.activeProjectId === legacyProjectId;
+  const legacyFile = state.uploadedFileName === legacyFileName || state.profile?.fileName === legacyFileName;
+  if (legacyProject || legacyFile) return safePersistedState({ ...createInitialState(), browserStorageExpiresAt: browserStorageExpiresAt() });
+
+  const safe = safePersistedState({ ...createInitialState(), ...state, browserStorageExpiresAt: browserStorageExpiresAt() });
+  return {
+    ...safe,
+    persistenceStatus: safe.persistenceStatus || "Sesion restaurada sin datos sensibles en navegador."
+  };
+}
+
 export const useDashPilotStore = create<DashPilotState>()(
-  persist(
+  persist<DashPilotState, [], [], BrowserSafePersistedState>(
     (set, get) => ({
       ...createInitialState(),
       setDataset: (rows, fileName) => {
@@ -1088,57 +1157,25 @@ export const useDashPilotStore = create<DashPilotState>()(
         });
       },
       deleteSavedDashboardTheme: (themeId) => set({ savedThemes: get().savedThemes.filter((theme) => theme.id !== themeId) }),
-      toggleCopilotPanel: () => set({ isCopilotPanelOpen: !get().isCopilotPanelOpen })
+      toggleCopilotPanel: () => set({ isCopilotPanelOpen: !get().isCopilotPanelOpen }),
+      clearSensitiveWorkspace: () => {
+        const current = get();
+        set({
+          ...createInitialState(),
+          presentationOptions: current.presentationOptions,
+          shareSettings: current.shareSettings,
+          savedThemes: current.savedThemes,
+          isCopilotPanelOpen: current.isCopilotPanelOpen,
+          persistenceStatus: "Sesion cerrada. El workspace sensible fue purgado del navegador.",
+          browserStorageExpiresAt: browserStorageExpiresAt()
+        });
+      }
     }),
     {
       name: "dashpilot-mvp",
-      version: 2,
-      migrate: (persistedState) => {
-        const state = persistedState as Partial<DashPilotState>;
-        const legacyProjectName = ["Analisis Comercial", "Q2", "2024"].join(" ");
-        const legacyProjectId = ["demo", "project"].join("-");
-        const legacyFileName = `${["Ventas", "Q2", "2024"].join("_")}.xlsx`;
-        const legacyProject = state.currentProject?.name === legacyProjectName || state.activeProjectId === legacyProjectId;
-        const legacyFile = state.uploadedFileName === legacyFileName || state.profile?.fileName === legacyFileName;
-        if (legacyProject || legacyFile) return createInitialState();
-        return { ...createInitialState(), ...state };
-      },
-      partialize: (state) => ({
-        currentProject: state.currentProject,
-        rows: state.rows,
-        currentDataset: state.currentDataset,
-        parsedDataset: state.parsedDataset,
-        selectedSheetName: state.selectedSheetName,
-        importWarnings: state.importWarnings,
-        activeProjectId: state.activeProjectId,
-        activeDatasetId: state.activeDatasetId,
-        activeDashboardId: state.activeDashboardId,
-        activePresentationId: state.activePresentationId,
-        persistenceMode: state.persistenceMode,
-        persistenceStatus: state.persistenceStatus,
-        executionMode: state.executionMode,
-        syncStatus: state.syncStatus,
-        lastSyncCorrelationId: state.lastSyncCorrelationId,
-        lastSyncError: state.lastSyncError,
-        outboxCount: state.outboxCount,
-        profile: state.profile,
-        datasetProfile: state.datasetProfile,
-        dashboard: state.dashboard,
-        dashboardSpec: state.dashboardSpec,
-        viewState: state.viewState,
-        filters: state.filters,
-        presentation: state.presentation,
-        presentationSpec: state.presentationSpec,
-        messages: state.messages,
-        chatMessages: state.chatMessages,
-        versions: state.versions,
-        isDemoMode: state.isDemoMode,
-        uploadedFileName: state.uploadedFileName,
-        presentationOptions: state.presentationOptions,
-        shareSettings: state.shareSettings,
-        savedThemes: state.savedThemes,
-        isCopilotPanelOpen: state.isCopilotPanelOpen
-      })
+      version: DASH_PILOT_PERSIST_VERSION,
+      migrate: migratePersistedState,
+      partialize: safePersistedState
     }
   )
 );

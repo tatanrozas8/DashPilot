@@ -13,8 +13,9 @@ import { saveChatMessage } from "@/lib/supabase/chat";
 import { createPresentation } from "@/lib/supabase/presentations";
 import { createShareLink } from "@/lib/supabase/share-links";
 import { nameFromFile } from "@/lib/utils/name-from-file";
+import { purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
 
-const OUTBOX_KEY = "dashpilot:sync-outbox";
+const OUTBOX_KEY = "dashpilot:sync-outbox:v2";
 const MAX_ATTEMPTS = 5;
 
 export type OutboxPayload =
@@ -25,9 +26,17 @@ export type OutboxPayload =
   | { kind: "chat"; projectId: string; dashboardId?: string; message: ChatMessage }
   | { kind: "dashboard-version"; dashboardId: string; spec: DashboardSpec; reason?: string };
 
+export type SafeOutboxPayload =
+  | { kind: "dataset"; datasetId: string; projectId?: string; fileName: string; rowCount: number }
+  | { kind: "dashboard"; dashboardId: string; projectId?: string; updateDashboardId?: string }
+  | { kind: "presentation"; presentationId: string }
+  | { kind: "share"; dashboardId: string; access: ShareLink["access"] }
+  | { kind: "chat"; projectId: string; dashboardId?: string; messageId: string }
+  | { kind: "dashboard-version"; dashboardId: string };
+
 export interface OutboxItem {
   id: string;
-  payload: OutboxPayload;
+  payload: SafeOutboxPayload;
   status: SyncStatus;
   attempts: number;
   nextAttemptAt: string;
@@ -36,6 +45,8 @@ export interface OutboxItem {
   correlationId: string;
   lastError?: string;
 }
+
+const transientPayloads = new Map<string, OutboxPayload>();
 
 function nowIso() {
   return new Date().toISOString();
@@ -81,9 +92,10 @@ export function outboxCount() {
 
 export function enqueueOutbox(payload: OutboxPayload, correlationId = createCorrelationId("sync")) {
   const timestamp = nowIso();
+  const id = createCorrelationId("outbox");
   const item: OutboxItem = {
-    id: createCorrelationId("outbox"),
-    payload,
+    id,
+    payload: safePayload(payload),
     status: "retrying",
     attempts: 0,
     nextAttemptAt: timestamp,
@@ -91,8 +103,32 @@ export function enqueueOutbox(payload: OutboxPayload, correlationId = createCorr
     updatedAt: timestamp,
     correlationId
   };
+  transientPayloads.set(id, payload);
   writeOutbox([...readOutbox(), item]);
   return item;
+}
+
+function safePayload(payload: OutboxPayload): SafeOutboxPayload {
+  if (payload.kind === "dataset") {
+    return {
+      kind: "dataset",
+      datasetId: payload.profile.id,
+      fileName: payload.profile.fileName,
+      rowCount: payload.profile.rowCount
+    };
+  }
+  if (payload.kind === "dashboard") {
+    return {
+      kind: "dashboard",
+      dashboardId: payload.updateDashboardId ?? payload.spec.id,
+      projectId: payload.projectId,
+      updateDashboardId: payload.updateDashboardId
+    };
+  }
+  if (payload.kind === "presentation") return { kind: "presentation", presentationId: payload.spec.id };
+  if (payload.kind === "share") return { kind: "share", dashboardId: payload.link.dashboardId, access: payload.link.access };
+  if (payload.kind === "chat") return { kind: "chat", projectId: payload.projectId, dashboardId: payload.dashboardId, messageId: payload.message.id };
+  return { kind: "dashboard-version", dashboardId: payload.dashboardId };
 }
 
 function updateOutboxItem(item: OutboxItem) {
@@ -100,6 +136,7 @@ function updateOutboxItem(item: OutboxItem) {
 }
 
 function removeOutboxItem(id: string) {
+  transientPayloads.delete(id);
   writeOutbox(readOutbox().filter((item) => item.id !== id));
 }
 
@@ -137,10 +174,31 @@ async function replayPayload(payload: OutboxPayload) {
 }
 
 export async function retryOutboxItem(item: OutboxItem) {
+  const payload = transientPayloads.get(item.id);
+  if (!payload) {
+    updateOutboxItem({
+      ...item,
+      status: "failed",
+      updatedAt: nowIso(),
+      lastError: "El payload sensible no se conserva en storage del navegador. Vuelve a guardar el cambio desde la sesion activa."
+    });
+    purgeSensitiveBrowserStorage();
+    return {
+      success: false as const,
+      correlationId: item.correlationId,
+      error: toDomainError(new Error("Transient outbox payload expired"), {
+        code: "persistence_failed",
+        fallbackMessage: "El cambio pendiente requiere volver a guardarse desde la sesion activa.",
+        correlationId: item.correlationId,
+        executionMode: "degraded",
+        syncStatus: "failed"
+      })
+    };
+  }
   const attempt = { ...item, status: "pending" as const, updatedAt: nowIso() };
   updateOutboxItem(attempt);
   try {
-    await replayPayload(item.payload);
+    await replayPayload(payload);
     removeOutboxItem(item.id);
     return { success: true as const, correlationId: item.correlationId };
   } catch (error) {

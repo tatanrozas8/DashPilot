@@ -6,7 +6,15 @@ import { useRouter } from "next/navigation";
 import { Check, ShieldCheck, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/shared/app-shell";
 import { persistDashboard } from "@/lib/data-access";
+import { capability } from "@/lib/product/capabilities";
 import { useDashPilotStore } from "@/lib/store/app-store";
+
+const generationSteps = [
+  "Dataset disponible",
+  "Perfil y reglas deterministicas aplicadas",
+  "DashboardSpec generado",
+  "Persistencia verificada"
+];
 
 export function GenerationPage() {
   const router = useRouter();
@@ -14,8 +22,9 @@ export function GenerationPage() {
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const rows = useDashPilotStore((state) => state.rows);
-  const [progress, setProgress] = useState(18);
+  const [completedStep, setCompletedStep] = useState(0);
   const [status, setStatus] = useState("Generando dashboard...");
+  const dashboardGeneration = capability("dashboard.generate");
 
   useEffect(() => {
     let active = true;
@@ -25,7 +34,11 @@ export function GenerationPage() {
         setStatus("Sube un dataset para comenzar.");
         return;
       }
+      setCompletedStep(1);
+      setStatus("Aplicando reglas deterministicas al perfil del dataset...");
       const dashboard = generateDashboard();
+      if (!active) return;
+      setCompletedStep(3);
       const state = useDashPilotStore.getState();
       setStatus("Guardando dashboard...");
       const result = await persistDashboard(
@@ -38,6 +51,7 @@ export function GenerationPage() {
         state.activeProjectId
       );
       if (!active) return;
+      setCompletedStep(4);
       setPersistenceState({
         activeDashboardId: result.dashboardId,
         persistenceMode: result.mode,
@@ -55,14 +69,12 @@ export function GenerationPage() {
       if (!active) return;
       setStatus(error instanceof Error ? error.message : "No se pudo generar el dashboard.");
     });
-    const timer = window.setInterval(() => setProgress((value) => Math.min(100, value + 18)), 420);
     return () => {
       active = false;
-      window.clearInterval(timer);
     };
   }, [generateDashboard, router, setPersistenceState]);
 
-  const steps = ["Leyendo archivo", "Detectando metricas", "Interpretando dimensiones", "Construyendo KPIs", "Disenando visualizaciones", "Redactando resumen ejecutivo"];
+  const progress = Math.round((completedStep / generationSteps.length) * 100);
 
   return (
     <AppShell>
@@ -81,29 +93,32 @@ export function GenerationPage() {
         {rows.length > 0 && <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
           <Sparkles className="mx-auto size-9 text-[#3d35ff]" />
           <h1 className="mt-4 text-3xl font-black tracking-[-0.04em]">Generando tu dashboard</h1>
-          <p className="mt-3 text-[#617094]">Nuestra IA esta analizando tus datos y creando una historia clara con los insights mas importantes.</p>
-          <div className="mt-10 grid gap-4 md:grid-cols-6">
-            {steps.map((step, index) => (
+          <p className="mt-3 text-[#617094]">DashPilot esta aplicando analisis deterministico sobre columnas reales para construir un DashboardSpec.</p>
+          <p className="mx-auto mt-3 max-w-2xl rounded-lg bg-[#f6f7ff] px-4 py-3 text-sm font-semibold text-[#536088]">
+            Capacidad: {dashboardGeneration.label}. Estado: {dashboardGeneration.status === "real" ? "implementada" : dashboardGeneration.status}.
+          </p>
+          <div className="mt-10 grid gap-4 md:grid-cols-4">
+            {generationSteps.map((step, index) => (
               <div key={step} className="text-center">
-                <div className={`mx-auto grid size-12 place-items-center rounded-full border ${progress >= (index + 1) * 16 ? "bg-[#3d35ff] text-white" : progress >= index * 16 ? "border-[#9f9aff] bg-[#f2f1ff] text-[#3d35ff]" : "border-[#dfe5f0] text-[#7a85a6]"}`}>
-                  {progress >= (index + 1) * 16 ? <Check className="size-5" /> : index + 1}
+                <div className={`mx-auto grid size-12 place-items-center rounded-full border ${completedStep >= index + 1 ? "bg-[#3d35ff] text-white" : completedStep === index ? "border-[#9f9aff] bg-[#f2f1ff] text-[#3d35ff]" : "border-[#dfe5f0] text-[#7a85a6]"}`}>
+                  {completedStep >= index + 1 ? <Check className="size-5" /> : index + 1}
                 </div>
-                <p className={`mt-3 text-sm font-bold ${index === 2 ? "text-[#3d35ff]" : ""}`}>{step}</p>
-                <p className="mt-1 text-xs text-[#7a85a6]">{progress >= (index + 1) * 16 ? "Completado" : progress >= index * 16 ? "En progreso..." : "Pendiente"}</p>
+                <p className={`mt-3 text-sm font-bold ${completedStep === index ? "text-[#3d35ff]" : ""}`}>{step}</p>
+                <p className="mt-1 text-xs text-[#7a85a6]">{completedStep >= index + 1 ? "Completado" : completedStep === index ? "En progreso..." : "Pendiente"}</p>
               </div>
             ))}
           </div>
           <div className="mx-auto mt-10 h-2 max-w-[780px] rounded-full bg-[#e9e8ff]">
             <div className="h-full rounded-full bg-[#3d35ff] transition-all" style={{ width: `${progress}%` }} />
           </div>
-          <p className="mt-3 text-sm text-[#7a85a6]">Procesando {progress}% - {status}</p>
+          <p className="mt-3 text-sm text-[#7a85a6]">Etapa {completedStep} de {generationSteps.length} - {status}</p>
 
           <div className="mt-10 grid gap-5 text-left lg:grid-cols-[0.9fr_1.6fr]">
             <div className="soft-card rounded-xl p-6">
               <h2 className="font-bold">Lo que estamos encontrando</h2>
-              {["Se identificaron metricas principales", "Se reviso la completitud de columnas", "Se preparan filtros desde dimensiones detectadas", "Analizando tendencias y patrones"].map((item, index) => (
+              {["Columnas normalizadas desde el archivo", "Metricas y dimensiones inferidas", "Widgets construidos desde reglas deterministicas", "Persistencia confirmada o degradada con estado visible"].map((item, index) => (
                 <p key={item} className="mt-4 flex items-center gap-3 rounded-lg p-3 text-sm text-[#34405f] last:bg-[#f0efff]">
-                  <Check className={`size-5 ${index < 3 ? "text-emerald-600" : "text-[#3d35ff]"}`} /> {item}
+                  <Check className={`size-5 ${completedStep > index ? "text-emerald-600" : "text-[#3d35ff]"}`} /> {item}
                 </p>
               ))}
             </div>

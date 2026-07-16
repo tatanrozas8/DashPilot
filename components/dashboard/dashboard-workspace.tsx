@@ -122,7 +122,7 @@ export function DashboardWorkspace() {
                 <Button onClick={startDashboardEditing} variant="secondary"><Pencil className="size-4" /> Editar dashboard</Button>
                 <Button onClick={saveDashboard} variant="secondary"><Save className="size-4" /> Guardar</Button>
                 {!isCopilotPanelOpen && (
-                  <Button onClick={toggleCopilotPanel} variant="soft"><Sparkles className="size-4" /> Copiloto IA</Button>
+                  <Button onClick={toggleCopilotPanel} variant="soft"><Sparkles className="size-4" /> Copiloto</Button>
                 )}
               </>
             )}

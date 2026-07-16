@@ -13,6 +13,7 @@ import { useDashPilotStore } from "@/lib/store/app-store";
 import { purgeDashPilotBrowserState } from "@/lib/security/browser-storage";
 import { cn } from "@/lib/utils";
 import { modeLabel, syncStatusLabel } from "@/lib/observability/modes";
+import { capability } from "@/lib/product/capabilities";
 
 const nav = [
   { href: "/app", label: "Inicio", icon: Home },
@@ -54,6 +55,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const notificationCount = profile.qualityWarnings.length + (hasProject && persistenceStatus ? 1 : 0);
   const hasCriticalUnsavedChanges = ["pending", "retrying", "failed", "conflict"].includes(syncStatus);
   const syncTone = syncStatus === "saved" ? "bg-emerald-50 text-emerald-700" : syncStatus === "failed" || syncStatus === "conflict" ? "bg-rose-50 text-rose-700" : syncStatus === "retrying" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600";
+  const copilotCapability = capability("copilot.provider");
 
   useEffect(() => {
     if (!hasCriticalUnsavedChanges) return;
@@ -113,12 +115,12 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         </nav>
         <div className="absolute bottom-8 left-5 right-5">
           <div className="rounded-lg border border-[#e3e8f5] bg-white p-4">
-            <p className="text-sm font-semibold">Plan Empresarial</p>
-            <p className="mt-4 text-xs text-[#657095]">Uso de IA este mes</p>
-            <div className="mt-3 h-1.5 rounded-full bg-[#e5e9f6]">
-              <div className="h-full w-[78%] rounded-full bg-[#3d35ff]" />
+            <p className="text-sm font-semibold">{configured ? "Workspace Supabase" : "Sandbox local"}</p>
+            <p className="mt-4 text-xs text-[#657095]">Proveedor IA</p>
+            <div className="mt-3 rounded-lg bg-[#f6f7ff] px-3 py-2 text-xs font-semibold text-[#536088]">
+              {copilotCapability.beta ? "Beta parcial" : copilotCapability.status}
             </div>
-            <p className="mt-3 text-xs text-[#657095]">2,340 / 3,000 creditos</p>
+            <p className="mt-3 text-xs leading-5 text-[#657095]">Sin consumo simulado. {copilotCapability.description}</p>
           </div>
         </div>
       </aside>

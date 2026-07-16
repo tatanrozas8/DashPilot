@@ -348,3 +348,57 @@ Debt remaining:
 
 - Add server-side durable retry/audit storage before production multi-device offline support.
 - If IndexedDB is introduced later, gate it behind explicit sandbox opt-in with expiry and do not label it as secure enterprise storage.
+
+## 2026-07-16 - capability-alignment-2026-07-16
+
+Commit: `fix: align visible capabilities with real behavior`
+
+Objective:
+
+- Ensure visible CTAs execute real behavior, are clearly beta/partial, or are disabled as future work.
+- Remove artificial success for PDF, PNG, PPTX, manifest, password-protected sharing and deterministic flows labeled as AI.
+- Keep documentation aligned with the actual MVP capability surface.
+
+Files changed:
+
+- `lib/product/capabilities.ts`
+- `components/share-export-page.tsx`
+- `components/generation-page.tsx`
+- `components/presentation/presentation-builder.tsx`
+- `components/layout/AppShell.tsx`
+- `components/landing-page.tsx`
+- `components/dashboard/dashboard-renderer.tsx`
+- `components/dashboard/dashboard-workspace.tsx`
+- `components/app-home.tsx`
+- `components/dataset-preview.tsx`
+- `README.md`
+- `PRODUCT.md`
+- `tests/capabilities.test.ts`
+- `tests/cta-capabilities.test.tsx`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- `lib/product/capabilities.ts` is the canonical catalog for real, partial, future and disabled capabilities.
+- Share/export now exposes real DashboardSpec JSON and dataset CSV downloads, while future static/manifest exports are disabled with explicit explanations.
+- Password-protected sharing is not shown as a working client-side security feature until server-side validation exists.
+- Deterministic generation, deterministic presentation adjustments and provider-backed Copilot are labeled separately.
+
+Validation:
+
+- `npm run test -- tests/capabilities.test.ts tests/cta-capabilities.test.tsx`: passed, 2 files and 3 tests.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `npm run test`: passed, 25 files and 171 tests.
+- `npm run build`: passed, 23 app routes generated.
+
+Migrations/env vars:
+
+- No database migrations changed.
+- No environment variables changed.
+
+Debt remaining:
+
+- Implement real PDF/PNG/PPTX rendering pipelines before enabling those CTAs.
+- Implement server-side password validation before exposing password-protected share links.
+- Replace partial provider Copilot flag with runtime capability discovery if multiple providers are supported.

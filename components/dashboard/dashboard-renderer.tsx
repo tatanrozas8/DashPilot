@@ -26,6 +26,7 @@ import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard
 import { barOrientation } from "@/lib/dashboard-spec/visual-config";
 import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { buildDatasetCatalog, inferSemanticLayer } from "@/lib/semantic-layer";
+import { modeLabel } from "@/lib/observability/modes";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
@@ -707,6 +708,7 @@ export function CopilotPanel() {
   const copilotIntent = useDashPilotStore((state) => state.viewState.copilotIntent);
   const setCopilotIntent = useDashPilotStore((state) => state.setCopilotIntent);
   const clearSelectedTarget = useDashPilotStore((state) => state.clearSelectedTarget);
+  const executionMode = useDashPilotStore((state) => state.executionMode);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
   const [recommendationsOpen, setRecommendationsOpen] = useState(false);
@@ -749,7 +751,7 @@ export function CopilotPanel() {
   return (
     <aside className="fixed bottom-0 right-0 top-20 z-40 flex w-full min-w-0 flex-col border-l border-[#e3e8f5] bg-white shadow-2xl shadow-slate-900/10 sm:w-[420px] xl:z-20 xl:w-[360px] xl:shadow-none">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-[#edf1fa] px-5">
-        <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-6 text-[#3d35ff]" /> Copiloto IA</h2>
+        <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-6 text-[#3d35ff]" /> Copiloto</h2>
         <div className="flex items-center gap-1">
           <button aria-label="Deshacer cambio del Copiloto" disabled={!undoCount || isCopilotThinking} onClick={undoCopilotChange} className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff] disabled:cursor-not-allowed disabled:opacity-40">
             <RotateCcw className="size-4" />
@@ -758,7 +760,7 @@ export function CopilotPanel() {
             <RotateCw className="size-4" />
           </button>
           <button
-            aria-label="Cerrar Copiloto IA"
+            aria-label="Cerrar Copiloto"
             onClick={toggleCopilotPanel}
             className="grid size-9 place-items-center rounded-md text-[#697597] transition hover:bg-[#f3f5ff]"
           >
@@ -789,6 +791,7 @@ export function CopilotPanel() {
               <p className="mt-1 text-xs leading-5 text-[#697597]">
                 {selectedTargetType !== "none" ? "Las instrucciones se aplican a la seleccion actual." : "Pide un nuevo grafico o selecciona un widget para editarlo."}
               </p>
+              <p className="mt-1 text-xs font-semibold text-[#536088]">Modo: {modeLabel(executionMode)}</p>
             </div>
             <span className={cn("shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold", selectedTargetType !== "none" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600")}>
               {selectedTargetType !== "none" ? "Listo" : "General"}
@@ -860,7 +863,7 @@ export function CopilotPanel() {
         )}
         {visibleMessages.map((message) => (
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>
-            <p className="mb-1 text-xs font-bold text-[#697597]">{message.role === "user" ? "Tu" : "Copiloto IA"}</p>
+            <p className="mb-1 text-xs font-bold text-[#697597]">{message.role === "user" ? "Tu" : "Copiloto"}</p>
             {message.content}
             {message.role === "assistant" && message.structuredAction && (
               <p className="mt-3 inline-flex rounded-full border border-[#dfe5fb] bg-[#f6f7ff] px-3 py-1 text-xs font-bold text-[#3d35ff]">
@@ -874,7 +877,7 @@ export function CopilotPanel() {
         ))}
         {isCopilotThinking && (
           <div className="mr-4 rounded-xl border border-[#e5e9f5] bg-white p-4 text-sm font-semibold leading-6 text-[#697597]">
-            <p className="mb-1 text-xs font-bold text-[#697597]">Copiloto IA</p>
+            <p className="mb-1 text-xs font-bold text-[#697597]">Copiloto</p>
             Pensando...
           </div>
         )}

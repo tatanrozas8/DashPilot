@@ -11,6 +11,7 @@ import { useDashPilotStore } from "@/lib/store/app-store";
 import { useToast } from "@/components/shared/toast";
 import { persistPresentation } from "@/lib/data-access";
 import { applyPresentationPrompt } from "@/lib/presentation-spec/apply-presentation-prompt";
+import { capability } from "@/lib/product/capabilities";
 import type { PresentationTheme } from "@/types/presentation";
 
 export function PresentationBuilder() {
@@ -25,8 +26,10 @@ export function PresentationBuilder() {
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const toast = useToast();
   const [chat, setChat] = useState("");
-  const [responses, setResponses] = useState(["Cuando tengas un dashboard, puedo ayudarte a convertirlo en una presentacion ejecutiva."]);
+  const [responses, setResponses] = useState(["Cuando tengas un dashboard, aplicare reglas locales para convertirlo en una presentacion ejecutiva."]);
   const hasDashboard = rows.length > 0 && dashboard.widgets.length > 0;
+  const canPresent = hasDashboard && presentation.slides.length > 0 && Boolean(activePresentationId);
+  const presentationSaveCapability = capability("presentation.save");
 
   const themes: Array<[PresentationTheme, string]> = [
     ["executive", "Ejecutiva"],
@@ -84,12 +87,16 @@ export function PresentationBuilder() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black tracking-[-0.04em]">Crear presentacion interactiva</h1>
-            <p className="mt-2 text-[#617094]">Convierte tu dashboard en una presentacion profesional e interactiva en minutos.</p>
+            <p className="mt-2 text-[#617094]">Convierte tu dashboard en una presentacion profesional con reglas deterministicas y guardado beta.</p>
           </div>
           <div className="flex gap-3">
-            <Button onClick={() => hasDashboard ? void saveDraft() : toast("Sube un dataset para guardar una presentacion.")} variant="secondary"><Save className="size-4" /> Guardar borrador</Button>
+            <Button onClick={() => hasDashboard ? void saveDraft() : toast("Sube un dataset para guardar una presentacion.")} variant="secondary" title={presentationSaveCapability.description}><Save className="size-4" /> Guardar borrador {presentationSaveCapability.beta ? "(beta)" : ""}</Button>
             <Button onClick={() => hasDashboard ? void savePresentation() : toast("Sube un dataset para comenzar.")}><Sparkles className="size-4" /> Generar presentacion</Button>
-            <Link href={`/app/present/${activePresentationId}`} className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#bfc7ff] bg-white px-5 text-sm font-semibold text-[#3d35ff]"><Play className="size-4" /> Presentar ahora</Link>
+            {canPresent ? (
+              <Link href={`/app/present/${activePresentationId}`} className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#bfc7ff] bg-white px-5 text-sm font-semibold text-[#3d35ff]"><Play className="size-4" /> Presentar ahora</Link>
+            ) : (
+              <button disabled className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#dce3f4] bg-white px-5 text-sm font-semibold text-[#9aa7c7]" title="Guarda una presentacion real antes de presentarla."><Play className="size-4" /> Presentar ahora</button>
+            )}
           </div>
         </div>
 
@@ -130,8 +137,8 @@ export function PresentationBuilder() {
           <section className="space-y-6">
             <div className="soft-card rounded-xl p-5">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-bold">2. Esquema propuesto por IA</h2>
-                <Button disabled title="La edicion granular de slides se realiza con el Copiloto de esta pantalla." variant="secondary" className="h-9 px-3"><Edit3 className="size-4" /> Editar esquema</Button>
+                <h2 className="font-bold">2. Esquema generado por reglas</h2>
+                <Button disabled title="La edicion granular de slides todavia no esta implementada." variant="secondary" className="h-9 px-3"><Edit3 className="size-4" /> Editar esquema</Button>
               </div>
               <div className="divide-y divide-[#edf1fa] rounded-xl border border-[#edf1fa]">
                 {(hasDashboard ? presentation.slides : []).map((slide) => (
@@ -164,7 +171,7 @@ export function PresentationBuilder() {
           </section>
 
           <aside className="soft-card rounded-xl p-5">
-            <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-6 text-[#3d35ff]" /> Copiloto IA</h2>
+            <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-6 text-[#3d35ff]" /> Ajustes deterministicos</h2>
             <div className="mt-6 space-y-3">
               {responses.map((response) => <div key={response} className="rounded-xl bg-[#f0efff] p-4 text-sm leading-6">{response}</div>)}
             </div>
@@ -198,7 +205,7 @@ export function PresentationBuilder() {
                 setChat("");
               }}
             >
-              <input className="min-w-0 flex-1 px-2 text-sm outline-none" placeholder="Pide un ajuste..." value={chat} onChange={(event) => setChat(event.target.value)} />
+              <input className="min-w-0 flex-1 px-2 text-sm outline-none" placeholder="Pide un ajuste local..." value={chat} onChange={(event) => setChat(event.target.value)} />
               <button className="rounded-lg bg-[#3d35ff] px-3 text-sm font-semibold text-white">Enviar</button>
             </form>
           </aside>

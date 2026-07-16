@@ -270,7 +270,7 @@ export function DatasetPreview() {
 
           <aside className="space-y-6">
             <section className="soft-card rounded-xl p-5">
-              <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-5 text-[#3d35ff]" /> Insights detectados por IA</h2>
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-5 text-[#3d35ff]" /> Insights detectados por reglas</h2>
               <div className="mt-4 space-y-3">
                 {(showAllInsights ? insightItems : insightItems.slice(0, 4)).map((item) => (
                   <p key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm leading-6 text-[#34405f]"><CheckCircle2 className="mr-2 inline size-4 text-emerald-600" /> {item}</p>
@@ -279,7 +279,7 @@ export function DatasetPreview() {
               <button onClick={() => setShowAllInsights((value) => !value)} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">{showAllInsights ? "Ver menos insights" : "Ver todos los insights"}</button>
             </section>
             <section className="soft-card rounded-xl p-5">
-              <h2 className="text-lg font-bold">KPIs recomendados por IA</h2>
+              <h2 className="text-lg font-bold">KPIs recomendados automaticamente</h2>
               <div className="mt-4 space-y-3">
                 {(showAllKpis ? recommendedKpis : recommendedKpis.slice(0, 4)).map((item) => (
                   <div key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm font-semibold">{item}</div>

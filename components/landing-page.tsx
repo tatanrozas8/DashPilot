@@ -80,10 +80,10 @@ export function LandingPage() {
         <section className="grid items-center gap-14 lg:grid-cols-[0.82fr_1fr]">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-[#dce0ff] bg-[#f6f5ff] px-4 py-2 text-sm font-semibold text-[#3d35ff]">
-              <Sparkles className="size-4" /> Tu copiloto de datos con IA
+              <Sparkles className="size-4" /> Analisis automatico + copiloto beta
             </div>
             <h1 className="mt-6 max-w-[680px] text-5xl font-black leading-[1.05] tracking-[-0.06em] sm:text-6xl lg:text-7xl">
-              Convierte Excel en dashboards ejecutivos con <span className="text-[#3d35ff]">IA</span>
+              Convierte Excel en dashboards ejecutivos con <span className="text-[#3d35ff]">reglas verificables</span>
             </h1>
             <p className="mt-5 max-w-[660px] text-lg leading-8 text-[#617094]">
               Sube tu archivo de Excel o CSV y obten en minutos un dashboard profesional, interactivo y listo para tomar mejores decisiones.
@@ -117,7 +117,7 @@ export function LandingPage() {
                 <Button onClick={() => inputRef.current?.click()}><FileUp className="size-4" /> Subir Excel</Button>
                 <Button variant="secondary" onClick={startDemo}><Sparkles className="size-4" /> Probar con datos de ejemplo</Button>
               </div>
-              <p className="mt-5 flex items-center justify-center gap-2 text-sm text-[#617094]"><Lock className="size-4" /> Tus datos estan seguros y nunca se comparten.</p>
+              <p className="mt-5 flex items-center justify-center gap-2 text-sm text-[#617094]"><Lock className="size-4" /> En sandbox local, el dataset permanece en memoria del navegador.</p>
               {status && <p className="mt-4 text-sm font-semibold text-[#3d35ff]">{status}</p>}
               {error && <p className="mt-4 text-sm font-semibold text-red-600">{error}</p>}
             </div>
@@ -166,10 +166,10 @@ export function LandingPage() {
                 </div>
               </div>
               <div className="rounded-xl border border-[#e3e8f5] p-5">
-                <h3 className="font-bold">Copiloto IA</h3>
+                <h3 className="font-bold">Copiloto beta</h3>
                 <div className="mt-5 space-y-3 text-sm text-[#34405f]">
                   <div className="rounded-xl bg-[#f0efff] p-4">Haz que este dashboard sea mas ejecutivo.</div>
-                  <div className="rounded-xl border border-[#e3e8f5] p-4">Actualice KPIs, comparaciones y resumen ejecutivo.</div>
+                  <div className="rounded-xl border border-[#e3e8f5] p-4">Aplica ajustes deterministas o proveedor IA cuando este configurado.</div>
                 </div>
               </div>
             </div>
@@ -178,8 +178,8 @@ export function LandingPage() {
 
         <section className="mt-16 grid gap-7 lg:grid-cols-3">
           {([
-            [WandSparkles, "Generacion automatica", "La IA analiza tus datos y construye dashboards con KPIs, graficos y tablas relevantes."],
-            [MessageCircle, "Edicion por chat", "Pide cambios en lenguaje natural. DashPilot actualiza el spec al instante."],
+            [WandSparkles, "Generacion automatica", "El motor deterministico perfila tus datos y construye dashboards con KPIs, graficos y tablas relevantes."],
+            [MessageCircle, "Edicion asistida", "Pide cambios en lenguaje natural. DashPilot muestra el modo usado antes de aplicar resultados."],
             [Presentation, "Presentaciones interactivas", "Presenta, filtra y explora datos en vivo con dashboards disenados para impresionar."]
           ] as Array<[LucideIcon, string, string]>).map(([Icon, title, copy]) => (
             <article key={String(title)} className="soft-card rounded-2xl p-8">

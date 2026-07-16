@@ -99,7 +99,7 @@ export function AppHome() {
         <section className="mt-7 grid gap-5 md:grid-cols-4">
           {([
             [Database, "Datasets", "/app/datasets/preview", hasProject ? "Vista previa y perfilado" : "Sube un dataset para comenzar"],
-            [BarChart3, "Dashboards", dashboardHref, hasProject ? "KPIs y Copiloto IA" : "Aún no hay dashboards"],
+            [BarChart3, "Dashboards", dashboardHref, hasProject ? "KPIs y Copiloto" : "Aún no hay dashboards"],
             [MonitorPlay, "Presentaciones", presentationHref, hasProject ? "Slides vivos" : "Aún no hay presentaciones"],
             [Share2, "Compartidos", shareHref, hasProject ? "Enlaces y exportacion" : "Aún no hay enlaces compartidos"]
           ] as Array<[LucideIcon, string, string, string]>).map(([Icon, title, href, copy]) => (

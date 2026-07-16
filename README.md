@@ -38,11 +38,21 @@ The browser parser validates the file, detects workbook sheets, normalizes colum
 Current MVP limits:
 
 - Up to 50,000 rows are processed in-browser.
-- Dataset preview renders the first 100 rows.
+- Dataset preview renders an explicit bounded sample.
 - Supabase persistence is active when env vars and Auth session are available.
-- The app remains functional without Supabase env vars by using Zustand/localStorage.
-- AI Copilot actions are mocked and operate on the current `DashboardSpec`.
+- The app remains functional without Supabase env vars as an explicit local sandbox. Raw rows are kept in memory, while browser persistence is limited to non-sensitive preferences and resumable non-sensitive metadata.
+- Dashboard generation is deterministic: it builds a `DashboardSpec` from the current `DatasetProfile` and rows. Copilot provider mode is beta/partial; when no provider is configured, deterministic/degraded mode is surfaced to the user.
 - Max upload size is 25MB for the browser MVP.
+
+## Capability Status
+
+Visible controls must match implemented behavior:
+
+- Real: upload CSV/XLS/XLSX, demo dataset, virtualized preview, deterministic dashboard generation, DashboardSpec JSON export, dataset CSV export, interactive presentation generation, presentation mode.
+- Beta/partial: Supabase/local sandbox persistence, interactive share links, provider-backed Copilot when configured.
+- Future/disabled: password-protected sharing, static PDF export, PNG export, PPTX export, and interactive manifest export.
+
+Disabled future controls stay visible only when they explain what is missing. DashPilot does not show success toasts for unavailable exports or client-only security placeholders.
 
 ## Environment
 
@@ -159,7 +169,8 @@ Important folders:
 - `lib/dashboard-spec/`: dashboard generation from real `DatasetProfile` and rows.
 - `lib/presentation-spec/`: live presentation generation from dashboard widgets.
 - `lib/supabase/`: Supabase Auth, datasets, dashboards, share links, presentations, chat, and compatibility persistence helpers.
-- `lib/data-access/`: local-first adapter that chooses Supabase when configured/authenticated and localStorage otherwise.
+- `lib/data-access/`: local-first adapter that chooses Supabase when configured/authenticated and otherwise exposes explicit local/degraded modes.
+- `lib/product/capabilities.ts`: canonical catalog of real, partial, future, and disabled product capabilities used by UI/tests/docs.
 - `lib/validation/`: Zod schemas for persisted structured payloads.
 - `components/dashboard/`: renderer, filters, widgets, empty states, and Copilot panel.
 - `lib/store/app-store.ts`: Zustand state and local persistence.
@@ -202,6 +213,8 @@ Current tests cover:
 - Local-first data access fallback.
 - Share expiration validation.
 - Real CSV fixture pipeline QA.
+- Capability catalog snapshot.
+- CTA behavior for main share/export and presentation controls.
 
 Fixture:
 
@@ -213,5 +226,6 @@ tests/fixtures/ventas_real_test.csv
 ## Current Production Gaps
 
 - Supabase types are represented by a permissive placeholder until generated from a real project.
-- Static PDF/PNG/PPTX export buttons are UI actions, not full export pipelines yet.
+- Static PDF/PNG/PPTX export and interactive manifest are disabled until real rendering/import pipelines exist.
+- Password-protected share is hidden/disabled until server-side password validation exists.
 - Public share by token is implemented through RPC, but download/export enforcement should be hardened server-side before production.

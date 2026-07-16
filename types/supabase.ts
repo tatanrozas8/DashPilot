@@ -14,6 +14,7 @@ export interface Database {
       profiles: Table;
       projects: Table;
       datasets: Table;
+      dataset_versions: Table;
       dataset_sheets: Table;
       dataset_columns: Table;
       dataset_rows: Table;
@@ -30,6 +31,10 @@ export interface Database {
     Functions: {
       get_public_shared_dashboard: {
         Args: { share_token: string };
+        Returns: Json;
+      };
+      activate_dataset_version: {
+        Args: { target_dataset_id: string; target_version_id: string; expected_active_version_id: string | null };
         Returns: Json;
       };
     };

@@ -34,6 +34,7 @@ export interface DashboardSpec {
   subtitle?: string;
   businessDomain?: string;
   datasetId: string;
+  datasetVersionId?: string;
   design?: DashboardDesignSettings;
   globalFilters: DashboardFilterConfig[];
   widgets: DashboardWidget[];

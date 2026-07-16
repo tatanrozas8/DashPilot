@@ -44,6 +44,7 @@ export function AppHome() {
       const result = await persistParsedDataset({ file, parsed });
       setPersistenceState({
         activeDatasetId: result.datasetId,
+        activeDatasetVersionId: result.datasetVersionId ?? "",
         activeProjectId: result.projectId ?? "local-project",
         persistenceMode: result.mode,
         persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Guardado en Supabase" : "Modo local"),

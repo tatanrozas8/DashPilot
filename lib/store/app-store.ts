@@ -70,6 +70,7 @@ type BrowserSafePersistedState = Pick<
   DashPilotState,
   | "activeProjectId"
   | "activeDatasetId"
+  | "activeDatasetVersionId"
   | "activeDashboardId"
   | "activePresentationId"
   | "persistenceMode"
@@ -112,6 +113,7 @@ interface DashPilotState {
   importWarnings: string[];
   activeProjectId: string;
   activeDatasetId: string;
+  activeDatasetVersionId: string;
   activeDashboardId: string;
   activePresentationId: string;
   persistenceMode: "local" | "supabase" | "degraded";
@@ -160,7 +162,7 @@ interface DashPilotState {
   removeDashboardDraftWidget: (widgetId: string) => void;
   setDashboardDraftWidgetHidden: (widgetId: string, hidden: boolean) => void;
   commitDashboardEditing: () => DashboardSpec | null;
-  setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus" | "executionMode" | "syncStatus" | "lastSyncCorrelationId" | "lastSyncError" | "outboxCount">>) => void;
+  setPersistenceState: (state: Partial<Pick<DashPilotState, "activeProjectId" | "activeDatasetId" | "activeDatasetVersionId" | "activeDashboardId" | "activePresentationId" | "persistenceMode" | "persistenceStatus" | "executionMode" | "syncStatus" | "lastSyncCorrelationId" | "lastSyncError" | "outboxCount">>) => void;
   retryPendingSync: () => Promise<void>;
   setViewState: (viewState: Partial<DashboardViewState>) => void;
   selectDashboardTarget: (targetType: DashboardTargetType, targetId?: string) => void;
@@ -360,6 +362,7 @@ function createInitialState() {
     importWarnings: [],
     activeProjectId: "",
     activeDatasetId: "",
+    activeDatasetVersionId: "",
     activeDashboardId: "",
     activePresentationId: "",
     persistenceMode: "local" as const,
@@ -406,6 +409,7 @@ function safePersistedState(state: Omit<BrowserSafePersistedState, "browserStora
   return {
     activeProjectId: state.activeProjectId,
     activeDatasetId: state.activeDatasetId,
+    activeDatasetVersionId: state.activeDatasetVersionId,
     activeDashboardId: state.activeDashboardId,
     activePresentationId: state.activePresentationId,
     persistenceMode: state.persistenceMode,
@@ -470,6 +474,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           presentationSpec: presentation,
           activeProjectId: project.id,
           activeDatasetId: profile.id,
+          activeDatasetVersionId: profile.datasetVersionId ?? "",
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           messages,
@@ -510,6 +515,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           importWarnings: parsed.warnings,
           activeProjectId: project.id,
           activeDatasetId: profile.id,
+          activeDatasetVersionId: profile.datasetVersionId ?? "",
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           persistenceMode: "local",
@@ -559,6 +565,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           parsedDataset: nextParsed,
           selectedSheetName: sheetName,
           activeDatasetId: profile.id,
+          activeDatasetVersionId: profile.datasetVersionId ?? "",
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           versions: [dashboard],
@@ -595,6 +602,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           importWarnings: [],
           activeProjectId: project.id,
           activeDatasetId: profile.id,
+          activeDatasetVersionId: profile.datasetVersionId ?? "",
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           persistenceMode: "local",
@@ -614,8 +622,8 @@ export const useDashPilotStore = create<DashPilotState>()(
         });
       },
       generateDashboard: () => {
-        const { profile, rows } = get();
-        const dashboard = generateDashboardSpec(profile, rows);
+        const { activeDatasetVersionId, profile, rows } = get();
+        const dashboard = generateDashboardSpec({ ...profile, datasetVersionId: activeDatasetVersionId || profile.datasetVersionId }, rows, { datasetVersionId: activeDatasetVersionId || profile.datasetVersionId });
         const presentation = generatePresentationSpec(dashboard);
         set({
           dashboard,
@@ -649,6 +657,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           presentation,
           presentationSpec: presentation,
           activeDatasetId: dashboard.datasetId,
+          activeDatasetVersionId: dashboard.datasetVersionId ?? nextProfile.datasetVersionId ?? "",
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           isDemoMode: false,
@@ -676,6 +685,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           presentation,
           presentationSpec: presentation,
           activeDatasetId: datasetId,
+          activeDatasetVersionId: profile.datasetVersionId ?? "",
           activeDashboardId: dashboard.id,
           activePresentationId: presentation.id,
           uploadedFileName: profile.fileName,

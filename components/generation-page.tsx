@@ -45,6 +45,8 @@ export function GenerationPage() {
         {
           spec: dashboard,
           viewState: state.viewState,
+          datasetId: state.activeDatasetId || dashboard.datasetId,
+          datasetVersionId: state.activeDatasetVersionId || dashboard.datasetVersionId,
           rows: state.rows,
           profile: state.profile
         },

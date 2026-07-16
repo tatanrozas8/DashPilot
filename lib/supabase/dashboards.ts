@@ -27,6 +27,7 @@ export async function createDashboardSpec(spec: DashboardSpec, viewState: Dashbo
     .insert({
       project_id: projectId,
       dataset_id: spec.datasetId,
+      dataset_version_id: spec.datasetVersionId,
       user_id: auth.user.id,
       title: spec.title,
       description: spec.subtitle,
@@ -51,9 +52,10 @@ export async function getDashboardById(dashboardId: string) {
   if (error) throw new Error(`No se pudo cargar el dashboard: ${error.message}`);
   if (!data) return null;
   const datasetId = data.dataset_id as string;
-  const [rows, profile] = await Promise.all([getDatasetRows(datasetId), getDatasetProfile(datasetId)]);
+  const datasetVersionId = typeof data.dataset_version_id === "string" ? data.dataset_version_id : undefined;
+  const [rows, profile] = await Promise.all([getDatasetRows(datasetId, datasetVersionId), getDatasetProfile(datasetId, datasetVersionId)]);
   return {
-    spec: data.spec_json as DashboardSpec,
+    spec: { ...(data.spec_json as DashboardSpec), datasetId, datasetVersionId: datasetVersionId ?? (data.spec_json as DashboardSpec).datasetVersionId },
     viewState: data.view_state_json as DashboardViewState,
     rows,
     profile: profile ?? undefined
@@ -69,7 +71,7 @@ export async function updateDashboardSpec(dashboardId: string, spec: DashboardSp
   }
   const { error } = await supabase
     .from("dashboard_specs")
-    .update({ spec_json: spec, view_state_json: viewState, title: spec.title, description: spec.subtitle })
+    .update({ spec_json: spec, view_state_json: viewState, title: spec.title, description: spec.subtitle, dataset_version_id: spec.datasetVersionId })
     .eq("id", dashboardId);
   if (error) throw new Error(`No se pudo actualizar el dashboard: ${error.message}`);
   await createDashboardVersion(dashboardId, spec, "actualizacion manual");

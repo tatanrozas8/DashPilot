@@ -27,6 +27,7 @@ export const datasetColumnProfileSchema = z.object({
 
 export const datasetProfileSchema = z.object({
   id: z.string(),
+  datasetVersionId: z.string().optional(),
   fileName: z.string(),
   rowCount: z.number(),
   columnCount: z.number(),
@@ -38,6 +39,43 @@ export const datasetProfileSchema = z.object({
   qualityWarnings: z.array(z.string()),
   qualityScore: z.number().min(0).max(100),
   createdAt: z.string()
+});
+
+export const datasetImportStatusSchema = z.enum(["created", "uploading", "processing", "validating", "ready", "failed", "cancelled", "superseded"]);
+
+export const datasetVersionSchema = z.object({
+  id: z.string(),
+  datasetId: z.string(),
+  versionNumber: z.number().int().positive(),
+  status: datasetImportStatusSchema,
+  checksum: z.string().min(32),
+  schemaHash: z.string().min(32),
+  rowCount: z.number().int().nonnegative(),
+  columnCount: z.number().int().nonnegative(),
+  fileName: z.string(),
+  fileType: z.enum(["csv", "xlsx", "xls"]),
+  fileSize: z.number().int().nonnegative(),
+  selectedSheetName: z.string(),
+  idempotencyKey: z.string().optional(),
+  profile: datasetProfileSchema.optional(),
+  storagePath: z.string().optional(),
+  errorMessage: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  readyAt: z.string().optional(),
+  failedAt: z.string().optional(),
+  cancelledAt: z.string().optional(),
+  supersededAt: z.string().optional()
+}).superRefine((version, context) => {
+  if ((version.status === "ready" || version.status === "superseded") && !version.readyAt) {
+    context.addIssue({ code: "custom", path: ["readyAt"], message: "Una version ready/superseded debe registrar readyAt." });
+  }
+  if (version.status === "failed" && !version.failedAt) {
+    context.addIssue({ code: "custom", path: ["failedAt"], message: "Una version failed debe registrar failedAt." });
+  }
+  if (version.status === "cancelled" && !version.cancelledAt) {
+    context.addIssue({ code: "custom", path: ["cancelledAt"], message: "Una version cancelled debe registrar cancelledAt." });
+  }
 });
 
 export const dashboardFilterSchema = z.object({
@@ -77,6 +115,7 @@ export const dashboardSpecSchema = z.object({
   subtitle: z.string().optional(),
   businessDomain: z.string().optional(),
   datasetId: z.string(),
+  datasetVersionId: z.string().optional(),
   design: z.object({
     density: z.enum(["compact", "comfortable"]).optional(),
     accentColor: z.enum(["indigo", "emerald", "sky", "slate"]).optional(),

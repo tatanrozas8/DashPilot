@@ -130,6 +130,7 @@ export interface DatasetColumnProfile {
 
 export interface DatasetProfile {
   id: string;
+  datasetVersionId?: string;
   fileName: string;
   rowCount: number;
   columnCount: number;
@@ -145,10 +146,51 @@ export interface DatasetProfile {
 
 export interface DatasetRecord {
   id: string;
+  activeVersionId?: string;
   fileName: string;
   fileType: string;
   fileSize?: number;
   selectedSheetName?: string;
+  createdAt: string;
+}
+
+export type DatasetImportStatus = "created" | "uploading" | "processing" | "validating" | "ready" | "failed" | "cancelled" | "superseded";
+
+export interface DatasetVersion {
+  id: string;
+  datasetId: string;
+  versionNumber: number;
+  status: DatasetImportStatus;
+  checksum: string;
+  schemaHash: string;
+  rowCount: number;
+  columnCount: number;
+  fileName: string;
+  fileType: FileParseResult["fileType"];
+  fileSize: number;
+  selectedSheetName: string;
+  idempotencyKey?: string;
+  profile?: DatasetProfile;
+  storagePath?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  readyAt?: string;
+  failedAt?: string;
+  cancelledAt?: string;
+  supersededAt?: string;
+}
+
+export interface DatasetImportJob {
+  id: string;
+  datasetId: string;
+  datasetVersionId: string;
+  status: DatasetImportStatus;
+  progress: number;
+  idempotencyKey?: string;
+  errorMessage?: string;
+  startedAt?: string;
+  finishedAt?: string;
   createdAt: string;
 }
 

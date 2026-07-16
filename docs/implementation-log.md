@@ -541,3 +541,82 @@ Limitations:
 
 - `npm.cmd run test:e2e` requires an environment that can launch Chromium. In the managed sandbox it failed with `spawn EPERM`; outside the sandbox it passed.
 - Existing npm audit output still reports 3 known vulnerabilities (2 moderate, 1 high), unchanged by this incident.
+
+## 2026-07-16 - dataset-versions-lifecycle-2026-07-16
+
+Commit: `feat: add immutable dataset versions and import lifecycle`
+
+Objective:
+
+- Create a reproducible source of truth for each dataset import.
+- Prevent failed or partial imports from contaminating the active dataset version.
+- Pin dashboards to the dataset version that powered their figures.
+
+Files changed:
+
+- `types/dataset.ts`
+- `types/dashboard.ts`
+- `types/supabase.ts`
+- `lib/datasets/versioning.ts`
+- `lib/validation/schemas.ts`
+- `lib/dashboard-spec/generate-dashboard-spec.ts`
+- `lib/supabase/datasets.ts`
+- `lib/supabase/dashboards.ts`
+- `lib/data-access/index.ts`
+- `lib/data-access/types.ts`
+- `lib/store/app-store.ts`
+- `components/landing-page.tsx`
+- `components/app-home.tsx`
+- `components/generation-page.tsx`
+- `supabase/migrations/0003_dataset_versions_lifecycle.sql`
+- `tests/dataset-versions.test.ts`
+- `tests/dataset-versions-migration.test.ts`
+- `tests/dashboard-spec.test.ts`
+- `README.md`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added immutable `dataset_versions` with checksum, schema hash, version number, row/column counts, status timestamps, profile JSON, storage path and idempotency key.
+- Import status is explicit: `created`, `uploading`, `processing`, `validating`, `ready`, `failed`, `cancelled`, `superseded`.
+- Dataset rows, columns, sheets, import jobs and dashboards now link to `dataset_version_id`.
+- New imports write to a candidate version and activate only after validation reaches `ready`.
+- Activation uses `activate_dataset_version(target_dataset_id, target_version_id, expected_active_version_id)` for optimistic concurrency and rollback to a superseded ready version.
+- Dashboard persistence normalizes `datasetId` and `datasetVersionId` before saving so historical dashboards can load the same rows/profile later.
+- Local mode stores version metadata in memory only, preserving the browser storage policy.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test -- tests/dataset-versions.test.ts tests/dataset-versions-migration.test.ts tests/data-access.test.ts tests/dashboard-spec.test.ts`: passed, 4 files and 16 tests.
+- `npm run test -- tests/dataset-versions.test.ts tests/data-access.test.ts tests/dashboard-spec.test.ts tests/browser-storage-security.test.ts`: passed, 4 files and 19 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 26 files and 179 tests.
+- `npm run build`: passed, 23 app routes generated.
+- `npm run test:e2e`: failed in sandbox because Chromium launch returned `spawn EPERM`.
+- `npm.cmd run test:e2e` outside sandbox: passed, 1 Chromium E2E test.
+
+Known failures:
+
+- PowerShell `npm run test:e2e` failed because `npm.ps1` execution is disabled by system policy; use `npm.cmd`.
+- Sandbox Playwright launch failed with `browserType.launch: spawn EPERM`; outside-sandbox rerun passed.
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- Added `supabase/migrations/0003_dataset_versions_lifecycle.sql`.
+- Existing datasets are backfilled with a legacy `ready` version and `active_version_id`.
+- Existing rows, columns, sheets, dashboards and import jobs are backfilled to the active version.
+- No environment variables changed.
+
+Security/privacy notes:
+
+- Version checksums and schema hashes are derived from normalized import content and schema, not service keys or tenant secrets.
+- Public share RPC now resolves rows/profile through the dashboard's `dataset_version_id`.
+- No service-role key or sensitive rows are exposed to the client beyond existing authenticated/local data flows.
+
+Debt remaining:
+
+- Add database-level tests with a real Supabase/Postgres harness to execute RLS, trigger and RPC behavior end to end.
+- Consider a server-side import worker before production-scale multi-tenant uploads.
+- Add a visible dashboard metadata panel that displays `datasetVersionId`, checksum and activated timestamp for business users.

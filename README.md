@@ -94,6 +94,7 @@ Included tables cover:
 - `profiles`
 - `projects`
 - `datasets`
+- `dataset_versions`
 - `dataset_sheets`
 - `dataset_columns`
 - `dataset_rows`
@@ -135,7 +136,7 @@ dashboard-files
 The app uploads originals to:
 
 ```txt
-{user_id}/{project_id}/{dataset_id}/{original_filename}
+{user_id}/{project_id}/{dataset_id}/{dataset_version_id}/{original_filename}
 ```
 
 Public sharing uses the SQL RPC:
@@ -144,7 +145,7 @@ Public sharing uses the SQL RPC:
 get_public_shared_dashboard(share_token text)
 ```
 
-It returns only the dashboard spec, view state, profile, rows needed for rendering, and share settings for an active, non-expired public token.
+It returns only the dashboard spec, view state, versioned profile, versioned rows needed for rendering, and share settings for an active, non-expired public token.
 
 Generate real Supabase types after creating a project:
 
@@ -157,7 +158,7 @@ npx supabase gen types typescript --project-id TU_PROJECT_ID --schema public > t
 The core rule is:
 
 ```txt
-Dataset + DatasetProfile + DashboardSpec + ViewState + PresentationSpec = live dashboard or presentation
+Dataset + immutable DatasetVersion + DatasetProfile + DashboardSpec + ViewState + PresentationSpec = live dashboard or presentation
 ```
 
 Important folders:

@@ -13,6 +13,7 @@ export interface PersistenceResult extends ObservableOperation {
 
 export interface DatasetPersistResult extends PersistenceResult {
   datasetId: string;
+  datasetVersionId?: string;
   projectId?: string;
   storagePath?: string;
   profile: DatasetProfile;
@@ -36,11 +37,14 @@ export interface SharePersistResult extends PersistenceResult {
 export interface ParsedDatasetPayload {
   file?: File;
   parsed: FileParseResult;
+  idempotencyKey?: string;
 }
 
 export interface PersistedDashboardPayload {
   spec: DashboardSpec;
   viewState: DashboardViewState;
+  datasetId?: string;
+  datasetVersionId?: string;
   rows?: DataRow[];
   profile?: DatasetProfile;
 }

@@ -16,18 +16,23 @@ import type {
 import { enqueueOutbox } from "@/lib/data-access/outbox";
 import { createCorrelationId, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import {
+  activateReadyDatasetVersion,
   buildDatasetProfile,
   createDataset,
+  createDatasetVersion,
   createProjectIfNeeded,
+  findDatasetVersionByImportIdentity,
   saveDatasetColumns,
   saveDatasetProfile,
   saveDatasetRows,
   saveDatasetSheets,
   saveLocalDataset,
+  updateDatasetVersionStatus,
   uploadOriginalFile,
   getDatasetProfile,
   getDatasetRows
 } from "@/lib/supabase/datasets";
+import { buildDatasetImportIdentity, createDatasetVersionDraft, transitionDatasetVersion } from "@/lib/datasets/versioning";
 import { createDashboardSpec, getDashboardById, saveLocalDashboard, updateDashboardSpec } from "@/lib/supabase/dashboards";
 import { createPresentation } from "@/lib/supabase/presentations";
 import { createShareLink, createShareLinkToken, getPublicSharedDashboard } from "@/lib/supabase/share-links";
@@ -76,41 +81,105 @@ function degradedResult(error: unknown, fallbackMessage: string, correlationId =
   };
 }
 
-export async function persistParsedDataset({ file, parsed }: ParsedDatasetPayload): Promise<DatasetPersistResult> {
+export async function persistParsedDataset({ file, parsed, idempotencyKey }: ParsedDatasetPayload): Promise<DatasetPersistResult> {
   const { sheet, rows, profile } = buildDatasetProfile(parsed);
+  const identity = await buildDatasetImportIdentity({ parsed, selectedSheet: sheet, rows, profile, idempotencyKey });
   const configured = isSupabaseConfigured();
   const auth = await getCurrentAuthState();
 
   if (!configured || !auth.user) {
-    saveLocalDataset(profile.id, { parsed, profile, rows });
+    const localVersion = transitionDatasetVersion(
+      transitionDatasetVersion(
+        transitionDatasetVersion(
+          createDatasetVersionDraft({
+            datasetId: profile.id,
+            parsed,
+            selectedSheet: sheet,
+            rows,
+            profile,
+            checksum: identity.checksum,
+            schemaHash: identity.schemaHash,
+            versionNumber: 1,
+            idempotencyKey: identity.idempotencyKey
+          }),
+          "processing"
+        ),
+        "validating"
+      ),
+      "ready"
+    );
+    const versionedProfile = { ...profile, datasetVersionId: localVersion.id };
+    saveLocalDataset(profile.id, { parsed, profile: versionedProfile, rows, version: localVersion });
     return {
       ...localResult(),
       datasetId: profile.id,
+      datasetVersionId: localVersion.id,
       projectId: "local-project",
-      profile,
+      profile: versionedProfile,
       rows,
       warning: configured ? "Inicia sesion para guardar este dataset en Supabase." : localModeWarning()
     };
   }
 
+  let pendingVersionId: string | undefined;
+  let pendingVersionStatus: "created" | "uploading" | "processing" | "validating" | undefined;
   try {
     const project = await createProjectIfNeeded(nameFromFile(parsed.fileName));
+    const existingVersion = await findDatasetVersionByImportIdentity(project.projectId, identity);
+    if (existingVersion?.status === "ready" || existingVersion?.status === "superseded") {
+      const versionedProfile = { ...profile, datasetVersionId: existingVersion.id };
+      saveLocalDataset(existingVersion.datasetId, { parsed, profile: versionedProfile, rows, version: existingVersion });
+      return { ...providerResult(), datasetId: existingVersion.datasetId, datasetVersionId: existingVersion.id, projectId: project.projectId, storagePath: existingVersion.storagePath, profile: versionedProfile, rows };
+    }
+
     const dataset = await createDataset(project.projectId, { ...parsed, selectedSheetName: sheet.name }, profile);
-    const storagePath = await uploadOriginalFile(file, project.projectId, dataset.datasetId);
-    await saveDatasetSheets(dataset.datasetId, { ...parsed, selectedSheetName: sheet.name });
-    await saveDatasetColumns(dataset.datasetId, profile);
-    await saveDatasetRows(dataset.datasetId, rows);
-    await saveDatasetProfile(dataset.datasetId, profile);
-    return { ...providerResult(), datasetId: dataset.datasetId, projectId: project.projectId, storagePath, profile, rows };
+    const version = await createDatasetVersion({
+      projectId: project.projectId,
+      datasetId: dataset.datasetId,
+      parsed: { ...parsed, selectedSheetName: sheet.name },
+      selectedSheet: sheet,
+      profile,
+      checksum: identity.checksum,
+      schemaHash: identity.schemaHash,
+      idempotencyKey: identity.idempotencyKey
+    });
+    if (version.mode === "local") throw new Error("No se pudo crear version Supabase del dataset.");
+    pendingVersionId = version.datasetVersion.id;
+    pendingVersionStatus = "created";
+    await updateDatasetVersionStatus(pendingVersionId, "created", "uploading");
+    pendingVersionStatus = "uploading";
+    const storagePath = await uploadOriginalFile(file, project.projectId, dataset.datasetId, pendingVersionId);
+    await updateDatasetVersionStatus(pendingVersionId, "uploading", "processing", { storagePath });
+    pendingVersionStatus = "processing";
+    const versionedProfile = { ...profile, datasetVersionId: pendingVersionId };
+    await saveDatasetSheets(dataset.datasetId, { ...parsed, selectedSheetName: sheet.name }, pendingVersionId);
+    await saveDatasetColumns(dataset.datasetId, versionedProfile, pendingVersionId);
+    await saveDatasetRows(dataset.datasetId, rows, undefined, undefined, pendingVersionId);
+    await updateDatasetVersionStatus(pendingVersionId, "processing", "validating");
+    pendingVersionStatus = "validating";
+    await saveDatasetProfile(dataset.datasetId, versionedProfile, pendingVersionId);
+    await updateDatasetVersionStatus(pendingVersionId, "validating", "ready");
+    await activateReadyDatasetVersion(dataset.datasetId, pendingVersionId, null);
+    saveLocalDataset(dataset.datasetId, { parsed, profile: versionedProfile, rows, version: { ...version.datasetVersion, status: "ready", profile: versionedProfile, storagePath } });
+    return { ...providerResult(), datasetId: dataset.datasetId, datasetVersionId: pendingVersionId, projectId: project.projectId, storagePath, profile: versionedProfile, rows };
   } catch (error) {
+    if (pendingVersionId && pendingVersionStatus) {
+      try {
+        await updateDatasetVersionStatus(pendingVersionId, pendingVersionStatus, "failed", { errorMessage: error instanceof Error ? error.message : "Importacion fallida." });
+      } catch (statusError) {
+        logDomainError(toDomainError(statusError, { code: "persistence_failed", fallbackMessage: "No se pudo marcar la version fallida.", correlationId: createCorrelationId("sync") }), "data-access.persist.dataset-version");
+      }
+    }
     const degraded = degradedResult(error, "No se pudo guardar en Supabase.");
-    saveLocalDataset(profile.id, { parsed, profile, rows });
-    enqueueOutbox({ kind: "dataset", parsed, profile, rows }, degraded.correlationId);
+    const fallbackProfile = pendingVersionId ? { ...profile, datasetVersionId: pendingVersionId } : profile;
+    saveLocalDataset(profile.id, { parsed, profile: fallbackProfile, rows });
+    enqueueOutbox({ kind: "dataset", parsed, profile: fallbackProfile, rows }, degraded.correlationId);
     return {
       ...degraded,
       datasetId: profile.id,
+      datasetVersionId: pendingVersionId,
       projectId: "local-project",
-      profile,
+      profile: fallbackProfile,
       rows
     };
   }
@@ -118,19 +187,24 @@ export async function persistParsedDataset({ file, parsed }: ParsedDatasetPayloa
 
 export async function persistDashboard(payload: PersistedDashboardPayload, projectId?: string): Promise<DashboardPersistResult> {
   const auth = await getCurrentAuthState();
+  const spec = {
+    ...payload.spec,
+    datasetId: payload.datasetId ?? payload.spec.datasetId,
+    datasetVersionId: payload.datasetVersionId ?? payload.spec.datasetVersionId ?? payload.profile?.datasetVersionId
+  };
   if (!isSupabaseConfigured() || !auth.user || !projectId) {
-    saveLocalDashboard(payload.spec, payload.viewState, payload.rows, payload.profile);
-    return { ...localResult(), dashboardId: payload.spec.id, warning: !isSupabaseConfigured() ? localModeWarning() : "Inicia sesion para guardar el dashboard en Supabase." };
+    saveLocalDashboard(spec, payload.viewState, payload.rows, payload.profile);
+    return { ...localResult(), dashboardId: spec.id, warning: !isSupabaseConfigured() ? localModeWarning() : "Inicia sesion para guardar el dashboard en Supabase." };
   }
 
   try {
-    const result = await createDashboardSpec(payload.spec, payload.viewState, projectId);
+    const result = await createDashboardSpec(spec, payload.viewState, projectId);
     return { ...providerResult(), dashboardId: result.dashboardId };
   } catch (error) {
     const degraded = degradedResult(error, "No se pudo guardar el dashboard en Supabase.");
-    saveLocalDashboard(payload.spec, payload.viewState, payload.rows, payload.profile);
-    enqueueOutbox({ kind: "dashboard", projectId, spec: payload.spec, viewState: payload.viewState, rows: payload.rows, profile: payload.profile }, degraded.correlationId);
-    return { ...degraded, dashboardId: payload.spec.id };
+    saveLocalDashboard(spec, payload.viewState, payload.rows, payload.profile);
+    enqueueOutbox({ kind: "dashboard", projectId, spec, viewState: payload.viewState, rows: payload.rows, profile: payload.profile }, degraded.correlationId);
+    return { ...degraded, dashboardId: spec.id };
   }
 }
 

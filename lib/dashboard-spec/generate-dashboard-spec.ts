@@ -56,7 +56,7 @@ function metricSentence(label: string, value: number | null, format: string) {
   return `${label} suma ${formatNumber(value)}.`;
 }
 
-export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]): DashboardSpec {
+export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[], options: { datasetVersionId?: string } = {}): DashboardSpec {
   const semantic = inferSemanticLayer(profile, rows);
   const dateField = fieldName(semantic.primaryDate);
   const primaryMetric = semantic.primaryMetric;
@@ -186,6 +186,7 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[]):
     subtitle: isSalesDomain ? "Desempeno comercial consolidado con KPIs, filtros e insights accionables." : `Dashboard ${semantic.domain.name} generado desde roles semanticos del dataset.`,
     businessDomain: semantic.domain.name,
     datasetId: profile.id,
+    datasetVersionId: options.datasetVersionId ?? profile.datasetVersionId,
     design: DEFAULT_DASHBOARD_DESIGN,
     globalFilters: filters,
     widgets,

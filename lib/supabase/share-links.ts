@@ -166,6 +166,8 @@ export async function getPublicSharedDashboard(token: string, password?: string,
     }
     if (!local.snapshot) return null;
     if (!local.payload) return null;
+    const filtersAllowed = link.scopes ? link.scopes.includes("use_filters") : link.allowFilters;
+    if (requestedFilters.length > 0 && !filtersAllowed) return null;
     const filters = normalizePublicShareFilters(local.snapshot.allowedFilters, requestedFilters);
     if (!filters) return null;
     const filterSnapshot = local.snapshot.filterSnapshots.find((snapshot) => snapshot.filterKey === publicFilterKey(filters));
@@ -175,7 +177,7 @@ export async function getPublicSharedDashboard(token: string, password?: string,
       dashboard: local.payload.dashboard,
       viewState: local.payload.viewState,
       widgetResults: filterSnapshot.widgetResults,
-      allowedFilters: link.allowFilters ? local.snapshot.allowedFilters : []
+      allowedFilters: filtersAllowed ? local.snapshot.allowedFilters : []
     };
   }
 

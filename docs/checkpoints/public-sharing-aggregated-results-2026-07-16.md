@@ -61,7 +61,7 @@ Environment notes:
 - `npm.ps1` / `npx.ps1` remain blocked by local PowerShell execution policy; `.cmd` variants were used where needed.
 - Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
 - E2E emits the existing Next warning about `scroll-behavior: smooth`; not introduced by this phase.
-- `npm.cmd run test:e2e` still hangs in this environment after immediate `x` markers from Playwright's list reporter; the same suite passes with `npx.cmd playwright test --reporter=line --timeout=45000`.
+- `npm.cmd run test:e2e` was stabilized in commit `1bc235d` and now runs `playwright test --reporter=line --timeout=45000`; the official script passes 2 Chromium E2E tests and exits deterministically.
 
 ## Defects Found
 

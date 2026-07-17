@@ -14,7 +14,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --reporter=line --timeout=45000",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "audit": "npm audit",

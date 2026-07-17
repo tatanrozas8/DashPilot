@@ -1005,3 +1005,73 @@ Debt remaining:
 
 - Persist `DashboardDocument`/`DashboardRevision` in Supabase once the storage migration is introduced.
 - Wire store/editor selection state to `DashboardTargetSelection` after the existing dirty UI/store changes are reconciled.
+
+## 2026-07-17 - dashboard-domain-state-side-effects-2026-07-17
+
+Commit: `refactor: separate dashboard domain state and side effects`
+
+Prompt ID: `dashboard-domain-state-side-effects-2026-07-17`
+
+Objective:
+
+- Reduce coupling in the global store and monolithic dashboard state without changing visible behavior.
+- Introduce isolated domain slices, commands, queries, hooks and persistence side-effect services that can be adopted incrementally.
+
+Files changed:
+
+- `lib/store/dashboard-domain.ts`
+- `lib/store/dashboard-hooks.ts`
+- `lib/services/dashboard-side-effects.ts`
+- `lib/store/app-store.ts`
+- `tests/dashboard-domain-state.test.ts`
+- `docs/implementation-log.md`
+
+Current responsibility map:
+
+- Session slice: active project, dataset, dashboard, presentation and sync mode/status.
+- Import slice: selected sheet, import warnings and import job reference.
+- Dataset metadata slice: profile, uploaded file name and query-service row access metadata; no row arrays.
+- Editor slice: dashboard, view state, draft, selection by ID and undo/redo history.
+- Copilot slice: messages, thinking state and pending confirmation.
+- Presentation slice: presentation spec, options, share settings and saved themes.
+
+Coupling found:
+
+- Legacy `app-store.ts` still owns session, dataset rows, dashboard editor, Copilot, presentation, browser persistence and sync effects in one Zustand store.
+- Legacy `selectedTargetSpec` stores object snapshots; the new domain selection uses IDs and clears `selectedTargetSpec`.
+- Legacy rows/currentDataset remain in the global store for renderer/data explorer compatibility while the query service rollout continues.
+- Prior dirty UI changes already introduce table virtualization and data explorer changes; this refactor did not stage those unrelated hunks.
+
+Architecture notes:
+
+- Added pure dashboard domain commands and queries in `lib/store/dashboard-domain.ts`.
+- The pure domain state separates session, import, dataset metadata, editor, Copilot and presentation slices.
+- The pure dataset metadata slice stores `rowAccess` and never stores raw rows.
+- Added hooks for selection, query state, autosave, history and sync as a migration surface for components.
+- Added `DashboardEffectRepository` and `createDashboardEffectRepository` so Copilot chat/dashboard-version persistence is assembled outside reducers/store logic.
+- Updated the legacy store's Copilot sync path to use the effect repository instead of directly assembling Supabase/outbox tasks.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test -- tests/dashboard-domain-state.test.ts tests/dashboard-edit.test.ts tests/presentation.test.ts tests/data-access.test.ts`: passed, 4 files and 21 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 38 files and 241 tests.
+- `npm run build`: passed, 23 app routes generated.
+- `npx playwright test --reporter=line --timeout=45000`: passed, 3 Chromium E2E tests.
+
+Known failures:
+
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No environment variables added.
+- No dependency added, so no clean install was required.
+
+Debt remaining:
+
+- Move renderer/data explorer from legacy row arrays to governed query-service results before deleting `rows/currentDataset` from `app-store.ts`.
+- Migrate dashboard components to the new hooks after reconciling existing dirty renderer/workspace/data-explorer changes.
+- Replace legacy `selectedTargetSpec` writes in `app-store.ts` once every component can resolve selected targets from IDs.

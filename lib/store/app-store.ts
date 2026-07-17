@@ -26,10 +26,9 @@ import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-s
 import { createDemoDataset } from "@/lib/data/demo-dataset";
 import { generatePresentationSpec } from "@/lib/presentation-spec/generate-presentation-spec";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
-import { createDashboardVersion } from "@/lib/supabase/dashboards";
-import { saveChatMessage } from "@/lib/supabase/chat";
 import { nameFromFile } from "@/lib/utils/name-from-file";
-import { enqueueOutbox, flushOutboxDueItems, outboxCount } from "@/lib/data-access/outbox";
+import { flushOutboxDueItems, outboxCount } from "@/lib/data-access/outbox";
+import { createDashboardEffectRepository } from "@/lib/services/dashboard-side-effects";
 import { DomainError, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import type { ExecutionMode, SyncStatus } from "@/lib/observability/modes";
 import { DASH_PILOT_PERSIST_TTL_MS, DASH_PILOT_PERSIST_VERSION, purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
@@ -995,11 +994,15 @@ export const useDashPilotStore = create<DashPilotState>()(
             presentationOptions: presentationChanged ? { ...get().presentationOptions, generated: true } : get().presentationOptions,
             isCopilotThinking: false
           });
-          const syncTasks = [
-            { label: "chat:user", run: () => saveChatMessage(before.activeProjectId, before.activeDashboardId, userMessage), outbox: () => enqueueOutbox({ kind: "chat", projectId: before.activeProjectId, dashboardId: before.activeDashboardId, message: userMessage }) },
-            { label: "chat:assistant", run: () => saveChatMessage(before.activeProjectId, before.activeDashboardId, botMessage), outbox: () => enqueueOutbox({ kind: "chat", projectId: before.activeProjectId, dashboardId: before.activeDashboardId, message: botMessage }) },
-            ...(dashboardChanged ? [{ label: "dashboard-version", run: () => createDashboardVersion(before.activeDashboardId, nextDashboard, "accion de copilot"), outbox: () => enqueueOutbox({ kind: "dashboard-version", dashboardId: before.activeDashboardId, spec: nextDashboard, reason: "accion de copilot" }) }] : [])
-          ];
+          const effectRepository = createDashboardEffectRepository();
+          const syncTasks = effectRepository.createCopilotSyncTasks({
+            projectId: before.activeProjectId,
+            dashboardId: before.activeDashboardId,
+            userMessage,
+            assistantMessage: botMessage,
+            dashboardVersion: dashboardChanged ? nextDashboard : undefined,
+            dashboardVersionReason: "accion de copilot"
+          });
           if (syncTasks.length) set({ syncStatus: "pending", persistenceStatus: "Sincronizando cambios del Copiloto..." });
           for (const task of syncTasks) {
             void task.run()

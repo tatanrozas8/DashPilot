@@ -62,7 +62,14 @@ export async function createShareLink(link: ShareLink, options: { password?: str
         result_json: snapshotRowsJson(result)
       }))
     );
-    if (snapshotError) throw new Error(`No se pudo guardar el snapshot publico: ${snapshotError.message}`);
+    if (snapshotError) {
+      const { error: revokeError } = await supabase
+        .from("share_links")
+        .update({ is_active: false, revoked_at: new Date().toISOString() })
+        .eq("id", data.id);
+      const rollbackMessage = revokeError ? ` Reversion fallida: ${revokeError.message}` : "";
+      throw new Error(`No se pudo guardar el snapshot publico: ${snapshotError.message}.${rollbackMessage}`);
+    }
   }
   return { mode: "supabase" as const, token: link.token };
 }

@@ -25,9 +25,15 @@ export interface DashboardSelectedTarget {
   selectedTargetType: DashboardTargetType;
   selectedTargetId?: string;
   selectedTargetTitle?: string;
+  /**
+   * @deprecated Transitional UI snapshot only. Persist selectedTargetId/pageId/revisionId and resolve from the active revision.
+   */
   selectedTargetSpec?: unknown;
   selectedTargetCapabilities: string[];
 }
+
+export type DashboardRevisionStatus = "draft" | "published" | "archived";
+export type DashboardLayoutMode = "grid_12";
 
 export interface DashboardSpec {
   id: string;
@@ -59,6 +65,107 @@ export interface SavedDashboardTheme {
   design: Required<DashboardDesignSettings>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Dashboard {
+  id: string;
+  title: string;
+  subtitle?: string;
+  datasetId: string;
+  currentRevisionId: string;
+  publishedRevisionId?: string;
+  globalFilters: DashboardFilterConfig[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardPage {
+  id: string;
+  title: string;
+  order: number;
+  layout: {
+    mode: DashboardLayoutMode;
+    columns: 12;
+  };
+  filters: DashboardFilter[];
+  widgetIds: string[];
+}
+
+export interface WidgetLayout {
+  pageId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface WidgetQuery {
+  metricId?: string;
+  dimensionIds: string[];
+  timeDimensionId?: string;
+  filters: DashboardFilter[];
+  orderBy?: {
+    field: string;
+    direction: "asc" | "desc";
+  };
+  limit?: number;
+  legacyQuery?: DashboardQuerySpec;
+}
+
+export interface WidgetVisualSpec {
+  format?: string;
+  tone?: string;
+  icon?: string;
+  compact?: boolean;
+  comparison?: string | boolean;
+  visualConfig?: DashboardWidgetVisualConfig;
+  horizontal?: boolean;
+  columns?: string[];
+  hidden?: boolean;
+  emptyMessage?: string;
+}
+
+export interface WidgetContentSpec {
+  bullets?: string[];
+  text?: string;
+}
+
+export interface WidgetSpec {
+  id: string;
+  type: WidgetType;
+  title: string;
+  description?: string;
+  query?: WidgetQuery;
+  visual: WidgetVisualSpec;
+  content?: WidgetContentSpec;
+  layout: WidgetLayout;
+  lineage?: SemanticWidgetLineage;
+}
+
+export interface DashboardRevision {
+  id: string;
+  dashboardId: string;
+  revisionNumber: number;
+  status: DashboardRevisionStatus;
+  semanticModelId: string;
+  datasetVersionId: string;
+  pages: DashboardPage[];
+  widgets: WidgetSpec[];
+  createdAt: string;
+  createdBy: string;
+  publishedAt?: string;
+  mutable: boolean;
+}
+
+export interface DashboardDocument {
+  dashboard: Dashboard;
+  revisions: DashboardRevision[];
+}
+
+export interface DashboardTargetSelection {
+  revisionId: string;
+  pageId?: string;
+  widgetId?: string;
 }
 
 export interface DashboardWidget {

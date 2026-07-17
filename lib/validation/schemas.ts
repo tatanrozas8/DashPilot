@@ -112,6 +112,115 @@ export const dashboardWidgetVisualConfigSchema = z.object({
   legend: z.boolean().optional()
 });
 
+export const widgetQuerySchema = z.object({
+  metricId: z.string().optional(),
+  dimensionIds: z.array(z.string()).default([]),
+  timeDimensionId: z.string().optional(),
+  filters: z.array(dashboardFilterSchema).default([]),
+  orderBy: z.object({
+    field: z.string(),
+    direction: z.enum(["asc", "desc"])
+  }).optional(),
+  limit: z.number().int().positive().optional(),
+  legacyQuery: dashboardQuerySchema.optional()
+});
+
+export const widgetVisualSpecSchema = z.object({
+  format: z.string().optional(),
+  tone: z.string().optional(),
+  icon: z.string().optional(),
+  compact: z.boolean().optional(),
+  comparison: z.union([z.string(), z.boolean()]).optional(),
+  visualConfig: dashboardWidgetVisualConfigSchema.optional(),
+  horizontal: z.boolean().optional(),
+  columns: z.array(z.string()).optional(),
+  hidden: z.boolean().optional(),
+  emptyMessage: z.string().optional()
+});
+
+export const dashboardPageSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  order: z.number().int().nonnegative(),
+  layout: z.object({
+    mode: z.literal("grid_12"),
+    columns: z.literal(12)
+  }),
+  filters: z.array(dashboardFilterSchema),
+  widgetIds: z.array(z.string())
+});
+
+export const widgetSpecSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  query: widgetQuerySchema.optional(),
+  visual: widgetVisualSpecSchema,
+  content: z.object({
+    bullets: z.array(z.string()).optional(),
+    text: z.string().optional()
+  }).optional(),
+  layout: z.object({
+    pageId: z.string().min(1),
+    x: z.number().int().nonnegative(),
+    y: z.number().int().nonnegative(),
+    w: z.number().int().positive(),
+    h: z.number().int().positive()
+  }),
+  lineage: z.object({
+    semanticModelId: z.string(),
+    datasetVersionId: z.string().optional(),
+    metricIds: z.array(z.string()),
+    calculatedMetricIds: z.array(z.string()),
+    dimensionIds: z.array(z.string()),
+    timeDimensionIds: z.array(z.string()),
+    sourceColumnIds: z.array(z.string()),
+    filters: z.array(dashboardFilterSchema),
+    migratedAt: z.string(),
+    warnings: z.array(z.string())
+  }).optional()
+});
+
+export const dashboardRevisionSchema = z.object({
+  id: z.string().min(1),
+  dashboardId: z.string().min(1),
+  revisionNumber: z.number().int().positive(),
+  status: z.enum(["draft", "published", "archived"]),
+  semanticModelId: z.string().min(1),
+  datasetVersionId: z.string().min(1),
+  pages: z.array(dashboardPageSchema).min(1),
+  widgets: z.array(widgetSpecSchema),
+  createdAt: z.string(),
+  createdBy: z.string().min(1),
+  publishedAt: z.string().optional(),
+  mutable: z.boolean()
+});
+
+export const dashboardDocumentSchema = z.object({
+  dashboard: z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    subtitle: z.string().optional(),
+    datasetId: z.string().min(1),
+    currentRevisionId: z.string().min(1),
+    publishedRevisionId: z.string().optional(),
+    globalFilters: z.array(z.object({
+      id: z.string(),
+      field: z.string(),
+      label: z.string(),
+      type: z.enum(["date_range", "multi_select", "single_select", "number_range"]),
+      allowedValues: z.array(z.object({
+        label: z.string(),
+        value: z.union([z.string(), z.number(), z.boolean()])
+      })).optional()
+    })),
+    createdAt: z.string(),
+    updatedAt: z.string()
+  }),
+  revisions: z.array(dashboardRevisionSchema).min(1)
+});
+
 export const dashboardSpecSchema = z.object({
   id: z.string(),
   title: z.string(),

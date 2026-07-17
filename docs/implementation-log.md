@@ -951,3 +951,57 @@ Debt remaining:
 
 - Persist approved semantic models and review workflow when the product adds a stored metric catalog.
 - Route provider prompts through canonical semantic IDs rather than only column fields once the UI/store dirty worktree is reconciled.
+
+## 2026-07-17 - dashboard-pages-immutable-revisions-2026-07-17
+
+Commit: `feat: evolve dashboard model to pages and immutable revisions`
+
+Prompt ID: `dashboard-pages-immutable-revisions-2026-07-17`
+
+Objective:
+
+- Evolve dashboard contracts to support pages, history and safe editing without rewriting the renderer.
+- Keep v1 `DashboardSpec` readable while introducing v2 documents and immutable published revisions.
+
+Files changed:
+
+- `types/dashboard.ts`
+- `lib/dashboard-spec/model-v2.ts`
+- `lib/validation/schemas.ts`
+- `tests/dashboard-model-v2.test.ts`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added separated contracts for `Dashboard`, `DashboardPage`, `DashboardRevision`, `WidgetSpec` and `WidgetQuery`.
+- Added page-level order, title, grid layout and page filters while keeping global filters on `Dashboard` and widget filters on `WidgetQuery`.
+- Each revision requires `semanticModelId` and `datasetVersionId`.
+- Published revisions are immutable (`mutable: false`) and dashboards point to `publishedRevisionId`.
+- Added v1 to v2 migration and v2 to v1 adapter so renderer/editor/presentation can continue consuming legacy `DashboardSpec` during transition.
+- `WidgetSpec` separates `query`, `visual`, `content` and `layout`; transient query results such as fallback values and warnings are not migrated into v2 visual config.
+- Added target resolution by revision/page/widget IDs so persisted state does not need `selectedTargetSpec` as source of truth.
+- Added invariants for unique IDs, existing references, valid 12-column layouts, revision metadata and query-lineage compatibility.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test -- tests/dashboard-model-v2.test.ts tests/presentation.test.ts tests/dashboard-edit.test.ts`: passed, 3 files and 15 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 37 files and 234 tests.
+- `npm run build`: passed, 23 app routes generated.
+- `npx playwright test --reporter=line --timeout=45000`: passed, 3 Chromium E2E tests.
+
+Known failures:
+
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No environment variables added.
+- No dependency added, so no clean install was required.
+
+Debt remaining:
+
+- Persist `DashboardDocument`/`DashboardRevision` in Supabase once the storage migration is introduced.
+- Wire store/editor selection state to `DashboardTargetSelection` after the existing dirty UI/store changes are reconciled.

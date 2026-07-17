@@ -5,7 +5,7 @@ import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { dashboardSpecSchema } from "@/lib/validation/schemas";
-import { getDatasetProfile, getDatasetRows } from "@/lib/supabase/datasets";
+import { getDatasetProfile } from "@/lib/supabase/datasets";
 
 const localDashboards = new Map<string, { spec: DashboardSpec; viewState: DashboardViewState; rows?: DataRow[]; profile?: DatasetProfile }>();
 
@@ -53,11 +53,10 @@ export async function getDashboardById(dashboardId: string) {
   if (!data) return null;
   const datasetId = data.dataset_id as string;
   const datasetVersionId = typeof data.dataset_version_id === "string" ? data.dataset_version_id : undefined;
-  const [rows, profile] = await Promise.all([getDatasetRows(datasetId, datasetVersionId), getDatasetProfile(datasetId, datasetVersionId)]);
+  const profile = await getDatasetProfile(datasetId, datasetVersionId);
   return {
     spec: { ...(data.spec_json as DashboardSpec), datasetId, datasetVersionId: datasetVersionId ?? (data.spec_json as DashboardSpec).datasetVersionId },
     viewState: data.view_state_json as DashboardViewState,
-    rows,
     profile: profile ?? undefined
   };
 }

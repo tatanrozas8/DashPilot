@@ -14,7 +14,8 @@ export function AppHome() {
   const loadDemo = useDashPilotStore((state) => state.loadDemo);
   const uploadedFileName = useDashPilotStore((state) => state.uploadedFileName);
   const currentProject = useDashPilotStore((state) => state.currentProject);
-  const rows = useDashPilotStore((state) => state.rows);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const profile = useDashPilotStore((state) => state.profile);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const activePresentationId = useDashPilotStore((state) => state.activePresentationId);
@@ -24,7 +25,7 @@ export function AppHome() {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const toast = useToast();
-  const hasProject = rows.length > 0;
+  const hasProject = Boolean(activeDatasetId && profile.rowCount > 0);
   const dashboardHref = activeDashboardId ? `/app/dashboards/${activeDashboardId}` : "/app/generando";
   const shareHref = activeDashboardId ? `/app/dashboards/${activeDashboardId}/compartir` : "/app/proyectos";
   const presentationHref = activePresentationId ? `/app/present/${activePresentationId}` : "/app/presentaciones/crear";

@@ -3,16 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BarChart3, CheckCircle2, Download, Eye, Filter, Info, Plus, Search, Table2, X } from "lucide-react";
 import { Button } from "@/components/shared/button";
-import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
-import { queryTableRows } from "@/lib/query-engine/search";
+import { VirtualizedDataTable } from "@/components/shared/virtualized-data-table";
+import { executeAggregateQuery, executeTableQuery } from "@/lib/query-service/client";
 import { inferSemanticLayer } from "@/lib/semantic-layer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatNumber } from "@/lib/utils";
 import type { DataRow, DatasetColumnProfile, DatasetProfile, SemanticColumnType } from "@/types/dataset";
-import type { DashboardViewState, DashboardWidget, WidgetType } from "@/types/dashboard";
+import type { DashboardViewState, DashboardWidget, QueryResultRow, WidgetType } from "@/types/dashboard";
 
-const PAGE_SIZE = 50;
 const semanticOptions: SemanticColumnType[] = ["metric", "measure", "dimension", "category", "time", "geo", "identifier", "unknown"];
+interface ExplorerTableResult {
+  rows: DataRow[];
+  totalRows: number;
+  filteredRows: number;
+}
+
+const emptyTableResult: ExplorerTableResult = { rows: [], totalRows: 0, filteredRows: 0 };
 
 function nextWidgetId(widgets: DashboardWidget[]) {
   const ids = new Set(widgets.map((widget) => widget.id));
@@ -91,14 +97,6 @@ function ColumnStatsPanel({
   const [semanticType, setSemanticType] = useState<SemanticColumnType>(column?.userSemanticType ?? column?.semanticType ?? "unknown");
   const [synonyms, setSynonyms] = useState((column?.synonyms ?? []).join(", "));
   const [isHidden, setIsHidden] = useState(column?.isHidden ?? false);
-
-  useEffect(() => {
-    setBusinessName(column?.businessName ?? column?.displayName ?? "");
-    setDescription(column?.description ?? "");
-    setSemanticType(column?.userSemanticType ?? column?.semanticType ?? "unknown");
-    setSynonyms((column?.synonyms ?? []).join(", "));
-    setIsHidden(column?.isHidden ?? false);
-  }, [column]);
 
   if (!column) return null;
 
@@ -221,20 +219,69 @@ function DataQualitySummary({ profile }: { profile: DatasetProfile }) {
 }
 
 function ChartBuilder() {
-  const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const dashboard = useDashPilotStore((state) => state.dashboard);
+  const viewState = useDashPilotStore((state) => state.viewState);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
+  const persistenceMode = useDashPilotStore((state) => state.persistenceMode);
   const addDashboardWidget = useDashPilotStore((state) => state.addDashboardWidget);
-  const semantic = useMemo(() => inferSemanticLayer(profile, rows), [profile, rows]);
+  const semantic = useMemo(() => inferSemanticLayer(profile), [profile]);
   const [chartType, setChartType] = useState<WidgetType>("bar_chart");
   const [metric, setMetric] = useState(semantic.primaryMetric?.field ?? profile.detectedMetricColumns[0] ?? "");
   const [dimension, setDimension] = useState(semantic.primaryDimension?.field ?? profile.detectedDimensionColumns[0] ?? "");
   const [aggregation, setAggregation] = useState<"sum" | "avg" | "count" | "count_distinct" | "min" | "max">("sum");
   const [limit, setLimit] = useState(10);
+  const [preview, setPreview] = useState<QueryResultRow[]>([]);
+  const [previewError, setPreviewError] = useState("");
 
   const metrics = profile.columns.filter((column) => ["metric", "measure"].includes(column.semanticType) || ["number", "currency", "percentage"].includes(column.inferredType));
   const dimensions = profile.columns.filter((column) => !metrics.some((metricColumn) => metricColumn.normalizedName === column.normalizedName));
-  const preview = useMemo(() => executeDashboardQuery(rows, { metric: metric ? { field: metric, aggregation } : undefined, groupBy: dimension ? [dimension] : undefined, orderBy: { field: "value", direction: "desc" }, limit }, { filters: [] }), [aggregation, dimension, limit, metric, rows]);
+  const datasetId = activeDatasetId || dashboard.datasetId || profile.id;
+  const datasetVersionId = activeDatasetVersionId || dashboard.datasetVersionId || profile.datasetVersionId || datasetId;
+
+  useEffect(() => {
+    let cancelled = false;
+    const fallbackMetric = metric || profile.detectedMetricColumns[0] || profile.columns[0]?.normalizedName;
+    if (!datasetId || !datasetVersionId || !fallbackMetric) {
+      void Promise.resolve().then(() => {
+        if (cancelled) return;
+        setPreview([]);
+        setPreviewError("No hay una fuente consultable para previsualizar.");
+      });
+      return;
+    }
+    void Promise.resolve().then(() => {
+      if (!cancelled) setPreviewError("");
+    });
+    void executeAggregateQuery({
+      datasetId,
+      dashboardId: activeDashboardId || dashboard.id,
+      context: persistenceMode === "supabase" ? "authenticated" : "local",
+      query: {
+        datasetVersionId,
+        metrics: [{ field: fallbackMetric, aggregation }],
+        dimensions: dimension ? [dimension] : [],
+        filters: viewState.filters,
+        orderBy: { field: "value", direction: "desc" },
+        limit,
+        offset: 0
+      }
+    })
+      .then((result) => {
+        if (!cancelled) setPreview(result.rows);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPreview([]);
+          setPreviewError(error instanceof Error ? error.message : "No se pudo previsualizar la consulta.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDashboardId, aggregation, dashboard, datasetId, datasetVersionId, dimension, limit, metric, persistenceMode, profile, viewState.filters]);
 
   function addWidget() {
     const widget: DashboardWidget = {
@@ -279,7 +326,7 @@ function ChartBuilder() {
         <input className="h-10 rounded-lg border border-[#dfe5f0] px-3 text-sm" type="number" min={1} max={100} value={limit} onChange={(event) => setLimit(Number(event.target.value) || 10)} />
       </div>
       <p className="mt-3 text-xs text-[#697597]">
-        Vista previa: {preview.slice(0, 3).map((row) => `${row.label}: ${previewValue(row.value)}`).join(" · ") || "sin datos"}
+        Vista previa: {previewError || preview.slice(0, 3).map((row) => `${row.label}: ${previewValue(row.value)}`).join(" · ") || "sin datos"}
         {preview.some((row) => row.result?.state && row.result.state !== "ok") ? " · revisar cobertura de datos" : ""}
       </p>
     </section>
@@ -287,45 +334,90 @@ function ChartBuilder() {
 }
 
 export function DataExplorerPanel() {
-  const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
+  const persistenceMode = useDashPilotStore((state) => state.persistenceMode);
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const addDashboardWidget = useDashPilotStore((state) => state.addDashboardWidget);
   const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
   const updateColumnDictionary = useDashPilotStore((state) => state.updateColumnDictionary);
-  const [page, setPage] = useState(0);
+  const [tableKey, setTableKey] = useState(0);
   const [columnSearchText, setColumnSearchText] = useState("");
   const [selectedColumnName, setSelectedColumnName] = useState<string | undefined>();
   const [selectedRow, setSelectedRow] = useState<DataRow | null>(null);
+  const [table, setTable] = useState(emptyTableResult);
+  const [tablePending, setTablePending] = useState(false);
+  const [tableError, setTableError] = useState("");
   const allColumns = useMemo(() => profile.columns.map((column) => column.normalizedName), [profile.columns]);
   const allColumnSet = useMemo(() => new Set(allColumns), [allColumns]);
-  const persistedColumns = viewState.dataExplorer?.visibleColumns?.filter((column) => allColumnSet.has(column)) ?? [];
-  const visibleColumns = persistedColumns.length ? persistedColumns : allColumns;
+  const persistedColumnState = viewState.dataExplorer?.visibleColumns;
+  const persistedColumns = useMemo(() => persistedColumnState?.filter((column) => allColumnSet.has(column)) ?? [], [allColumnSet, persistedColumnState]);
+  const visibleColumns = useMemo(() => persistedColumns.length ? persistedColumns : allColumns, [allColumns, persistedColumns]);
+  const columnLabels = useMemo(() => new Map(profile.columns.map((column) => [column.normalizedName, column.displayName])), [profile.columns]);
+  const tableColumns = useMemo(() => visibleColumns.map((column) => ({ key: column, label: columnLabels.get(column) ?? column })), [columnLabels, visibleColumns]);
   const search = viewState.dataExplorer?.search ?? "";
   const sort = viewState.dataExplorer?.sort && allColumnSet.has(viewState.dataExplorer.sort.field) ? viewState.dataExplorer.sort : undefined;
   const storedColumnSearch = viewState.dataExplorer?.columnSearch && allColumnSet.has(viewState.dataExplorer.columnSearch.field) ? viewState.dataExplorer.columnSearch : undefined;
   const columnSearch = storedColumnSearch?.query.trim() ? storedColumnSearch : undefined;
-  const table = useMemo(() => queryTableRows(rows, { search, columns: visibleColumns, filters: viewState.filters, sort, columnSearch }), [rows, search, sort, viewState.filters, visibleColumns, columnSearch]);
-  const pageRows = table.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const filteredProfileColumns = useMemo(() => {
     const needle = columnSearchText.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     if (!needle) return profile.columns;
     return profile.columns.filter((column) => `${column.displayName} ${column.originalName} ${column.normalizedName}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(needle));
   }, [columnSearchText, profile.columns]);
   const columnGroups = useMemo(() => groupColumns(filteredProfileColumns), [filteredProfileColumns]);
-  const semantic = useMemo(() => inferSemanticLayer(profile, rows), [profile, rows]);
+  const semantic = useMemo(() => inferSemanticLayer(profile), [profile]);
   const selectedColumn = profile.columns.find((column) => column.normalizedName === selectedColumnName) ?? profile.columns[0];
   const selectedSearchField = storedColumnSearch?.field ?? selectedColumn?.normalizedName ?? allColumns[0] ?? "";
-  const pageCount = Math.max(1, Math.ceil(table.filteredRows / PAGE_SIZE));
+  const datasetId = activeDatasetId || dashboard.datasetId || profile.id;
+  const datasetVersionId = activeDatasetVersionId || dashboard.datasetVersionId || profile.datasetVersionId || datasetId;
 
   useEffect(() => {
-    setPage((value) => Math.min(value, pageCount - 1));
-  }, [pageCount]);
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      setTablePending(true);
+      setTableError("");
+      void executeTableQuery({
+        datasetId,
+        dashboardId: activeDashboardId || dashboard.id,
+        context: persistenceMode === "supabase" ? "authenticated" : "local",
+        query: {
+          datasetVersionId,
+          columns: visibleColumns,
+          filters: viewState.filters,
+          search,
+          columnSearch,
+          orderBy: sort,
+          limit: viewState.dataExplorer?.pageSize ?? 100,
+          offset: 0
+        }
+      })
+        .then((result) => {
+          if (!cancelled) setTable({ rows: result.rows, totalRows: result.totalRows, filteredRows: result.filteredRows });
+        })
+        .catch((error) => {
+          if (!cancelled) setTableError(error instanceof Error ? error.message : "No se pudo preparar la tabla.");
+        })
+        .finally(() => {
+          if (!cancelled) setTablePending(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeDashboardId, columnSearch, dashboard, datasetId, datasetVersionId, persistenceMode, search, sort, viewState.dataExplorer?.pageSize, viewState.filters, visibleColumns]);
 
   function patchExplorer(patch: Partial<NonNullable<DashboardViewState["dataExplorer"]>>) {
     setViewState({ dataExplorer: { ...viewState.dataExplorer, ...patch, isOpen: true } });
+  }
+
+  function resetTableScroll() {
+    setTableKey((value) => value + 1);
   }
 
   function setColumnSearch(field: string, query: string) {
@@ -347,14 +439,14 @@ export function DataExplorerPanel() {
       }
     });
     setSelectedColumnName(undefined);
-    setPage(0);
+    resetTableScroll();
   }
 
   function toggleColumn(column: string) {
     const next = visibleColumns.includes(column) ? visibleColumns.filter((item) => item !== column) : [...visibleColumns, column];
     patchExplorer({ visibleColumns: next.length ? next : [column] });
     setSelectedColumnName(column);
-    setPage(0);
+    resetTableScroll();
   }
 
   function createWidgetFromColumn(column: DatasetColumnProfile) {
@@ -420,7 +512,7 @@ export function DataExplorerPanel() {
                       onFilter={() => {
                         patchExplorer({ visibleColumns: [column.normalizedName], columnSearch: undefined });
                         setSelectedColumnName(column.normalizedName);
-                        setPage(0);
+                        resetTableScroll();
                       }}
                       onInspect={() => setSelectedColumnName(column.normalizedName)}
                     />
@@ -436,66 +528,55 @@ export function DataExplorerPanel() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="flex items-center gap-2 font-bold"><Table2 className="size-4 text-[#3d35ff]" /> Explorar datos</h3>
-                <p className="mt-1 text-sm text-[#697597]">{formatNumber(table.filteredRows)} filas visibles de {formatNumber(table.totalRows)} totales</p>
+                <p className="mt-1 text-sm text-[#697597]">
+                  Mostrando {formatNumber(table.filteredRows)} de {formatNumber(table.totalRows)} filas. Render virtual acotado a la ventana visible.
+                </p>
               </div>
               <div className="flex gap-2">
                 <Button onClick={showAllRowsAndColumns} variant="secondary" className="h-10 px-3">Ver todo</Button>
-                <Button onClick={exportCsv} variant="secondary" className="h-10 px-3"><Download className="size-4" /> CSV</Button>
+                <Button onClick={exportCsv} disabled={tablePending || table.rows.length === 0} variant="secondary" className="h-10 px-3"><Download className="size-4" /> CSV</Button>
               </div>
               <div className="flex min-w-[260px] items-center gap-2 rounded-xl border border-[#dfe5f0] px-3">
                 <Search className="size-4 text-[#697597]" />
-                <input className="h-10 min-w-0 flex-1 text-sm outline-none" placeholder="Buscar en toda la tabla..." value={search} onChange={(event) => { patchExplorer({ search: event.target.value }); setPage(0); }} />
+                <input className="h-10 min-w-0 flex-1 text-sm outline-none" placeholder="Buscar en toda la tabla..." value={search} onChange={(event) => { patchExplorer({ search: event.target.value }); resetTableScroll(); }} />
               </div>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto]">
               <select className="h-10 rounded-lg border border-[#dfe5f0] bg-white px-3 text-sm" value={selectedSearchField} onChange={(event) => {
                 setSelectedColumnName(event.target.value);
                 setColumnSearch(event.target.value, columnSearch?.query ?? "");
-                setPage(0);
+                resetTableScroll();
               }}>
                 {profile.columns.map((column) => <option key={column.normalizedName} value={column.normalizedName}>{column.displayName}</option>)}
               </select>
               <input className="h-10 rounded-lg border border-[#dfe5f0] px-3 text-sm" placeholder="Buscar dentro de una columna..." value={columnSearch?.query ?? ""} onChange={(event) => {
                 setColumnSearch(selectedSearchField, event.target.value);
-                setPage(0);
+                resetTableScroll();
               }} />
-              <button className="rounded-lg border border-[#dfe5f0] px-3 text-sm font-semibold disabled:opacity-50" disabled={!columnSearch?.query} onClick={() => { patchExplorer({ columnSearch: undefined }); setPage(0); }}>Limpiar columna</button>
+              <button className="rounded-lg border border-[#dfe5f0] px-3 text-sm font-semibold disabled:opacity-50" disabled={!columnSearch?.query} onClick={() => { patchExplorer({ columnSearch: undefined }); resetTableScroll(); }}>Limpiar columna</button>
             </div>
-            <div className="mt-4 h-[420px] overflow-auto rounded-xl border border-[#edf1fa] lg:h-[520px]">
-              <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="sticky top-0 bg-[#fbfcff] text-xs text-[#697597]">
-                  <tr>
-                    {visibleColumns.map((column) => (
-                      <th key={column} className="border-b border-[#edf1fa] px-3 py-3">
-                        <button className="font-semibold" onClick={() => patchExplorer({ sort: { field: column, direction: sort?.field === column && sort.direction === "desc" ? "asc" : "desc" } })}>
-                          {profile.columns.find((item) => item.normalizedName === column)?.displayName ?? column}
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.length ? pageRows.map((row, index) => (
-                    <tr key={`${page}-${index}`} onClick={() => setSelectedRow(row)} className="cursor-pointer border-b border-[#edf1fa] last:border-0 hover:bg-[#fbfcff]">
-                      {visibleColumns.map((column) => <td key={column} className="max-w-[240px] truncate px-3 py-3 text-[#1c2748]">{String(row[column] ?? "-")}</td>)}
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={Math.max(1, visibleColumns.length)} className="px-4 py-10 text-center text-sm font-semibold text-[#697597]">
-                        No hay filas para la busqueda o filtros actuales.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <button className="rounded-lg border border-[#dfe5f0] px-3 py-2 font-semibold disabled:opacity-50" disabled={page === 0} onClick={() => setPage((value) => Math.max(0, value - 1))}>Anterior</button>
-              <span className="text-[#697597]">Pagina {page + 1} de {pageCount}</span>
-              <button className="rounded-lg border border-[#dfe5f0] px-3 py-2 font-semibold disabled:opacity-50" disabled={page >= pageCount - 1} onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}>Siguiente</button>
-            </div>
+            {tablePending ? (
+              <div className="mt-4 grid h-[420px] gap-3 rounded-xl border border-[#edf1fa] bg-white p-4 lg:h-[520px]" aria-label="Preparando tabla">
+                {Array.from({ length: 9 }, (_, index) => <div key={index} className="h-8 animate-pulse rounded bg-[#f3f5fb]" />)}
+              </div>
+            ) : tableError ? (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm font-semibold text-rose-800">{tableError}</div>
+            ) : (
+              <VirtualizedDataTable
+                key={tableKey}
+                ariaLabel="Explorador virtualizado de datos"
+                rows={table.rows}
+                columns={tableColumns}
+                totalRows={table.totalRows}
+                height={520}
+                emptyMessage="No hay filas para la busqueda o filtros actuales."
+                onRowSelect={(row) => setSelectedRow(row)}
+                onColumnHeaderClick={(column) => patchExplorer({ sort: { field: column, direction: sort?.field === column && sort.direction === "desc" ? "asc" : "desc" } })}
+              />
+            )}
           </section>
           <ColumnStatsPanel
+            key={selectedColumn?.normalizedName ?? "no-column"}
             column={selectedColumn}
             onShowOnly={() => selectedColumn && patchExplorer({ visibleColumns: [selectedColumn.normalizedName] })}
             onAskCopilot={() => selectedColumn && void sendPrompt(`Explica la columna ${selectedColumn.displayName}`)}

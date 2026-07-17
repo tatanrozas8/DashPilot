@@ -1075,3 +1075,76 @@ Debt remaining:
 - Move renderer/data explorer from legacy row arrays to governed query-service results before deleting `rows/currentDataset` from `app-store.ts`.
 - Migrate dashboard components to the new hooks after reconciling existing dirty renderer/workspace/data-explorer changes.
 - Replace legacy `selectedTargetSpec` writes in `app-store.ts` once every component can resolve selected targets from IDs.
+
+## 2026-07-17 - dashboard-foundation-p1-query-service-remediation-2026-07-17
+
+Commit: `Route dashboard rendering through query service`
+
+Prompt ID: `dashboard-foundation-p1-query-service-remediation-2026-07-17`
+
+Objective:
+
+- Correct only the open P1 defects from `docs/checkpoints/dashboard-foundation-phase-2026-07-17.md`.
+- Route dashboard rendering and Data Explorer through the governed QueryService.
+- Remove full dataset rows/currentDataset as production source of truth from the global store.
+
+Files changed:
+
+- `app/api/query/route.ts`
+- `components/app-home.tsx`
+- `components/dashboard/dashboard-renderer.tsx`
+- `components/dashboard/dashboard-workspace.tsx`
+- `components/dashboard/data-explorer.tsx`
+- `components/dataset-preview.tsx`
+- `components/generation-page.tsx`
+- `components/layout/AppShell.tsx`
+- `components/presentation/presentation-builder.tsx`
+- `components/projects-page.tsx`
+- `components/share-export-page.tsx`
+- `lib/query-service/client.ts`
+- `lib/query-service/contract.ts`
+- `lib/query-service/schemas.ts`
+- `lib/store/app-store.ts`
+- `lib/supabase/dashboards.ts`
+- `tests/e2e/capability-ctas.spec.ts`
+- `tests/query-service-ui-guardrails.test.ts`
+- `docs/checkpoints/dashboard-foundation-phase-2026-07-17.md`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added a client QueryService boundary that routes local/demo datasets through the existing governed analytical service and authenticated Supabase datasets through `/api/query`.
+- Added a server-side `/api/query` route using the Supabase anon/session client, not service-role credentials, so dashboard widgets and Data Explorer can request aggregate/page results without hydrating full rows in browser state.
+- Moved local/demo row access into a queryable in-memory repository outside Zustand. The product store now keeps dataset metadata, preview/import state and IDs, not `rows` or `currentDataset`.
+- Renderer widgets, chart builder and Data Explorer now call `executeWidgetQuery`, `executeAggregateQuery` or `executeTableQuery` and render loading/error/empty states from query results.
+- Dataset preview and Copilot context use bounded samples only.
+- Loosened query field ID parsing to support legacy dashboard column IDs with spaces/punctuation while retaining allowlist validation against the dataset profile and banning control characters.
+- Supabase dashboard loading no longer fetches `dataset_rows` into the client payload.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `npm run test -- tests/query-service-ui-guardrails.test.ts tests/analytical-query-service.test.ts tests/dashboard-domain-state.test.ts tests/browser-storage-security.test.ts`: passed, 4 files and 25 tests.
+- `npm run test -- tests/query-service-ui-guardrails.test.ts tests/analytical-query-service.test.ts`: passed after the legacy column-ID regression fix, 2 files and 14 tests.
+- `npm run test`: passed, 39 files and 245 tests.
+- `npm run build`: passed, 24 app routes generated including `/api/query`.
+- `$env:CI = '1'; npm run test:e2e`: passed, 4 Chromium E2E tests.
+- Static guardrail: `rg -n "state\.rows|currentDataset|executeDashboardQuery|queryTableRows|applyDashboardFilters" components lib/store lib/supabase app --glob "*.ts" --glob "*.tsx"` returned no production matches.
+
+Known warnings:
+
+- Git still warns that `C:\Users\CristiÃ¡n\.config\git\ignore` cannot be read.
+- Playwright logs existing React duplicate-key warnings for `Tecnologia` and `Hogar`; this was not introduced by the P1 remediation and remains documented debt.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No environment variables added.
+- No dependency added, so clean install was not required.
+
+Debt remaining:
+
+- `/api/query` still reconstructs the transitional `columnar-json` artifact server-side from `dataset_rows`; integrating DuckDB/Parquet remains the existing P2 scale item.
+- CSV export in local/demo mode reads from the queryable local repository for compatibility; a server-side export endpoint should replace that for Supabase datasets before enterprise rollout.
+- Existing duplicate-key warnings in dashboard chart labels should be fixed in a separate non-P1 task.

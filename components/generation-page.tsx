@@ -21,7 +21,8 @@ export function GenerationPage() {
   const generateDashboard = useDashPilotStore((state) => state.generateDashboard);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
-  const rows = useDashPilotStore((state) => state.rows);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const profile = useDashPilotStore((state) => state.profile);
   const [completedStep, setCompletedStep] = useState(0);
   const [status, setStatus] = useState("Generando dashboard...");
   const dashboardGeneration = capability("dashboard.generate");
@@ -30,7 +31,7 @@ export function GenerationPage() {
     let active = true;
 
     async function runGeneration() {
-      if (!useDashPilotStore.getState().rows.length) {
+      if (!useDashPilotStore.getState().activeDatasetId || useDashPilotStore.getState().profile.rowCount <= 0) {
         setStatus("Sube un dataset para comenzar.");
         return;
       }
@@ -47,7 +48,6 @@ export function GenerationPage() {
           viewState: state.viewState,
           datasetId: state.activeDatasetId || dashboard.datasetId,
           datasetVersionId: state.activeDatasetVersionId || dashboard.datasetVersionId,
-          rows: state.rows,
           profile: state.profile
         },
         state.activeProjectId
@@ -85,14 +85,14 @@ export function GenerationPage() {
           <Link href="/app/datasets/preview" className="inline-flex h-11 items-center rounded-lg border border-[#dce3f4] bg-white px-5 text-sm font-semibold">Cancelar generacion</Link>
           <Link href={activeDashboardId ? `/app/dashboards/${activeDashboardId}` : "/app/proyectos"} className="inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Ver mis dashboards</Link>
         </div>
-        {!rows.length && (
+        {!activeDatasetId && (
           <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
             <h1 className="text-3xl font-black tracking-[-0.04em]">Sin proyecto activo</h1>
             <p className="mt-3 text-[#617094]">Sube un dataset para comenzar.</p>
             <Link href="/app" className="mt-6 inline-flex h-11 items-center rounded-lg bg-[#3d35ff] px-5 text-sm font-semibold text-white">Subir dataset</Link>
           </section>
         )}
-        {rows.length > 0 && <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
+        {activeDatasetId && profile.rowCount > 0 && <section className="mt-6 rounded-2xl border border-[#e3e8f5] bg-white p-8 text-center">
           <Sparkles className="mx-auto size-9 text-[#3d35ff]" />
           <h1 className="mt-4 text-3xl font-black tracking-[-0.04em]">Generando tu dashboard</h1>
           <p className="mt-3 text-[#617094]">DashPilot esta aplicando analisis deterministico sobre columnas reales para construir un DashboardSpec.</p>

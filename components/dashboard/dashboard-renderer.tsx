@@ -22,9 +22,10 @@ import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, Eye, Filter, GripVe
 import { Button } from "@/components/shared/button";
 import { MetricIcon } from "@/components/shared/metric-icon";
 import { useToast } from "@/components/shared/toast";
+import { VirtualizedDataTable } from "@/components/shared/virtualized-data-table";
 import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { barOrientation } from "@/lib/dashboard-spec/visual-config";
-import { applyDashboardFilters, executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
+import { executeWidgetQuery } from "@/lib/query-service/client";
 import { buildDatasetCatalog, inferSemanticLayer } from "@/lib/semantic-layer";
 import { modeLabel } from "@/lib/observability/modes";
 import { useDashPilotStore } from "@/lib/store/app-store";
@@ -53,6 +54,10 @@ function formatChartValue(value: unknown) {
 
 function configNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function configStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 }
 
 function qualityText(result?: QueryMetricResult) {
@@ -210,10 +215,88 @@ function EmptyWidget({ message }: { message?: string }) {
   );
 }
 
-function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
+function useWidgetQueryResult(widget: DashboardWidget) {
+  const profile = useDashPilotStore((state) => state.profile);
   const viewState = useDashPilotStore((state) => state.viewState);
+  const dashboard = useDashPilotStore((state) => state.dashboard);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
+  const persistenceMode = useDashPilotStore((state) => state.persistenceMode);
+  const [rows, setRows] = useState<QueryResultRow[]>([]);
+  const [tableRows, setTableRows] = useState<DataRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const datasetId = activeDatasetId || dashboard.datasetId || profile.id;
+  const datasetVersionId = activeDatasetVersionId || dashboard.datasetVersionId || profile.datasetVersionId || datasetId;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!datasetId || !datasetVersionId || !profile.columns.length) {
+      void Promise.resolve().then(() => {
+        if (cancelled) return;
+        setRows([]);
+        setTableRows([]);
+        setError("No hay una version de dataset consultable.");
+      });
+      return;
+    }
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setError("");
+    });
+    void executeWidgetQuery({
+      datasetId,
+      dashboardId: activeDashboardId || dashboard.id,
+      datasetVersionId,
+      context: persistenceMode === "supabase" ? "authenticated" : "local",
+      widget,
+      profile,
+      viewState
+    })
+      .then((result) => {
+        if (cancelled) return;
+        if (!result) {
+          setRows([]);
+          setTableRows([]);
+          return;
+        }
+        if ("filteredRows" in result) {
+          setRows([]);
+          setTableRows(result.rows);
+        } else {
+          setRows(result.rows);
+          setTableRows([]);
+        }
+      })
+      .catch((queryError) => {
+        if (cancelled) return;
+        setRows([]);
+        setTableRows([]);
+        setError(queryError instanceof Error ? queryError.message : "No se pudo ejecutar la consulta del widget.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDashboardId, dashboard, datasetId, datasetVersionId, persistenceMode, profile, viewState, widget]);
+
+  return { rows, tableRows, loading, error };
+}
+
+function QueryState({ loading, error }: { loading: boolean; error: string }) {
+  if (loading) return <EmptyWidget message="Consultando datos gobernados..." />;
+  if (error) return <EmptyWidget message={error} />;
+  return null;
+}
+
+function KpiWidget({ widget }: { widget: DashboardWidget }) {
   const colors = chartColors(useDashboardDesign());
-  const queryRow = widget.query ? executeDashboardQuery(rows, widget.query, viewState)[0] : undefined;
+  const query = useWidgetQueryResult(widget);
+  const queryRow = query.rows[0];
   const result = queryRow?.result;
   const value = widget.query ? queryRow?.value ?? null : configNumber(widget.config.fallbackValue);
   const tone = String(widget.config.tone ?? "blue") as "blue" | "violet" | "green" | "sky" | "orange";
@@ -226,6 +309,7 @@ function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
       <p className="mt-4 text-sm font-semibold text-[#1c2748]">{widget.title}</p>
       <p className="mt-1 text-3xl font-bold tracking-[-0.04em]">{formatNullableValue(value, widget.config.format)}</p>
       <QualityNote result={result} />
+      <QueryState loading={query.loading} error={query.error} />
       <div className="mt-4 h-9">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={[12, 18, 15, 22, 17, 26, 28].map((value, index) => ({ index, value }))}>
@@ -237,10 +321,10 @@ function KpiWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   );
 }
 
-function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
-  const viewState = useDashPilotStore((state) => state.viewState);
+function LineWidget({ widget }: { widget: DashboardWidget }) {
   const colors = chartColors(useDashboardDesign());
-  const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const query = useWidgetQueryResult(widget);
+  const data = query.rows;
   const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
   const comparison = data.map((item) => ({ ...item, previous: isFiniteNumber(item.value) ? Math.round(item.value * 0.72) : null }));
   const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
@@ -248,7 +332,9 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 || !hasRenderableValues(data, seriesKeys) ? (
+      {query.loading || query.error ? (
+        <QueryState loading={query.loading} error={query.error} />
+      ) : data.length === 0 || !hasRenderableValues(data, seriesKeys) ? (
         <EmptyWidget message={String(widget.config.emptyMessage ?? "No hay datos suficientes para esta serie.")} />
       ) : (
         <>
@@ -277,10 +363,10 @@ function LineWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[]
   );
 }
 
-function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
-  const viewState = useDashPilotStore((state) => state.viewState);
+function BarWidget({ widget }: { widget: DashboardWidget }) {
   const colors = chartColors(useDashboardDesign());
-  const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const query = useWidgetQueryResult(widget);
+  const data = query.rows;
   const seriesKeys = Object.keys(data[0] ?? {}).filter((key) => !["label", "value"].includes(key));
   const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
   const compact = Boolean(widget.config.compact);
@@ -290,7 +376,9 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 || !hasRenderableValues(data, seriesKeys) ? (
+      {query.loading || query.error ? (
+        <QueryState loading={query.loading} error={query.error} />
+      ) : data.length === 0 || !hasRenderableValues(data, seriesKeys) ? (
         <EmptyWidget />
       ) : (
         <>
@@ -319,16 +407,18 @@ function BarWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] 
   );
 }
 
-function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
-  const viewState = useDashPilotStore((state) => state.viewState);
+function DonutWidget({ widget }: { widget: DashboardWidget }) {
   const colors = chartColors(useDashboardDesign());
-  const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState) : [];
+  const query = useWidgetQueryResult(widget);
+  const data = query.rows;
   const chartData = data.filter((row) => isFiniteNumber(row.value));
   const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {chartData.length === 0 ? (
+      {query.loading || query.error ? (
+        <QueryState loading={query.loading} error={query.error} />
+      ) : chartData.length === 0 ? (
         <EmptyWidget />
       ) : (
         <>
@@ -347,15 +437,17 @@ function DonutWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
   );
 }
 
-function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
-  const viewState = useDashPilotStore((state) => state.viewState);
+function ScatterWidget({ widget }: { widget: DashboardWidget }) {
   const colors = chartColors(useDashboardDesign());
-  const data = widget.query ? executeDashboardQuery(rows, widget.query, viewState).map((row, index) => ({ ...row, index: index + 1 })) : [];
+  const query = useWidgetQueryResult(widget);
+  const data = query.rows.map((row, index) => ({ ...row, index: index + 1 }));
   const firstWarning = data.find((item) => item.result?.state !== "ok")?.result;
   return (
     <Card className="min-h-[310px]">
       <WidgetHeader widget={widget} />
-      {data.length === 0 || !data.some((row) => isFiniteNumber(row.value)) ? (
+      {query.loading || query.error ? (
+        <QueryState loading={query.loading} error={query.error} />
+      ) : data.length === 0 || !data.some((row) => isFiniteNumber(row.value)) ? (
         <EmptyWidget />
       ) : (
         <>
@@ -375,11 +467,15 @@ function ScatterWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRo
   );
 }
 
-function TableWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[] }) {
+function TableWidget({ widget }: { widget: DashboardWidget }) {
   const viewState = useDashPilotStore((state) => state.viewState);
   const setViewState = useDashPilotStore((state) => state.setViewState);
-  const filtered = useMemo(() => applyDashboardFilters(rows, viewState.filters), [rows, viewState.filters]);
-  const columns = (widget.config.columns as string[] | undefined)?.filter(Boolean) ?? Object.keys(rows[0] ?? {}).slice(0, 5);
+  const profile = useDashPilotStore((state) => state.profile);
+  const query = useWidgetQueryResult(widget);
+  const configuredColumns = configStringArray(widget.config.columns);
+  const columns = configuredColumns.length ? configuredColumns : profile.columns.map((column) => column.normalizedName).slice(0, 5);
+  const displayRows = query.tableRows;
+  const tableColumns = useMemo(() => columns.map((column) => ({ key: column, label: column })), [columns]);
   return (
     <Card className="min-h-[310px] overflow-hidden">
       <div className="mb-4 flex items-center justify-between">
@@ -389,29 +485,22 @@ function TableWidget({ widget, rows }: { widget: DashboardWidget; rows: DataRow[
           <button className="rounded-md border border-[#dfe5f0] px-3 py-1.5 text-xs font-semibold text-[#3d35ff]" onClick={() => setViewState({ dataExplorer: { ...viewState.dataExplorer, isOpen: true } })}>Ver tabla completa</button>
         </div>
       </div>
-      {filtered.length === 0 ? (
+      {query.loading || query.error ? (
+        <QueryState loading={query.loading} error={query.error} />
+      ) : displayRows.length === 0 ? (
         <EmptyWidget message="No hay filas para mostrar con los filtros actuales." />
       ) : (
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] text-left text-sm">
-          <thead className="text-xs text-[#697597]">
-            <tr>{columns.map((column) => <th key={column} className="border-b border-[#edf1fa] py-3 font-semibold">{column}</th>)}</tr>
-          </thead>
-          <tbody>
-            {filtered.slice(0, Number(widget.config.limit ?? 5)).map((row, index) => (
-              <tr key={index} className="border-b border-[#edf1fa] last:border-0">
-                {columns.map((column) => (
-                  <td key={column} className="py-3 text-[#1c2748]">
-                    {typeof row[column] === "number" && column.toLowerCase().includes("venta")
-                      ? formatCurrency(row[column])
-                      : String(row[column] ?? "-")}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <>
+          <p className="mb-2 text-xs font-semibold text-[#697597]">Mostrando {displayRows.length} filas consultadas por QueryService.</p>
+          <VirtualizedDataTable
+            ariaLabel={`Tabla virtualizada de ${widget.title}`}
+            rows={displayRows}
+            columns={tableColumns}
+            totalRows={displayRows.length}
+            height={240}
+            emptyMessage="No hay filas para mostrar con los filtros actuales."
+          />
+        </>
       )}
     </Card>
   );
@@ -440,7 +529,6 @@ function InsightWidget({ widget }: { widget: DashboardWidget }) {
 }
 
 export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[] }) {
-  const rows = useDashPilotStore((state) => state.rows);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
   const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
@@ -528,12 +616,12 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
                   <GripVertical className="size-4" />
                 </span>
               )}
-              {widget.type === "kpi_card" && <KpiWidget widget={widget} rows={rows} />}
-              {widget.type === "line_chart" && <LineWidget widget={widget} rows={rows} />}
-              {widget.type === "bar_chart" && <BarWidget widget={widget} rows={rows} />}
-              {widget.type === "donut_chart" && <DonutWidget widget={widget} rows={rows} />}
-              {widget.type === "scatter_plot" && <ScatterWidget widget={widget} rows={rows} />}
-              {widget.type === "table" && <TableWidget widget={widget} rows={rows} />}
+              {widget.type === "kpi_card" && <KpiWidget widget={widget} />}
+              {widget.type === "line_chart" && <LineWidget widget={widget} />}
+              {widget.type === "bar_chart" && <BarWidget widget={widget} />}
+              {widget.type === "donut_chart" && <DonutWidget widget={widget} />}
+              {widget.type === "scatter_plot" && <ScatterWidget widget={widget} />}
+              {widget.type === "table" && <TableWidget widget={widget} />}
               {widget.type === "insight_text" && <InsightWidget widget={widget} />}
             </div>
           );
@@ -544,7 +632,6 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
 }
 
 export function DashboardFilters() {
-  const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
@@ -555,7 +642,12 @@ export function DashboardFilters() {
   const [filterField, setFilterField] = useState(catalog.filters[0]?.normalizedName ?? "");
   const selectedFilterColumn = catalog.columns.find((column) => column.normalizedName === filterField) ?? catalog.filters[0];
 
-  const optionsFor = (field: string) => Array.from(new Set(rows.map((row) => row[field]).filter(Boolean))).slice(0, 12);
+  const optionsFor = (field: string) => {
+    const configured = dashboard.globalFilters.find((filter) => filter.field === field)?.allowedValues?.map((option) => option.value) ?? [];
+    if (configured.length) return configured.slice(0, 12);
+    const column = profile.columns.find((item) => item.normalizedName === field);
+    return (column?.sampleValues ?? []).filter((value) => value !== null && value !== undefined && value !== "").slice(0, 12);
+  };
   const setFilter = (field: string, value: unknown, operator: "in" | "between" = "in") => {
     setViewState({
       filters: [
@@ -691,7 +783,6 @@ export function DashboardFilters() {
 
 export function CopilotPanel() {
   const messages = useDashPilotStore((state) => state.messages);
-  const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const sendPrompt = useDashPilotStore((state) => state.sendPrompt);
   const isCopilotThinking = useDashPilotStore((state) => state.isCopilotThinking);
@@ -713,7 +804,7 @@ export function CopilotPanel() {
   const [prompt, setPrompt] = useState("");
   const [recommendationsOpen, setRecommendationsOpen] = useState(false);
   const quickPrompts = useMemo(() => {
-    const semantic = inferSemanticLayer(profile, rows);
+    const semantic = inferSemanticLayer(profile);
     const prompts: string[] = [];
     const geo = semantic.primaryGeography;
     const seller = semantic.primarySeller;
@@ -730,7 +821,7 @@ export function CopilotPanel() {
     if (productOrCategory) prompts.push(`Mostrar top productos por ${metricName} usando ${productOrCategory.displayName}`);
     prompts.push("Hacer el dashboard mas ejecutivo y ordenar widgets por prioridad");
     return prompts.slice(0, 5);
-  }, [profile, rows]);
+  }, [profile]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });

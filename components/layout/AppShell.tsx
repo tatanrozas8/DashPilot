@@ -38,7 +38,6 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const currentProject = useDashPilotStore((state) => state.currentProject);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
-  const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const persistenceStatus = useDashPilotStore((state) => state.persistenceStatus);
   const executionMode = useDashPilotStore((state) => state.executionMode);
@@ -49,7 +48,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const clearSensitiveWorkspace = useDashPilotStore((state) => state.clearSensitiveWorkspace);
   const [globalSearch, setGlobalSearch] = useState("");
-  const hasProject = Boolean(activeDatasetId && rows.length);
+  const hasProject = Boolean(activeDatasetId && profile.rowCount > 0);
   const projectName = hasProject ? currentProject.name : "Sin proyecto activo";
   const projectStatus = hasProject ? persistenceStatus || currentProject.updatedAt : "Sube un dataset para comenzar";
   const notificationCount = profile.qualityWarnings.length + (hasProject && persistenceStatus ? 1 : 0);

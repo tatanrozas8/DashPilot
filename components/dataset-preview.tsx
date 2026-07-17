@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { BarChart3, Calendar, CheckCircle2, Database, Download, FileSpreadsheet, Sparkles, Table2, Timer } from "lucide-react";
 import { AppShell } from "@/components/shared/app-shell";
 import { useToast } from "@/components/shared/toast";
+import { VirtualizedDataTable } from "@/components/shared/virtualized-data-table";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { loadImportJobForDataset, loadPersistedDataset } from "@/lib/data-access";
 import { createDatasetDiagnostics, logDatasetDiagnostics } from "@/lib/debug/dataset-diagnostics";
+import { getQueryableRowsSample } from "@/lib/query-service/client";
 import { useDashPilotStore } from "@/lib/store/app-store";
-import type { SemanticColumnType } from "@/types/dataset";
+import type { DataRow, SemanticColumnType } from "@/types/dataset";
 import type { ImportJobRecord } from "@/types/imports";
 
 const correctionOptions: Array<{ label: string; value: SemanticColumnType }> = [
@@ -22,9 +24,36 @@ const correctionOptions: Array<{ label: string; value: SemanticColumnType }> = [
   { label: "Texto / desconocido", value: "unknown" }
 ];
 
+const PREVIEW_SAMPLE_LIMIT = 100;
+
+function DatasetPreviewSkeleton() {
+  return (
+    <section className="mt-7 rounded-xl border border-[#e3e8f5] bg-white p-5" aria-label="Cargando vista previa">
+      <div className="h-5 w-56 animate-pulse rounded bg-[#edf1fa]" />
+      <div className="mt-5 grid gap-3">
+        {Array.from({ length: 7 }, (_, index) => (
+          <div key={index} className="grid grid-cols-5 gap-3">
+            {Array.from({ length: 5 }, (__, cellIndex) => <div key={cellIndex} className="h-9 animate-pulse rounded bg-[#f3f5fb]" />)}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function exportRowsCsv(fileName: string, rows: DataRow[], columns: string[], labelFor: (column: string) => string) {
+  const header = columns.map((column) => `"${labelFor(column).replace(/"/g, '""')}"`).join(",");
+  const body = rows.map((row) => columns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([[header, body].filter(Boolean).join("\n")], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function DatasetPreview() {
   const params = useParams<{ datasetId?: string }>();
-  const rows = useDashPilotStore((state) => state.rows);
   const profile = useDashPilotStore((state) => state.profile);
   const uploadedFileName = useDashPilotStore((state) => state.uploadedFileName);
   const parsedDataset = useDashPilotStore((state) => state.parsedDataset);
@@ -37,25 +66,38 @@ export function DatasetPreview() {
   const persistenceMode = useDashPilotStore((state) => state.persistenceMode);
   const persistenceStatus = useDashPilotStore((state) => state.persistenceStatus);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
   const hydrateDataset = useDashPilotStore((state) => state.hydrateDataset);
   const toast = useToast();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [showAllInsights, setShowAllInsights] = useState(false);
   const [showAllKpis, setShowAllKpis] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<string | null>(null);
   const [importJob, setImportJob] = useState<ImportJobRecord | null>(null);
-  const visibleColumns = profile.columns.length ? profile.columns.map((column) => column.normalizedName) : Object.keys(rows[0] ?? {});
-  const hasRows = rows.length > 0;
+  const loadRequestRef = useRef(0);
   const selectedSheet = parsedDataset?.sheets.find((sheet) => sheet.name === selectedSheetName);
+  const visibleColumns = useMemo(() => profile.columns.map((column) => column.normalizedName), [profile.columns]);
+  const columnLabels = useMemo(() => new Map(profile.columns.map((column) => [column.normalizedName, column.displayName])), [profile.columns]);
+  const querySampleRows = useMemo(() => getQueryableRowsSample(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId, PREVIEW_SAMPLE_LIMIT), [activeDatasetId, activeDatasetVersionId, profile.datasetVersionId]);
+  const previewRows = useMemo(() => {
+    if (selectedSheet?.previewRows.length) return selectedSheet.previewRows.slice(0, PREVIEW_SAMPLE_LIMIT);
+    return querySampleRows;
+  }, [querySampleRows, selectedSheet]);
+  const tableColumns = useMemo(
+    () => visibleColumns.map((column) => ({ key: column, label: columnLabels.get(column) ?? column })),
+    [columnLabels, visibleColumns]
+  );
+  const hasRows = Boolean(activeDatasetId && profile.rowCount > 0);
   const parseAudit = selectedSheet?.parseAudit ?? [];
   const columnsWithParseWarnings = profile.columns.filter((column) => (column.parseWarnings?.length ?? 0) > 0 || column.mixedType);
   const diagnostics = useMemo(() => {
     const copilotContext = process.env.NODE_ENV === "development" && hasRows
-      ? buildCopilotContext({ rows, datasetProfile: profile, dashboardSpec: dashboard, viewState })
+      ? buildCopilotContext({ rows: previewRows, datasetProfile: profile, dashboardSpec: dashboard, viewState })
       : undefined;
     return createDatasetDiagnostics({ profile, parsedDataset, dashboardSpec: dashboard, copilotContext });
-  }, [dashboard, hasRows, parsedDataset, profile, rows, viewState]);
+  }, [dashboard, hasRows, parsedDataset, previewRows, profile, viewState]);
   const updatedAt = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" }) : "Sin actualizacion";
   const dateColumn = profile.columns.find((column) => profile.detectedDateColumns.includes(column.normalizedName));
   const detectedPeriod = dateColumn ? `Detectado desde ${dateColumn.displayName}` : "Sin periodo detectado";
@@ -73,33 +115,42 @@ export function DatasetPreview() {
   ].filter((item): item is string => Boolean(item));
 
   function exportPreviewCsv() {
-    const previewRows = rows;
-    const header = visibleColumns.map((column) => `"${column.replace(/"/g, '""')}"`).join(",");
-    const body = previewRows.map((row) => visibleColumns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([[header, body].filter(Boolean).join("\n")], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${profile.id || "dataset"}-preview.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    exportRowsCsv(`${profile.id || "dataset"}-preview-sample.csv`, previewRows, visibleColumns, (column) => columnLabels.get(column) ?? column);
     toast("Vista previa exportada en CSV.");
+  }
+
+  function cancelDatasetLoad() {
+    loadRequestRef.current += 1;
+    setLoading(false);
+    setLoadError("Carga cancelada por el usuario.");
   }
 
   useEffect(() => {
     if (!params.datasetId || params.datasetId === activeDatasetId) return;
-    let active = true;
-    setLoading(true);
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+    void Promise.resolve().then(() => {
+      if (loadRequestRef.current === requestId) {
+        setLoadError("");
+        setLoading(true);
+      }
+    });
     void loadPersistedDataset(params.datasetId)
       .then((payload) => {
-        if (!active || !payload) return;
+        if (loadRequestRef.current !== requestId || !payload) return;
         hydrateDataset({ rows: payload.rows, profile: payload.profile, datasetId: params.datasetId! });
       })
-      .catch((error) => toast(error instanceof Error ? error.message : "No se pudo cargar el dataset."))
+      .catch((error) => {
+        if (loadRequestRef.current !== requestId) return;
+        const message = error instanceof Error ? error.message : "No se pudo cargar el dataset.";
+        setLoadError(message);
+        toast(message);
+      })
       .finally(() => {
-        if (active) setLoading(false);
+        if (loadRequestRef.current === requestId) setLoading(false);
       });
     return () => {
-      active = false;
+      if (loadRequestRef.current === requestId) loadRequestRef.current += 1;
     };
   }, [activeDatasetId, hydrateDataset, params.datasetId, toast]);
 
@@ -126,7 +177,12 @@ export function DatasetPreview() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black tracking-[-0.04em]">Previsualizacion del Dataset</h1>
-            {loading && <p className="mt-2 text-sm font-semibold text-[#3d35ff]">Cargando dataset...</p>}
+            {loading && (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm font-semibold text-[#3d35ff]">
+                <span>Cargando dataset...</span>
+                <button onClick={cancelDatasetLoad} className="rounded-md border border-[#dfe5f0] bg-white px-3 py-1 text-xs text-[#536088]">Cancelar</button>
+              </div>
+            )}
             {hasRows ? (
               <p className="mt-3 flex items-center gap-2 text-lg text-[#536088]">
                 <FileSpreadsheet className="size-6 rounded bg-emerald-100 p-1 text-emerald-600" />
@@ -153,6 +209,15 @@ export function DatasetPreview() {
             </Link>
           </div>
         </div>
+
+        {loading && !hasRows && <DatasetPreviewSkeleton />}
+
+        {loadError && !loading && (
+          <section className="mt-7 rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-800">
+            <h2 className="font-bold">No se pudo cargar la vista previa</h2>
+            <p className="mt-2 text-sm font-semibold">{loadError}</p>
+          </section>
+        )}
 
         {!hasRows && importJob && (
           <section className="mt-7 rounded-xl border border-[#d9dcff] bg-white p-5">
@@ -221,6 +286,7 @@ export function DatasetPreview() {
           <section className="mt-5 soft-card rounded-xl p-5">
             <label className="text-sm font-bold">Hoja a analizar</label>
             <select
+              aria-label="Hoja a analizar"
               className="mt-2 h-11 rounded-lg border border-[#dfe5f0] bg-white px-4 text-sm"
               value={selectedSheetName}
               onChange={(event) => selectSheet(event.target.value)}
@@ -306,28 +372,25 @@ export function DatasetPreview() {
         {hasRows && <div className="mt-7 grid gap-7 xl:grid-cols-[1fr_340px]">
           <section className="soft-card rounded-xl p-5">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Vista previa de datos</h2>
-              <button onClick={exportPreviewCsv} className="flex items-center gap-2 rounded-md border border-[#dfe5f0] px-3 py-2 text-sm font-semibold"><Download className="size-4" /> Exportar vista previa</button>
+              <div>
+                <h2 className="text-lg font-bold">Vista previa de datos</h2>
+                <p className="mt-1 text-sm text-[#697597]">Mostrando {previewRows.length.toLocaleString("en-US")} de {profile.rowCount.toLocaleString("en-US")} filas. Usa Explorar datos para filtros y descarga completa.</p>
+              </div>
+              <button onClick={exportPreviewCsv} className="flex items-center gap-2 rounded-md border border-[#dfe5f0] px-3 py-2 text-sm font-semibold"><Download className="size-4" /> Exportar muestra</button>
             </div>
-            <div className="h-[420px] overflow-auto rounded-xl border border-[#edf1fa] lg:h-[520px]">
-              <table className="w-full min-w-[980px] text-left text-sm">
-                <thead className="sticky top-0 bg-[#fbfcff] text-xs text-[#536088]">
-                  <tr>{visibleColumns.map((key) => <th key={key} className="border-b border-[#edf1fa] px-3 py-3 font-bold">{profile.columns.find((column) => column.normalizedName === key)?.displayName ?? key}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={index} className="border-b border-[#edf1fa] last:border-0 hover:bg-[#fbfcff]">
-                      {visibleColumns.map((key) => <td key={key} className="max-w-[240px] truncate px-3 py-3 text-[#1c2748]">{String(row[key] ?? "-")}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <VirtualizedDataTable
+              ariaLabel="Vista previa virtualizada del dataset"
+              rows={previewRows}
+              columns={tableColumns}
+              totalRows={profile.rowCount}
+              height={520}
+              emptyMessage="No hay filas disponibles para la vista previa."
+            />
           </section>
 
           <aside className="space-y-6">
             <section className="soft-card rounded-xl p-5">
-              <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-5 text-[#3d35ff]" /> Insights detectados por reglas</h2>
+                <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="size-5 text-[#3d35ff]" /> Insights detectados por reglas</h2>
               <div className="mt-4 space-y-3">
                 {(showAllInsights ? insightItems : insightItems.slice(0, 4)).map((item) => (
                   <p key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm leading-6 text-[#34405f]"><CheckCircle2 className="mr-2 inline size-4 text-emerald-600" /> {item}</p>
@@ -336,7 +399,7 @@ export function DatasetPreview() {
               <button onClick={() => setShowAllInsights((value) => !value)} className="mt-4 w-full rounded-lg border border-[#dfe5fb] py-2 text-sm font-semibold text-[#3d35ff]">{showAllInsights ? "Ver menos insights" : "Ver todos los insights"}</button>
             </section>
             <section className="soft-card rounded-xl p-5">
-              <h2 className="text-lg font-bold">KPIs recomendados automaticamente</h2>
+                <h2 className="text-lg font-bold">KPIs recomendados automaticamente</h2>
               <div className="mt-4 space-y-3">
                 {(showAllKpis ? recommendedKpis : recommendedKpis.slice(0, 4)).map((item) => (
                   <div key={item} className="rounded-lg border border-[#edf1fa] p-3 text-sm font-semibold">{item}</div>

@@ -18,7 +18,8 @@ export function PresentationBuilder() {
   const router = useRouter();
   const presentation = useDashPilotStore((state) => state.presentation);
   const dashboard = useDashPilotStore((state) => state.dashboard);
-  const rows = useDashPilotStore((state) => state.rows);
+  const profile = useDashPilotStore((state) => state.profile);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
   const generatePresentation = useDashPilotStore((state) => state.generatePresentation);
   const options = useDashPilotStore((state) => state.presentationOptions);
   const setOptions = useDashPilotStore((state) => state.setPresentationOptions);
@@ -27,7 +28,7 @@ export function PresentationBuilder() {
   const toast = useToast();
   const [chat, setChat] = useState("");
   const [responses, setResponses] = useState(["Cuando tengas un dashboard, aplicare reglas locales para convertirlo en una presentacion ejecutiva."]);
-  const hasDashboard = rows.length > 0 && dashboard.widgets.length > 0;
+  const hasDashboard = Boolean(activeDatasetId && profile.rowCount > 0 && dashboard.widgets.length > 0);
   const canPresent = hasDashboard && presentation.slides.length > 0 && Boolean(activePresentationId);
   const presentationSaveCapability = capability("presentation.save");
 

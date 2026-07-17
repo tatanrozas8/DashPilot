@@ -2,7 +2,9 @@ import { z } from "zod";
 import type { DatasetProfile } from "@/types/dataset";
 import type { AnalyticalTableQuery, GovernedAnalyticalQuery } from "@/types/analytical-query";
 
-const fieldNameSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_]+$/, "Solo se permiten ids de columna normalizados.");
+const fieldNameSchema = z.string().trim().min(1).max(128).refine((value) => !/[\u0000-\u001f\u007f]/u.test(value), {
+  message: "El id de columna contiene caracteres de control no permitidos."
+});
 
 export const analyticalMetricSchema = z.object({
   field: fieldNameSchema,

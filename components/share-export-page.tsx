@@ -9,6 +9,7 @@ import { Button } from "@/components/shared/button";
 import { useToast } from "@/components/shared/toast";
 import { persistShareLink } from "@/lib/data-access";
 import { capability, type CapabilityId, type CapabilityStatus } from "@/lib/product/capabilities";
+import { getQueryableRowsForExport } from "@/lib/query-service/client";
 import { useDashPilotStore } from "@/lib/store/app-store";
 
 interface ExportCard {
@@ -54,11 +55,12 @@ export function ShareExportPage() {
   const setShareSettings = useDashPilotStore((state) => state.setShareSettings);
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
-  const rows = useDashPilotStore((state) => state.rows);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
   const profile = useDashPilotStore((state) => state.profile);
   const viewState = useDashPilotStore((state) => state.viewState);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
-  const hasDashboard = rows.length > 0 && dashboard.widgets.length > 0;
+  const hasDashboard = Boolean(activeDatasetId && profile.rowCount > 0 && dashboard.widgets.length > 0);
   const url = generatedUrl || "Aun no hay enlaces compartidos";
   const dashboardHref = `/app/dashboards/${activeDashboardId || dashboard.id}`;
   const shareLinkCapability = capability("share.interactiveLink");
@@ -71,6 +73,11 @@ export function ShareExportPage() {
       }
       if (shareSettings.requirePassword && sharePassword.trim().length < 8) {
         toast("La contrasena debe tener al menos 8 caracteres.");
+        return;
+      }
+      const rows = getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
+      if (!rows.length) {
+        toast("No hay snapshot local consultable para crear el enlace.");
         return;
       }
       const result = await persistShareLink({
@@ -123,6 +130,7 @@ export function ShareExportPage() {
   }
 
   function exportDatasetCsv() {
+    const rows = getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
     if (!rows.length) {
       toast("Sube un dataset antes de exportar CSV.");
       return;
@@ -240,7 +248,7 @@ export function ShareExportPage() {
           <div className="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {exportCards.filter((card) => capability(card.capabilityId).visible).map((item) => {
               const itemCapability = capability(item.capabilityId);
-              const disabled = !itemCapability.enabled || (item.capabilityId === "dashboard.exportCsv" ? !rows.length : !hasDashboard);
+              const disabled = !itemCapability.enabled || (item.capabilityId === "dashboard.exportCsv" ? !hasDashboard : !hasDashboard);
               return (
                 <article key={item.title} className="rounded-xl border border-[#e3e8f5] p-5">
                   <item.icon className="size-11 rounded-lg bg-[#f0f1ff] p-2 text-[#3d35ff]" />

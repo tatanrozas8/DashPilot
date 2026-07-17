@@ -64,6 +64,30 @@ test("public share links expose usable allowlisted filters", async ({ page }) =>
   await expect(page.getByText(/No se pudo|no es valido|error critico/i)).toHaveCount(0);
 });
 
+test("dashboard widgets and data explorer survive query-service filters", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Probar con datos de ejemplo" }).click();
+  await expect(page).toHaveURL(/\/app\/datasets\/preview$/);
+  await page.getByRole("link", { name: /Generar dashboard automaticamente/ }).click();
+  await expect(page).toHaveURL(/\/app\/dashboards\//, { timeout: 30_000 });
+
+  await expect(page.getByText(/No hay una version de dataset consultable|No se pudo ejecutar la consulta/i)).toHaveCount(0);
+  const dashboardText = await page.locator("main").innerText();
+
+  const filterSelect = page.locator("aside select").first();
+  if (await filterSelect.count()) {
+    await filterSelect.selectOption({ index: 1 });
+    await expect(page.getByText(/No hay una version de dataset consultable|No se pudo ejecutar la consulta/i)).toHaveCount(0);
+    await expect(page.locator("main")).not.toHaveText(dashboardText, { timeout: 10_000 });
+  }
+
+  await page.getByRole("button", { name: "Datos" }).click();
+  await expect(page.getByRole("heading", { name: "Explorar datos" })).toBeVisible();
+  await page.getByPlaceholder("Buscar en toda la tabla...").fill("Norte");
+  await expect(page.getByRole("table", { name: "Explorador virtualizado de datos" })).toBeVisible();
+  await expect(page.getByText(/No se pudo preparar la tabla|No se pudo ejecutar la consulta/i)).toHaveCount(0);
+});
+
 test("uploaded files start a recoverable background import job", async ({ page }) => {
   await page.goto("/");
   await page.locator('input[type="file"]').setInputFiles({

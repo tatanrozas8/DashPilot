@@ -8,9 +8,9 @@ import { useDashPilotStore } from "@/lib/store/app-store";
 export function ProjectsPage() {
   const currentProject = useDashPilotStore((state) => state.currentProject);
   const profile = useDashPilotStore((state) => state.profile);
-  const rows = useDashPilotStore((state) => state.rows);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
-  const hasProject = rows.length > 0;
+  const hasProject = Boolean(activeDatasetId && profile.rowCount > 0);
 
   return (
     <AppShell>

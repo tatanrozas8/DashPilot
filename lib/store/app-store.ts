@@ -32,6 +32,7 @@ import { createDashboardEffectRepository } from "@/lib/services/dashboard-side-e
 import { DomainError, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import type { ExecutionMode, SyncStatus } from "@/lib/observability/modes";
 import { DASH_PILOT_PERSIST_TTL_MS, DASH_PILOT_PERSIST_VERSION, purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
+import { clearQueryableDatasets, getQueryableRowsSample, getQueryableRowsForExport, registerQueryableDataset } from "@/lib/query-service/client";
 
 export interface PresentationOptions {
   theme: PresentationTheme;
@@ -95,8 +96,6 @@ export interface ProjectSummary {
 
 interface DashPilotState {
   currentProject: ProjectSummary;
-  rows: DataRow[];
-  currentDataset: DataRow[];
   profile: DatasetProfile;
   datasetProfile: DatasetProfile;
   dashboard: DashboardSpec;
@@ -344,8 +343,6 @@ function createInitialState() {
   const presentation = createEmptyPresentation();
   return {
     currentProject: { id: "", name: "Sin proyecto activo", owner: "Usuario", updatedAt: "Sube un dataset para comenzar" },
-    rows: [],
-    currentDataset: [],
     profile,
     datasetProfile: profile,
     dashboard,
@@ -457,10 +454,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const presentation = generatePresentationSpec(dashboard);
         const messages = [assistantMessage("Archivo analizado. Detecte metricas, dimensiones y filtros recomendados.")];
         const project = createProjectSummary(fileName);
+        registerQueryableDataset({ datasetId: profile.id, profile, rows, source: "local" });
         set({
           currentProject: project,
-          rows,
-          currentDataset: rows,
           profile,
           datasetProfile: profile,
           dashboard,
@@ -495,10 +491,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const viewState: DashboardViewState = { filters: [], selectedDateRange: undefined };
         const messages = [assistantMessage("Archivo real analizado. Detecte columnas, tipos, metricas y filtros recomendados.")];
         const project = createProjectSummary(parsed.fileName);
+        registerQueryableDataset({ datasetId: profile.id, profile, rows, source: "local" });
         set({
           currentProject: project,
-          rows,
-          currentDataset: rows,
           profile,
           datasetProfile: profile,
           dashboard,
@@ -547,10 +542,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const presentation = generatePresentationSpec(dashboard);
         const viewState: DashboardViewState = { filters: [], selectedDateRange: undefined };
         const project = createProjectSummary(parsed.fileName, get().activeProjectId || "local-project");
+        registerQueryableDataset({ datasetId: profile.id, profile, rows: selected.rows, source: "local" });
         set({
           currentProject: project,
-          rows: selected.rows,
-          currentDataset: selected.rows,
           profile,
           datasetProfile: profile,
           dashboard,
@@ -582,10 +576,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const viewState: DashboardViewState = { filters: [], selectedDateRange: undefined };
         const messages = [assistantMessage("Datos de ejemplo cargados. Ya puedes revisar el dataset o generar el dashboard.")];
         const project = { id: "sample-project", name: "Ejemplo comercial", owner: "Usuario", updatedAt: "Datos de ejemplo" };
+        registerQueryableDataset({ datasetId: profile.id, profile, rows, source: "local" });
         set({
           currentProject: project,
-          rows,
-          currentDataset: rows,
           profile,
           datasetProfile: profile,
           dashboard,
@@ -621,7 +614,8 @@ export const useDashPilotStore = create<DashPilotState>()(
         });
       },
       generateDashboard: () => {
-        const { activeDatasetVersionId, profile, rows } = get();
+        const { activeDatasetVersionId, activeDatasetId, profile } = get();
+        const rows = getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
         const dashboard = generateDashboardSpec({ ...profile, datasetVersionId: activeDatasetVersionId || profile.datasetVersionId }, rows, { datasetVersionId: activeDatasetVersionId || profile.datasetVersionId });
         const presentation = generatePresentationSpec(dashboard);
         set({
@@ -641,10 +635,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const nextProfile = profile ?? get().profile;
         const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
         const project = createProjectSummary(nextProfile.fileName, get().activeProjectId || "local-project");
+        if (rows.length) registerQueryableDataset({ datasetId: dashboard.datasetId, profile: nextProfile, rows, source: get().persistenceMode === "supabase" ? "supabase" : "local" });
         set({
           currentProject: project,
-          rows,
-          currentDataset: rows,
           profile: nextProfile,
           datasetProfile: nextProfile,
           dashboard,
@@ -671,10 +664,9 @@ export const useDashPilotStore = create<DashPilotState>()(
         const dashboard = generateDashboardSpec(profile, rows);
         const presentation = generatePresentationSpec(dashboard, get().presentationOptions.theme);
         const project = createProjectSummary(profile.fileName, get().activeProjectId || "local-project");
+        if (rows.length) registerQueryableDataset({ datasetId, profile, rows, source: get().persistenceMode === "supabase" ? "supabase" : "local" });
         set({
           currentProject: project,
-          rows,
-          currentDataset: rows,
           profile,
           datasetProfile: profile,
           dashboard,
@@ -910,8 +902,9 @@ export const useDashPilotStore = create<DashPilotState>()(
           pendingCopilotConfirmation: undefined
         });
         try {
+          const sampleRows = getQueryableRowsSample(before.activeDatasetVersionId || before.profile.datasetVersionId || before.activeDatasetId, 25);
           const copilotContext = buildCopilotContext({
-            rows: before.rows,
+            rows: sampleRows,
             datasetProfile: before.profile,
             dashboardSpec: before.dashboard,
             viewState: before.viewState,
@@ -927,7 +920,7 @@ export const useDashPilotStore = create<DashPilotState>()(
             presentationSpec: before.presentation,
             messages: before.messages,
             copilotContext,
-            rows: before.rows
+            rows: sampleRows
           });
           if (result.actions?.some((action) => action.type === "undo_last_action")) {
             const previous = before.copilotUndoStack.at(-1);
@@ -958,8 +951,8 @@ export const useDashPilotStore = create<DashPilotState>()(
             });
             return;
           }
-          let nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
-          let nextViewState = result.updatedViewState ?? get().viewState;
+          const nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
+          const nextViewState = result.updatedViewState ?? get().viewState;
           let nextPresentation = result.updatedPresentationSpec ?? get().presentation;
           if (!result.updatedPresentationSpec && result.actions?.some((action) => action.type === "generate_presentation" || action.type === "create_presentation")) {
             nextPresentation = generatePresentationSpec(nextDashboard, get().presentationOptions.theme);
@@ -1173,6 +1166,7 @@ export const useDashPilotStore = create<DashPilotState>()(
       toggleCopilotPanel: () => set({ isCopilotPanelOpen: !get().isCopilotPanelOpen }),
       clearSensitiveWorkspace: () => {
         const current = get();
+        clearQueryableDatasets();
         set({
           ...createInitialState(),
           presentationOptions: current.presentationOptions,

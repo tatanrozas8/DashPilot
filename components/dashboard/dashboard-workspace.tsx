@@ -11,18 +11,28 @@ import { AppShell } from "@/components/shared/app-shell";
 import { Button } from "@/components/shared/button";
 import { useToast } from "@/components/shared/toast";
 import { loadPersistedDashboard, updatePersistedDashboard } from "@/lib/data-access";
+import { getQueryableRowsForExport } from "@/lib/query-service/client";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
+
+type DashboardWorkspaceView = "dashboard" | "data";
+
+const dashboardWorkspaceViews: Array<{ value: DashboardWorkspaceView; label: string }> = [
+  { value: "dashboard", label: "Dashboard" },
+  { value: "data", label: "Datos" }
+];
 
 export function DashboardWorkspace() {
   const toast = useToast();
   const params = useParams<{ dashboardId?: string }>();
   const [exportOpen, setExportOpen] = useState(false);
-  const [activeView, setActiveView] = useState<"dashboard" | "data">("dashboard");
+  const [selectedView, setSelectedView] = useState<DashboardWorkspaceView>("dashboard");
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
-  const rows = useDashPilotStore((state) => state.rows);
+  const setViewState = useDashPilotStore((state) => state.setViewState);
   const profile = useDashPilotStore((state) => state.profile);
+  const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
   const dashboardEditDraft = useDashPilotStore((state) => state.dashboardEditDraft);
@@ -36,7 +46,8 @@ export function DashboardWorkspace() {
   const dashboardId = params.dashboardId ?? activeDashboardId;
   const shareHref = `/app/dashboards/${dashboardId}/compartir`;
   const visibleDashboard = isDashboardEditing && dashboardEditDraft ? dashboardEditDraft : dashboard;
-  const hasRows = rows.length > 0;
+  const hasRows = Boolean(activeDatasetId && profile.rowCount > 0);
+  const activeView = viewState.dataExplorer?.isOpen ? "data" : selectedView;
 
   function downloadText(fileName: string, content: string, type: string) {
     const url = URL.createObjectURL(new Blob([content], { type }));
@@ -53,16 +64,17 @@ export function DashboardWorkspace() {
   }
 
   function exportDatasetCsv() {
+    const rows = getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
+    if (!rows.length) {
+      toast("No hay filas locales disponibles para exportar. Usa Data Explorer para consultas paginadas.");
+      return;
+    }
     const columns = profile.columns.map((column) => column.normalizedName);
     const header = columns.map((column) => `"${column.replace(/"/g, '""')}"`).join(",");
     const body = rows.map((row) => columns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     downloadText(`${profile.id || "dataset"}-completo.csv`, [header, body].filter(Boolean).join("\n"), "text/csv;charset=utf-8");
     toast("Dataset completo exportado en CSV.");
   }
-
-  useEffect(() => {
-    if (viewState.dataExplorer?.isOpen) setActiveView("data");
-  }, [viewState.dataExplorer?.isOpen]);
 
   useEffect(() => {
     if (!params.dashboardId || params.dashboardId === "demo" || params.dashboardId === activeDashboardId) return;
@@ -79,7 +91,7 @@ export function DashboardWorkspace() {
 
   async function saveDashboard() {
     try {
-      const result = await updatePersistedDashboard(activeDashboardId, dashboard, viewState, rows, profile);
+      const result = await updatePersistedDashboard(activeDashboardId, dashboard, viewState, undefined, profile);
       const warning = "warning" in result ? result.warning : undefined;
       setPersistenceState({ activeDashboardId: result.dashboardId, persistenceMode: result.mode, persistenceStatus: warning ?? "Dashboard guardado", executionMode: result.executionMode, syncStatus: result.syncStatus, lastSyncCorrelationId: result.correlationId, lastSyncError: warning });
       toast(warning ?? (result.mode === "local" ? "Dashboard guardado localmente." : "Dashboard guardado correctamente."));
@@ -92,7 +104,7 @@ export function DashboardWorkspace() {
     const draft = dashboardEditDraft;
     if (!draft) return;
     try {
-      const result = await updatePersistedDashboard(activeDashboardId, draft, viewState, rows, profile);
+      const result = await updatePersistedDashboard(activeDashboardId, draft, viewState, undefined, profile);
       const warning = "warning" in result ? result.warning : undefined;
       const committed = commitDashboardEditing();
       setPersistenceState({ activeDashboardId: result.dashboardId, persistenceMode: result.mode, persistenceStatus: warning ?? "Dashboard guardado", executionMode: result.executionMode, syncStatus: result.syncStatus, lastSyncCorrelationId: result.correlationId, lastSyncError: warning });
@@ -100,6 +112,13 @@ export function DashboardWorkspace() {
       if (!committed) toast("No habia cambios pendientes para confirmar.");
     } catch (error) {
       toast(error instanceof Error ? error.message : "No se pudieron guardar los cambios.");
+    }
+  }
+
+  function selectView(value: "dashboard" | "data") {
+    setSelectedView(value);
+    if (value === "dashboard" && viewState.dataExplorer?.isOpen) {
+      setViewState({ dataExplorer: { ...viewState.dataExplorer, isOpen: false } });
     }
   }
 
@@ -148,13 +167,10 @@ export function DashboardWorkspace() {
         {hasRows ? (
           <>
             <div className="mb-5 flex flex-wrap gap-2">
-              {[
-                ["dashboard", "Dashboard"],
-                ["data", "Datos"]
-              ].map(([value, label]) => (
+              {dashboardWorkspaceViews.map(({ value, label }) => (
                 <button
                   key={value}
-                  onClick={() => setActiveView(value as "dashboard" | "data")}
+                  onClick={() => selectView(value)}
                   className={cn(
                     "h-10 rounded-lg border px-4 text-sm font-semibold transition",
                     activeView === value ? "border-[#7a73ff] bg-[#f0f1ff] text-[#332cff]" : "border-[#dfe5f0] bg-white text-[#536088] hover:border-[#bfc9ea]"

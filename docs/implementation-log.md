@@ -825,3 +825,65 @@ Debt remaining:
 - Add executable Supabase/Postgres tests for `import_jobs` RLS, queue leasing and migration constraints once Supabase CLI or a database test harness is available.
 - Replace `columnar-json` with Parquet when an approved writer/runtime is selected.
 - Wire the production object-storage adapter to real TUS/signed upload and run the import worker as a long-lived process in deployment.
+
+## 2026-07-17 - governed-server-side-analytical-query-service-2026-07-17
+
+Commit: `feat: add governed server side analytical query service`
+
+Prompt ID: `governed-server-side-analytical-query-service-2026-07-17`
+
+Objective:
+
+- Avoid downloading all dataset rows to the browser for analytical dashboard rendering.
+- Add reproducible allowlisted analytical queries over dataset-version artifacts.
+- Keep the existing in-memory engine as a parity reference for small fixtures.
+
+Files changed:
+
+- `types/analytical-query.ts`
+- `lib/query-service/schemas.ts`
+- `lib/query-service/service.ts`
+- `lib/query-service/widgets.ts`
+- `tests/analytical-query-service.test.ts`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added a Zod-governed query contract with `datasetVersionId`, metrics, dimensions, filters, time granularity, ordering, limit and offset.
+- Introduced `GovernedAnalyticalQueryService` with a replaceable `AnalyticalArtifactRepository` boundary for Parquet or equivalent columnar artifacts.
+- The service currently executes through the existing deterministic dashboard query engine after reconstructing server-side rows from a columnar artifact. DuckDB was not added because the repo has no DuckDB/Arrow dependency or native runtime configured; the repository/executor boundary keeps that replacement local.
+- Queries are cost-estimated before execution with scan-row, projected-cell, result-limit and estimated-cardinality controls, plus timeout and `AbortSignal` cancellation checks.
+- Results include metadata for cache status, coverage, warnings, cost and lineage with a stable query hash.
+- Cache keys are version plus stable query hash; invalidation is version-scoped. Recurring low-cardinality queries promote to preaggregations after repeated use.
+- Added a widget adapter that converts existing aggregate/table widgets and dashboard filters into governed server-side query contracts without SQL text from the user or LLM.
+
+Validation:
+
+- `npm run test -- tests/analytical-query-service.test.ts`: passed, 10 tests.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `npm run test`: passed, 35 files and 219 tests.
+- `npm run build`: passed, 23 app routes generated.
+- `npx playwright test --reporter=line --timeout=45000`: passed, 3 Chromium E2E tests.
+
+Known failures:
+
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- No migration added.
+- No environment variables added.
+- No dependency added, so no clean install was required.
+
+Security/privacy notes:
+
+- Query schemas reject non-normalized identifiers and unknown fields before execution.
+- The service never accepts raw SQL from clients or generated text.
+- Tenant authorization is enforced at the artifact repository boundary in the in-memory implementation and covered by tests.
+
+Debt remaining:
+
+- Replace the current columnar in-process executor with a DuckDB/Arrow/Parquet adapter once the runtime dependency is approved and benchmarked in this repo.
+- Wire the dashboard renderer/data explorer request path to this service-backed contract in the app shell without staging unrelated dirty UI changes.
+- Add executable database isolation tests when a persisted artifact repository/RLS-backed query store lands.

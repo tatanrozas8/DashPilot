@@ -122,6 +122,60 @@ type PublicShareAccessLogsTable = {
   Relationships: [];
 };
 
+type ImportJobsTable = {
+  Row: {
+    id: string;
+    project_id: string | null;
+    dataset_id: string | null;
+    dataset_version_id: string | null;
+    user_id: string | null;
+    idempotency_key: string | null;
+    status: string;
+    stage: string;
+    progress: number;
+    attempts: number;
+    max_attempts: number;
+    lease_owner: string | null;
+    heartbeat_at: string | null;
+    next_run_at: string | null;
+    error_message: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    cancelled_at: string | null;
+    dead_letter_at: string | null;
+    created_at: string;
+    updated_at: string;
+    file_name: string | null;
+    file_type: string | null;
+    file_size: number;
+    declared_mime_type: string | null;
+    detected_mime_type: string | null;
+    storage_bucket: string;
+    storage_path: string | null;
+    upload_protocol: string;
+    upload_session_json: Json;
+    retention_policy: string;
+    retained_until: string | null;
+    scanner_provider: string | null;
+    scan_status: string;
+    scan_result_json: Json;
+    validation_json: Json;
+    preview_json: Json;
+    completed_stages: string[];
+    columnar_format: string | null;
+    columnar_storage_path: string | null;
+    active_artifact_path: string | null;
+  };
+  Insert: Partial<ImportJobsTable["Row"]> & {
+    user_id?: string | null;
+    status?: string;
+    stage?: string;
+    progress?: number;
+  };
+  Update: Partial<ImportJobsTable["Row"]>;
+  Relationships: [];
+};
+
 export interface Database {
   public: {
     Tables: {
@@ -141,7 +195,7 @@ export interface Database {
       share_widget_results: ShareWidgetResultsTable;
       share_filter_snapshots: ShareFilterSnapshotsTable;
       public_share_access_logs: PublicShareAccessLogsTable;
-      import_jobs: Table;
+      import_jobs: ImportJobsTable;
       audit_logs: Table;
     };
     Views: { [key: string]: never };

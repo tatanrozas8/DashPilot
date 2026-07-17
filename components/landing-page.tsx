@@ -6,15 +6,13 @@ import { useRouter } from "next/navigation";
 import { BarChart3, FileUp, Lock, MessageCircle, Presentation, Sparkles, Upload, WandSparkles, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { Logo } from "@/components/shared/logo";
-import { parseUploadedFile } from "@/lib/files/parse-file";
-import { persistParsedDataset } from "@/lib/data-access";
+import { startDatasetImport } from "@/lib/data-access";
 import { useDashPilotStore } from "@/lib/store/app-store";
 
 export function LandingPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const loadDemo = useDashPilotStore((state) => state.loadDemo);
-  const setParsedDataset = useDashPilotStore((state) => state.setParsedDataset);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -22,22 +20,20 @@ export function LandingPage() {
   async function handleFile(file: File) {
     try {
       setError("");
-      setStatus("Subiendo archivo...");
-      const parsed = await parseUploadedFile(file);
-      setParsedDataset(parsed);
-      setStatus("Guardando dataset...");
-      const result = await persistParsedDataset({ file, parsed });
+      setStatus("Creando upload firmado...");
+      const result = await startDatasetImport(file);
       setPersistenceState({
         activeDatasetId: result.datasetId,
-        activeDatasetVersionId: result.datasetVersionId ?? "",
-        activeProjectId: result.projectId ?? "local-project",
+        activeDatasetVersionId: result.datasetVersionId,
+        activeProjectId: result.projectId,
         persistenceMode: result.mode,
-        persistenceStatus: result.warning ?? (result.mode === "supabase" ? "Guardado en Supabase" : "Modo local"),
+        persistenceStatus: result.warning ?? "Importacion encolada.",
         executionMode: result.executionMode,
         syncStatus: result.syncStatus,
         lastSyncCorrelationId: result.correlationId,
         lastSyncError: result.warning
       });
+      setStatus("Archivo recibido. El worker procesara la importacion en segundo plano.");
       router.push(`/app/datasets/${result.datasetId}/preview`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo procesar el archivo.");

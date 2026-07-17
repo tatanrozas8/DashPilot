@@ -6,6 +6,7 @@ import type { PresentationSpec } from "@/types/presentation";
 import type { ShareLink } from "@/types/export";
 import type {
   DashboardPersistResult,
+  DatasetImportStartResult,
   DatasetPersistResult,
   ParsedDatasetPayload,
   PersistedDashboardPayload,
@@ -14,6 +15,7 @@ import type {
   SharePersistResult
 } from "@/lib/data-access/types";
 import { enqueueOutbox } from "@/lib/data-access/outbox";
+import { createBrowserImportJob, getBrowserImportJob, getBrowserImportJobByDatasetId, markBrowserUploadQueued, uploadFileToSession } from "@/lib/imports/upload-session";
 import { createCorrelationId, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import {
   activateReadyDatasetVersion,
@@ -80,6 +82,31 @@ function degradedResult(error: unknown, fallbackMessage: string, correlationId =
     recoverable: domainError.recoverable,
     warning: `${domainError.userMessage} Reintentaremos automaticamente. ID: ${domainError.correlationId}`
   };
+}
+
+export async function startDatasetImport(file: File, input: { idempotencyKey?: string } = {}): Promise<DatasetImportStartResult> {
+  const correlationId = createCorrelationId("import");
+  const started = await createBrowserImportJob(file, { idempotencyKey: input.idempotencyKey });
+  const uploaded = await uploadFileToSession(file, started.uploadSession);
+  const queued = await markBrowserUploadQueued(started.job.id);
+  return {
+    ...localResult(correlationId),
+    job: queued,
+    uploadSession: started.uploadSession,
+    datasetId: queued.datasetId,
+    datasetVersionId: queued.datasetVersionId,
+    projectId: queued.projectId,
+    reusedExistingJob: started.reusedExistingJob,
+    warning: `${localModeWarning()} ${uploaded.storagePath ? "Importacion encolada; el worker de imports debe procesarla." : ""}`.trim()
+  };
+}
+
+export async function loadImportJob(jobId: string) {
+  return getBrowserImportJob(jobId);
+}
+
+export async function loadImportJobForDataset(datasetId: string) {
+  return getBrowserImportJobByDatasetId(datasetId);
 }
 
 export async function persistParsedDataset({ file, parsed, idempotencyKey }: ParsedDatasetPayload): Promise<DatasetPersistResult> {

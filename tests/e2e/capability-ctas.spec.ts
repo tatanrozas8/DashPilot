@@ -63,3 +63,19 @@ test("public share links expose usable allowlisted filters", async ({ page }) =>
   await expect(page.getByText("Sin filtros activos")).toBeVisible();
   await expect(page.getByText(/No se pudo|no es valido|error critico/i)).toHaveCount(0);
 });
+
+test("uploaded files start a recoverable background import job", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "ventas-e2e.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Region,Ventas\nNorte,100\nSur,200\n")
+  });
+
+  await expect(page).toHaveURL(/\/app\/datasets\/dataset_.*\/preview$/, { timeout: 30_000 });
+  await expect(page.getByText("Importacion recuperable")).toBeVisible();
+  await expect(page.getByText(/Estado queued/)).toBeVisible();
+  await expect(page.getByText("Preview seguro")).toBeVisible();
+  await expect(page.getByText("Region,Ventas")).toBeVisible();
+  await expect(page.getByText("Vista previa de datos")).toHaveCount(0);
+});

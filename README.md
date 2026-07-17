@@ -33,16 +33,19 @@ Supported files:
 - `.xlsx`
 - `.xls`
 
-The browser parser validates the file, detects workbook sheets, normalizes column names, removes empty rows, profiles the selected sheet, and generates a `DashboardSpec` from the detected fields. Example data is still available through `Probar con datos de ejemplo`.
+Production imports now start as recoverable background jobs. The browser creates a signed resumable upload session, uploads the original file to object storage, and shows only a bounded safe preview while a modular-monolith import worker validates, scans, parses, profiles, converts, persists, and activates the dataset version. Example data is still available through `Probar con datos de ejemplo`.
 
 Current MVP limits:
 
-- Up to 50,000 rows are processed in-browser.
-- Dataset preview renders an explicit bounded sample.
+- Up to 50,000 rows are activated per dataset version by the worker.
+- Dataset preview renders an explicit bounded sample and can show queued import progress before rows are ready.
 - Supabase persistence is active when env vars and Auth session are available.
 - The app remains functional without Supabase env vars as an explicit local sandbox. Raw rows are kept in memory, while browser persistence is limited to non-sensitive preferences and resumable non-sensitive metadata.
 - Dashboard generation is deterministic: it builds a `DashboardSpec` from the current `DatasetProfile` and rows. Copilot provider mode is beta/partial; when no provider is configured, deterministic/degraded mode is surfaced to the user.
-- Max upload size is 25MB for the browser MVP.
+- Max upload size is 250MB for signed import jobs; parsing remains outside the browser.
+- Background import policy validates extension, detected MIME/magic bytes, workbook sheet count, compression ratio, malicious archive entries and antivirus scan results before activation.
+- Original files are retained privately by default under `retain_original_private`; jobs may be configured for `delete_original_after_import` with an explicit retention timestamp.
+- Worker jobs use heartbeats, retries, cancellation and dead-letter state. Long imports are not intended to run inside short-lived serverless request handlers.
 
 ## Capability Status
 

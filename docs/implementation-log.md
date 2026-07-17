@@ -747,3 +747,81 @@ Debt remaining:
 
 - Add executable Supabase/Postgres tests for the 0005 RPC and RLS policies.
 - Broaden public filter combinations only if there is a product decision and a bounded precomputation strategy.
+
+## 2026-07-16 - resumable-background-imports-2026-07-16
+
+Commit: `feat: move dataset ingestion to resumable background jobs`
+
+Prompt ID: `resumable-background-imports-2026-07-16`
+
+Objective:
+
+- Move heavy dataset ingestion out of the browser.
+- Introduce signed/resumable upload contracts, recoverable import jobs, worker heartbeats, retry, cancellation and dead-letter handling.
+- Validate file security before activation and keep a safe preview while processing.
+
+Files changed:
+
+- `types/imports.ts`
+- `types/supabase.ts`
+- `lib/imports/file-security.ts`
+- `lib/imports/scanner.ts`
+- `lib/imports/columnar.ts`
+- `lib/imports/import-worker.ts`
+- `lib/imports/upload-session.ts`
+- `lib/imports/schemas.ts`
+- `lib/data-access/index.ts`
+- `lib/data-access/types.ts`
+- `components/landing-page.tsx`
+- `components/dataset-preview.tsx`
+- `supabase/migrations/0006_resumable_import_jobs.sql`
+- `tests/import-file-security.test.ts`
+- `tests/import-worker.test.ts`
+- `tests/import-jobs-migration.test.ts`
+- `tests/e2e/capability-ctas.spec.ts`
+- `README.md`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Upload now starts as an import job instead of parsing the full file in `LandingPage`.
+- The import domain has explicit contracts for resumable upload sessions, safe previews, validation issues, scanner results, progress events and columnar artifacts.
+- `ImportWorker` is a modular-monolith worker abstraction with leases, heartbeats, retry scheduling, cancellation and dead-letter state. It is not tied to a short-lived serverless request handler.
+- File validation checks extension, declared MIME, detected magic bytes, size, workbook sheet count, compression ratio, macro/encrypted flags and suspicious archive entries.
+- Antivirus is represented by a replaceable `MalwareScanner` interface. Tests use deterministic clean/infected scanners.
+- Worker activation is delayed until security validation, scan, parsing, profiling, columnar conversion and artifact persistence succeed.
+- Columnar output uses `columnar-json` because the repo has no Parquet writer dependency yet; the artifact boundary is isolated so a Parquet adapter can replace it.
+- Original-file retention is explicit through `retain_original_private` or `delete_original_after_import` plus optional retention timestamp.
+
+Validation:
+
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run test -- tests/import-file-security.test.ts tests/import-worker.test.ts tests/import-jobs-migration.test.ts`: passed, 3 files and 13 tests.
+- `npm.cmd run test`: passed, 34 files and 209 tests.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run build`: passed, 23 app routes generated.
+- `npx.cmd playwright test --reporter=line --timeout=45000`: passed, 3 Chromium E2E tests.
+
+Known failures:
+
+- `where.exe supabase`: Supabase CLI was not installed, so executable local Postgres/RLS migration tests could not be run.
+- Git still warns that `C:\Users\CristiÃ¡n\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- Added `supabase/migrations/0006_resumable_import_jobs.sql`.
+- No new environment variables.
+- Production deployments need a real long-lived import worker process and configured object-storage/TUS adapter plus antivirus provider.
+
+Security/privacy notes:
+
+- Browser preview reads only bounded header bytes and does not store raw rows in browser persistence.
+- Jobs do not set `activeArtifactPath` until the worker completes validation and activation.
+- Public/client code still does not import `SUPABASE_SERVICE_ROLE_KEY`.
+- Scanner failures and infected files dead-letter before parsing.
+
+Debt remaining:
+
+- Add executable Supabase/Postgres tests for `import_jobs` RLS, queue leasing and migration constraints once Supabase CLI or a database test harness is available.
+- Replace `columnar-json` with Parquet when an approved writer/runtime is selected.
+- Wire the production object-storage adapter to real TUS/signed upload and run the import worker as a long-lived process in deployment.

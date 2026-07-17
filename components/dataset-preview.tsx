@@ -7,10 +7,11 @@ import { BarChart3, Calendar, CheckCircle2, Database, Download, FileSpreadsheet,
 import { AppShell } from "@/components/shared/app-shell";
 import { useToast } from "@/components/shared/toast";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
-import { loadPersistedDataset } from "@/lib/data-access";
+import { loadImportJobForDataset, loadPersistedDataset } from "@/lib/data-access";
 import { createDatasetDiagnostics, logDatasetDiagnostics } from "@/lib/debug/dataset-diagnostics";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import type { SemanticColumnType } from "@/types/dataset";
+import type { ImportJobRecord } from "@/types/imports";
 
 const correctionOptions: Array<{ label: string; value: SemanticColumnType }> = [
   { label: "Metrica", value: "metric" },
@@ -43,6 +44,7 @@ export function DatasetPreview() {
   const [showAllKpis, setShowAllKpis] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [selectedProfileDetail, setSelectedProfileDetail] = useState<string | null>(null);
+  const [importJob, setImportJob] = useState<ImportJobRecord | null>(null);
   const visibleColumns = profile.columns.length ? profile.columns.map((column) => column.normalizedName) : Object.keys(rows[0] ?? {});
   const hasRows = rows.length > 0;
   const selectedSheet = parsedDataset?.sheets.find((sheet) => sheet.name === selectedSheetName);
@@ -102,6 +104,19 @@ export function DatasetPreview() {
   }, [activeDatasetId, hydrateDataset, params.datasetId, toast]);
 
   useEffect(() => {
+    if (!params.datasetId || hasRows) {
+      return;
+    }
+    let active = true;
+    void loadImportJobForDataset(params.datasetId).then((job) => {
+      if (active) setImportJob(job);
+    });
+    return () => {
+      active = false;
+    };
+  }, [hasRows, params.datasetId]);
+
+  useEffect(() => {
     if (hasRows) logDatasetDiagnostics(diagnostics);
   }, [diagnostics, hasRows]);
 
@@ -116,6 +131,11 @@ export function DatasetPreview() {
               <p className="mt-3 flex items-center gap-2 text-lg text-[#536088]">
                 <FileSpreadsheet className="size-6 rounded bg-emerald-100 p-1 text-emerald-600" />
                 Archivo subido: <strong className="text-[#071334]">{uploadedFileName || profile.fileName}</strong>
+              </p>
+            ) : importJob ? (
+              <p className="mt-3 flex items-center gap-2 text-lg text-[#536088]">
+                <FileSpreadsheet className="size-6 rounded bg-[#f1f3ff] p-1 text-[#3d35ff]" />
+                Importacion en proceso: <strong className="text-[#071334]">{importJob.fileName}</strong>
               </p>
             ) : (
               <p className="mt-3 text-lg text-[#536088]">Sube un dataset para comenzar.</p>
@@ -134,7 +154,44 @@ export function DatasetPreview() {
           </div>
         </div>
 
-        {!hasRows && (
+        {!hasRows && importJob && (
+          <section className="mt-7 rounded-xl border border-[#d9dcff] bg-white p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#1c2748]">Importacion recuperable</h2>
+                <p className="mt-2 text-sm leading-6 text-[#536088]">
+                  Estado {importJob.status}. Etapa {importJob.stage}. La UI no procesa el archivo completo; el worker continua desde la cola.
+                </p>
+              </div>
+              <span className="rounded-full bg-[#f1f3ff] px-3 py-1 text-sm font-bold text-[#3d35ff]">{importJob.progress}%</span>
+            </div>
+            <div className="mt-4 h-3 overflow-hidden rounded-full bg-[#edf1fa]" aria-label="Progreso de importacion">
+              <div className="h-full rounded-full bg-[#3d35ff]" style={{ width: `${importJob.progress}%` }} />
+            </div>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr]">
+              <div className="rounded-xl border border-[#edf1fa] p-4">
+                <h3 className="font-bold">Preview seguro</h3>
+                <p className="mt-2 text-sm text-[#536088]">{importJob.safePreview.fileType.toUpperCase()} · {importJob.safePreview.detectedMimeType} · {importJob.safePreview.sizeBytes.toLocaleString("en-US")} bytes</p>
+                {importJob.safePreview.sampleTextLines.length ? (
+                  <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-[#fbfcff] p-3 text-xs text-[#34405f]">{importJob.safePreview.sampleTextLines.join("\n")}</pre>
+                ) : (
+                  <p className="mt-3 rounded-lg bg-[#fbfcff] p-3 text-sm text-[#536088]">Preview tabular pendiente hasta que el worker inspeccione el archivo fuera del navegador.</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-[#edf1fa] p-4">
+                <h3 className="font-bold">Eventos</h3>
+                <div className="mt-3 space-y-2 text-sm text-[#536088]">
+                  {importJob.events.slice(-4).map((event) => (
+                    <p key={`${event.stage}-${event.createdAt}`}><strong className="text-[#1c2748]">{event.stage}:</strong> {event.message}</p>
+                  ))}
+                  {importJob.error && <p className="rounded-lg bg-rose-50 p-2 font-semibold text-rose-700">{importJob.error.message}</p>}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {!hasRows && !importJob && (
           <section className="mt-7 soft-card rounded-xl p-8 text-center">
             <h2 className="text-xl font-bold">Sin proyecto activo</h2>
             <p className="mt-2 text-[#617094]">Sube un dataset para comenzar. Aún no hay dashboards, presentaciones ni enlaces compartidos.</p>

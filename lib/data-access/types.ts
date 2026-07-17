@@ -1,6 +1,7 @@
 import type { DataRow, DatasetProfile, FileParseResult } from "@/types/dataset";
 import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { ShareLink } from "@/types/export";
+import type { ImportJobRecord, ResumableUploadSession } from "@/types/imports";
 import type { ObservableOperation } from "@/lib/observability/modes";
 import type { PublicWidgetResult } from "@/lib/share/public-snapshot";
 
@@ -19,6 +20,15 @@ export interface DatasetPersistResult extends PersistenceResult {
   storagePath?: string;
   profile: DatasetProfile;
   rows: DataRow[];
+}
+
+export interface DatasetImportStartResult extends PersistenceResult {
+  job: ImportJobRecord;
+  uploadSession: ResumableUploadSession;
+  datasetId: string;
+  datasetVersionId: string;
+  projectId: string;
+  reusedExistingJob: boolean;
 }
 
 export interface DashboardPersistResult extends PersistenceResult {

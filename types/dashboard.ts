@@ -110,6 +110,12 @@ export interface DashboardFilterConfig {
   field: string;
   label: string;
   type: "date_range" | "multi_select" | "single_select" | "number_range";
+  allowedValues?: DashboardFilterOption[];
+}
+
+export interface DashboardFilterOption {
+  label: string;
+  value: string | number | boolean;
 }
 
 export interface DashboardViewState {

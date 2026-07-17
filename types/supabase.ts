@@ -18,6 +18,7 @@ type ShareLinksTable = {
     access: "public" | "private" | "password";
     password_hash: string | null;
     password_salt: string | null;
+    allowed_filters_json: Json | null;
     expires_at: string | null;
     allow_filters: boolean;
     allow_download: boolean;
@@ -37,6 +38,7 @@ type ShareLinksTable = {
     access: "public" | "private" | "password";
     password_hash?: string | null;
     password_salt?: string | null;
+    allowed_filters_json?: Json | null;
     expires_at?: string | null;
     allow_filters?: boolean;
     allow_download?: boolean;
@@ -69,6 +71,27 @@ type ShareWidgetResultsTable = {
     created_at?: string;
   };
   Update: Partial<ShareWidgetResultsTable["Insert"]>;
+  Relationships: [];
+};
+
+type ShareFilterSnapshotsTable = {
+  Row: {
+    id: string;
+    share_link_id: string;
+    filter_key: string;
+    filters_json: Json;
+    revision_id: string;
+    created_at: string;
+  };
+  Insert: {
+    id?: string;
+    share_link_id: string;
+    filter_key: string;
+    filters_json?: Json;
+    revision_id: string;
+    created_at?: string;
+  };
+  Update: Partial<ShareFilterSnapshotsTable["Insert"]>;
   Relationships: [];
 };
 
@@ -116,6 +139,7 @@ export interface Database {
       chat_messages: Table;
       share_links: ShareLinksTable;
       share_widget_results: ShareWidgetResultsTable;
+      share_filter_snapshots: ShareFilterSnapshotsTable;
       public_share_access_logs: PublicShareAccessLogsTable;
       import_jobs: Table;
       audit_logs: Table;

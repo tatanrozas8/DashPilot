@@ -4,11 +4,12 @@ import type { ShareLink } from "@/types/export";
 import type { Json } from "@/types/supabase";
 import type { PublicSharedDashboard } from "@/lib/data-access/types";
 import type { PublicDashboardSnapshot, PublicSharePayload } from "@/lib/share/public-snapshot";
-import { publicShareScopes } from "@/lib/share/public-snapshot";
+import { normalizePublicShareFilters, publicFilterKey, publicShareScopes } from "@/lib/share/public-snapshot";
 import { createPasswordSalt, createPublicShareToken, hashPublicSharePassword, hashPublicShareToken, isPublicShareUsable } from "@/lib/share/public-access";
 import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { shareLinkSchema } from "@/lib/validation/schemas";
+import type { DashboardFilter } from "@/types/dashboard";
 
 export function createShareLinkToken() {
   return createPublicShareToken();
@@ -22,6 +23,10 @@ const localShareLinks = new Map<string, { link: ShareLink & { isActive?: boolean
 
 function snapshotRowsJson(result: PublicDashboardSnapshot["widgetResults"][number]): Json {
   return JSON.parse(JSON.stringify(result.rows)) as Json;
+}
+
+function jsonValue(value: unknown): Json {
+  return JSON.parse(JSON.stringify(value)) as Json;
 }
 
 export async function createShareLink(link: ShareLink, options: { password?: string; snapshot?: PublicDashboardSnapshot; payload?: PublicSharePayload } = {}) {
@@ -47,6 +52,7 @@ export async function createShareLink(link: ShareLink, options: { password?: str
     scopes,
     password_hash: passwordHash,
     password_salt: passwordSalt,
+    allowed_filters_json: options.snapshot ? jsonValue(options.snapshot.allowedFilters) : [],
     expires_at: link.expiresAt,
     allow_filters: link.allowFilters,
     allow_download: link.allowDownload,
@@ -54,13 +60,29 @@ export async function createShareLink(link: ShareLink, options: { password?: str
   }).select("id").single();
   if (error) throw new Error(`No se pudo crear el enlace: ${error.message}`);
   if (options.snapshot) {
+    const { error: filterSnapshotError } = await supabase.from("share_filter_snapshots").insert(
+      options.snapshot.filterSnapshots.map((snapshot) => ({
+        share_link_id: data.id,
+        filter_key: snapshot.filterKey,
+        filters_json: jsonValue(snapshot.filters),
+        revision_id: snapshot.revisionId
+      }))
+    );
+    if (filterSnapshotError) {
+      const { error: revokeError } = await supabase
+        .from("share_links")
+        .update({ is_active: false, revoked_at: new Date().toISOString() })
+        .eq("id", data.id);
+      const rollbackMessage = revokeError ? ` Reversion fallida: ${revokeError.message}` : "";
+      throw new Error(`No se pudo guardar el indice de filtros publico: ${filterSnapshotError.message}.${rollbackMessage}`);
+    }
     const { error: snapshotError } = await supabase.from("share_widget_results").insert(
-      options.snapshot.widgetResults.map((result) => ({
+      options.snapshot.filterSnapshots.flatMap((snapshot) => snapshot.widgetResults.map((result) => ({
         share_link_id: data.id,
         widget_id: result.widgetId,
         revision_id: result.revisionId,
         result_json: snapshotRowsJson(result)
-      }))
+      })))
     );
     if (snapshotError) {
       const { error: revokeError } = await supabase
@@ -131,7 +153,7 @@ export async function disableShareLink(token: string) {
   if (error) throw new Error(`No se pudo desactivar el enlace: ${error.message}`);
 }
 
-export async function getPublicSharedDashboard(token: string, password?: string): Promise<PublicSharedDashboard | null> {
+export async function getPublicSharedDashboard(token: string, password?: string, requestedFilters: DashboardFilter[] = []): Promise<PublicSharedDashboard | null> {
   const tokenHash = await hashPublicShareToken(token);
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
@@ -144,16 +166,20 @@ export async function getPublicSharedDashboard(token: string, password?: string)
     }
     if (!local.snapshot) return null;
     if (!local.payload) return null;
+    const filters = normalizePublicShareFilters(local.snapshot.allowedFilters, requestedFilters);
+    if (!filters) return null;
+    const filterSnapshot = local.snapshot.filterSnapshots.find((snapshot) => snapshot.filterKey === publicFilterKey(filters));
+    if (!filterSnapshot) return null;
     return {
       link: { ...link, token: undefined, passwordRequired: Boolean(local.passwordHash) },
       dashboard: local.payload.dashboard,
       viewState: local.payload.viewState,
-      widgetResults: local.snapshot.widgetResults,
+      widgetResults: filterSnapshot.widgetResults,
       allowedFilters: link.allowFilters ? local.snapshot.allowedFilters : []
     };
   }
 
-  const { data, error } = await supabase.rpc("get_public_shared_dashboard", { share_token: token, share_password: password ?? null });
+  const { data, error } = await supabase.rpc("get_public_shared_dashboard", { share_token: token, share_password: password ?? null, requested_filters: jsonValue(requestedFilters) });
   if (error) throw new Error(`No se pudo abrir el enlace compartido: ${error.message}`);
   if (!data) return null;
   const payload = data as unknown as {

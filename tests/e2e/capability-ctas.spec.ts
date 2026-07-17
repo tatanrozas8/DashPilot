@@ -1,8 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-test("main capability CTAs reflect real, beta and disabled behavior", async ({ page }) => {
+async function openDemoShareExport(page: Page) {
   await page.goto("/");
-
   await page.getByRole("button", { name: "Probar con datos de ejemplo" }).click();
   await expect(page).toHaveURL(/\/app\/datasets\/preview$/);
   await expect(page.getByText(/Vista previa de datos/)).toBeVisible();
@@ -14,6 +13,10 @@ test("main capability CTAs reflect real, beta and disabled behavior", async ({ p
   await page.getByRole("link", { name: "Compartir" }).click();
   await expect(page).toHaveURL(/\/compartir$/);
   await expect(page.getByText("Compartir enlace interactivo")).toBeVisible();
+}
+
+test("main capability CTAs reflect real, beta and disabled behavior", async ({ page }) => {
+  await openDemoShareExport(page);
   await expect(page.getByText("Requerir contrasena")).toBeVisible();
   await expect(page.getByText(/resultados agregados por widget/)).toBeVisible();
 
@@ -38,4 +41,25 @@ test("main capability CTAs reflect real, beta and disabled behavior", async ({ p
   await expect(page.getByRole("link", { name: "Presentar ahora" })).toHaveAttribute("href", /\/app\/present\//);
   await page.getByRole("link", { name: "Presentar ahora" }).click();
   await expect(page).toHaveURL(/\/app\/present\//);
+});
+
+test("public share links expose usable allowlisted filters", async ({ page }) => {
+  await openDemoShareExport(page);
+
+  await page.getByRole("button", { name: "Crear y copiar" }).click();
+  await expect(page.getByRole("link", { name: "Abrir vista previa" })).toBeVisible();
+  await page.getByRole("link", { name: "Abrir vista previa" }).click();
+
+  await expect(page).toHaveURL(/\/share\/share_/);
+  await expect(page.getByText("Filtros permitidos")).toBeVisible();
+  const firstFilter = page.getByRole("combobox").first();
+  await firstFilter.selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Aplicar filtros" }).click();
+
+  await expect(page.getByRole("button", { name: "Limpiar" })).toBeEnabled();
+  await expect(page.getByText("Sin filtros activos")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Limpiar" }).click();
+  await expect(page.getByText("Sin filtros activos")).toBeVisible();
+  await expect(page.getByText(/No se pudo|no es valido|error critico/i)).toHaveCount(0);
 });

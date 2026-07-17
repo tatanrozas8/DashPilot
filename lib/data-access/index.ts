@@ -1,7 +1,7 @@
 "use client";
 
 import type { DataRow, DatasetProfile } from "@/types/dataset";
-import type { DashboardSpec, DashboardViewState } from "@/types/dashboard";
+import type { DashboardFilter, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { PresentationSpec } from "@/types/presentation";
 import type { ShareLink } from "@/types/export";
 import type {
@@ -314,6 +314,6 @@ export async function persistShareLink(input: {
   }
 }
 
-export async function loadPublicShare(token: string, password?: string): Promise<PublicSharedDashboard | null> {
-  return getPublicSharedDashboard(token, password);
+export async function loadPublicShare(token: string, password?: string, requestedFilters: DashboardFilter[] = []): Promise<PublicSharedDashboard | null> {
+  return getPublicSharedDashboard(token, password, requestedFilters);
 }

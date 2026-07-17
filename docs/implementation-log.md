@@ -675,3 +675,75 @@ Debt remaining:
 - Add executable Supabase/Postgres tests for the security-definer RPC, RLS policies and rate-limit windows.
 - Add a first-class public snapshot export endpoint for `export_snapshot` instead of only preparing the scope contract.
 - Add owner-facing audit UI for public share access logs and revocation history.
+
+## 2026-07-16 - public-sharing-filters-p1-2026-07-16
+
+Commit: `Enable safe public filters for shared dashboards`
+
+Prompt ID: `public-sharing-filters-p1-2026-07-16`
+
+Symptom:
+
+- The public sharing checkpoint rejected the gate because `allowFilters=true` only rendered a static "Filtros permitidos" list.
+- The public page did not send `requested_filters`, so the RPC validation path existed but was not usable.
+
+Root cause:
+
+- The public share contract returned only a base aggregate snapshot and filter metadata.
+- There was no persisted mapping from an allowlisted filter request to a precomputed aggregate snapshot revision.
+
+Category:
+
+- Product/security contract mismatch in public sharing.
+
+Correction:
+
+- Public snapshots now include bounded allowed filter values and precomputed aggregate revisions for exact allowlisted filter requests.
+- New share links persist `allowed_filters_json`, `share_filter_snapshots` and per-revision `share_widget_results`.
+- The public RPC validates filter shape, field, operator, value length, allowed values and disabled-filter access server-side before selecting an exact precomputed revision.
+- The public UI renders usable controls, applies one safe allowlisted filter at a time, shows active filter state, handles loading/error states and can clear back to the base snapshot.
+- Snapshot persistence rollback remains intact: if filter index or widget result persistence fails, the share link is revoked instead of left partially active.
+
+Files changed:
+
+- `types/dashboard.ts`
+- `types/supabase.ts`
+- `lib/validation/schemas.ts`
+- `lib/share/public-snapshot.ts`
+- `lib/supabase/share-links.ts`
+- `lib/data-access/index.ts`
+- `components/public-share-page.tsx`
+- `supabase/migrations/0005_public_share_filters.sql`
+- `tests/public-share-page.test.tsx`
+- `tests/public-share-security.test.ts`
+- `tests/public-share-migration.test.ts`
+- `tests/share-links-persistence.test.ts`
+- `tests/e2e/capability-ctas.spec.ts`
+- `docs/checkpoints/public-sharing-aggregated-results-2026-07-16.md`
+- `docs/implementation-log.md`
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npx.cmd vitest run tests/public-share-page.test.tsx tests/public-share-security.test.ts tests/public-share-migration.test.ts tests/share-links-persistence.test.ts tests/share.test.ts tests/data-access.test.ts`: passed, 6 files and 20 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 31 files and 195 tests.
+- `npm run build`: passed, 23 app routes generated.
+- `npx.cmd playwright test --reporter=line --timeout=45000`: passed, 2 Chromium E2E tests.
+
+Known failures:
+
+- `npm.cmd run test:e2e` still hangs in this Windows/PowerShell environment after reporting immediate `x` markers from the list reporter. The same Playwright suite completed and passed with `npx.cmd playwright test --reporter=line --timeout=45000`.
+- Direct `npm run test:e2e` remains blocked by PowerShell script execution policy for `npm.ps1`.
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Prevention:
+
+- Public filter requests are exact-match snapshots, not query-spec mutations.
+- Server-side validation rejects disabled filters, unknown fields, operators outside `eq`/`in`, malformed payloads, more than one public filter, excessive values and values outside `allowed_filters_json`.
+- E2E now covers creating a local public share, opening the public link, applying an allowlisted filter and clearing it.
+
+Debt remaining:
+
+- Add executable Supabase/Postgres tests for the 0005 RPC and RLS policies.
+- Broaden public filter combinations only if there is a product decision and a bounded precomputation strategy.

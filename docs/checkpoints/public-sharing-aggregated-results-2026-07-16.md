@@ -2,9 +2,9 @@
 
 Commit reviewed: `13ea6ce security: redesign public sharing around aggregated results`
 
-Reviewer result: **gate not approved**.
+Reviewer result: **gate approved after P1 correction**.
 
-Reason: one P1 acceptance gap remains open: `allowFilters=true` does not provide usable public filters or filtered aggregate results. The server validates `requested_filters`, but the public client never sends them and only renders a static list of allowed filters.
+Original checkpoint result: gate was not approved because `allowFilters=true` did not provide usable public filters or filtered aggregate results. The P1 was corrected in `public-sharing-filters-p1-2026-07-16`.
 
 ## Scope Reviewed
 
@@ -38,8 +38,8 @@ Clean install: not executed; no dependency or lockfile change belongs to this ph
 | Every access is audited with reasonable privacy. | Passed | Migration creates `public_share_access_logs` and logs granted, denied, rate-limited, invalid password, invalid scope and invalid filter outcomes using token hash prefix plus hashed request metadata. No raw token/IP/user-agent is stored. |
 | Token is not recoverable from storage. | Passed | Migration backfills `token_hash` with SHA-256 and nulls `token`; new links insert `token: null` and `token_hash`. |
 | Expiration, revocation, password and scope are validated only server-side for public access. | Passed | RPC validates availability, password hash, scopes and filter payload before returning the public payload. UI no longer treats these flags as authoritative security. |
-| Public payload returns aggregate allowlisted results by widget/revision. | Mostly passed | `share_widget_results` stores `widget_id`, `revision_id`, and `result_json`. RPC only returns rows whose widget id exists in current dashboard spec. Remaining risk: static snapshots are not recomputed for allowed filters. |
-| Filters remain allowed without arbitrary queries. | **Failed P1** | `components/public-share-page.tsx` calls `loadPublicShare(token)` and `loadPublicShare(token, password)` only. It renders a "Filtros permitidos" list but no input controls and no `requested_filters` call. RPC validates `requested_filters`, but no public UI path uses it. |
+| Public payload returns aggregate allowlisted results by widget/revision. | Passed | `share_widget_results` stores `widget_id`, `revision_id`, and `result_json`. `share_filter_snapshots` maps exact filter requests to precomputed aggregate revisions. RPC returns only the selected revision. |
+| Filters remain allowed without arbitrary queries. | Passed after correction | Public UI now builds real `requested_filters` with the existing `DashboardFilter` contract. RPC validates shape, field, operator, value length and allowed value membership before selecting an exact precomputed snapshot. |
 | Avoid resource enumeration. | Passed | Public errors are generic in UI; RPC returns `null` for unavailable, expired, revoked, invalid password, invalid scope and invalid filter cases. |
 | Rate limiting and brute-force protection exist. | Passed | RPC counts denied/rate-limited attempts per token hash prefix and hashed IP over 10 minutes and logs `rate_limited`. Unit test covers threshold helper. |
 | Access-crossing/widget manipulation is prevented. | Passed | RPC looks up links by token hash, binds results to `share_link_id`, and only returns `share_widget_results` whose widget id exists in the linked dashboard spec. Static migration test covers widget allowlist string. |
@@ -49,20 +49,25 @@ Clean install: not executed; no dependency or lockfile change belongs to this ph
 
 - `npm run typecheck`: passed.
 - `npm run lint`: passed.
-- `npm run test`: passed, 30 files and 189 tests.
+- `npm run test`: passed, 31 files and 195 tests.
 - `npm run build`: passed, 23 app routes generated.
 - `npx.cmd vitest run tests/share-links-persistence.test.ts tests/share.test.ts tests/public-share-security.test.ts`: passed, 3 files and 6 tests.
 - `npx.cmd playwright test --reporter=line --timeout=30000`: passed, 1 Chromium E2E test.
+- `npx.cmd vitest run tests/public-share-page.test.tsx tests/public-share-security.test.ts tests/public-share-migration.test.ts tests/share-links-persistence.test.ts tests/share.test.ts tests/data-access.test.ts`: passed, 6 files and 20 tests.
+- `npx.cmd playwright test --reporter=line --timeout=45000`: passed, 2 Chromium E2E tests.
 
 Environment notes:
 
 - `npm.ps1` / `npx.ps1` remain blocked by local PowerShell execution policy; `.cmd` variants were used where needed.
 - Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
 - E2E emits the existing Next warning about `scroll-behavior: smooth`; not introduced by this phase.
+- `npm.cmd run test:e2e` still hangs in this environment after immediate `x` markers from Playwright's list reporter; the same suite passes with `npx.cmd playwright test --reporter=line --timeout=45000`.
 
 ## Defects Found
 
 ### P1 - Public filters are not usable despite `use_filters` scope
+
+Status: **closed**.
 
 Evidence:
 
@@ -78,8 +83,8 @@ Impact:
 
 Required action before advancing:
 
-- Either implement a server-side filtered aggregate path for allowlisted filters and wire the public UI to it, or disable/rename the public filter capability so the product no longer claims filters are usable.
-- Add E2E covering public filter usage or disabled filter behavior, depending on the chosen product decision.
+- Implemented server-side exact-match precomputed filtered aggregate snapshots.
+- Added public UI controls and E2E coverage for applying and clearing a public filter.
 
 ### P2 - Migration rollback is not executable
 
@@ -138,17 +143,47 @@ Severity after correction:
 
 - Closed P2.
 
+## P1 Correction Applied After Checkpoint
+
+Symptom:
+
+- `allowFilters=true` displayed only static filter names.
+- The public route never sent `requested_filters`.
+
+Root cause:
+
+- Public shares had only a base aggregate snapshot and no persisted mapping from safe filter requests to aggregate result revisions.
+
+Correction:
+
+- Added bounded `allowedValues` to public filter metadata.
+- Added `share_filter_snapshots` and `allowed_filters_json` through `supabase/migrations/0005_public_share_filters.sql`.
+- Public share creation now persists base and allowed filtered aggregate snapshots without exposing source rows.
+- The public RPC validates exact `requested_filters` server-side and returns only the precomputed revision for that request.
+- The public page now renders usable controls, loading/error states, active filter chips, apply and clear actions.
+
+Security guardrails:
+
+- Public users cannot choose arbitrary fields, operators, values, query specs, metrics or raw columns.
+- The current public UI supports one active allowlisted filter at a time, matching the bounded snapshot strategy.
+- Invalid filters return no payload and keep the last valid dashboard state in the client.
+
+Tests added/updated:
+
+- `tests/public-share-page.test.tsx`
+- `tests/public-share-security.test.ts`
+- `tests/public-share-migration.test.ts`
+- `tests/e2e/capability-ctas.spec.ts`
+
 ## Gate Decision
 
-Gate status: **not approved**.
+Gate status: **approved**.
 
 Blocking condition:
 
-- P1 public filters acceptance gap remains open.
+- None open for this phase.
 
 Mandatory actions before advancing:
 
-1. Resolve the P1 filter capability mismatch.
-2. Add/update tests for the selected resolution.
-3. Re-run lint, typecheck, full tests, build and E2E.
-4. Update this checkpoint or create a new checkpoint showing the P1 is closed.
+1. Keep the bounded one-filter public snapshot contract unless a future product decision expands filter combinations.
+2. Add executable Supabase/Postgres tests for the 0005 RPC before production rollout.

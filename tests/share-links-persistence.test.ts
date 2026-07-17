@@ -10,15 +10,20 @@ const supabaseMocks = vi.hoisted(() => {
       single: vi.fn(() => Promise.resolve({ data: { id: "share-link-1" }, error: null }))
     }))
   }));
+  const filterSnapshotInsert = vi.fn((_payload: unknown) => Promise.resolve({ error: null }));
   const widgetResultInsert = vi.fn((_payload: unknown) => Promise.resolve({ error: { message: "snapshot insert failed" } }));
   return {
     revokeEq,
     shareLinkUpdate,
     shareLinkInsert,
+    filterSnapshotInsert,
     widgetResultInsert,
     from: vi.fn((table: string) => {
       if (table === "share_links") {
         return { insert: shareLinkInsert, update: shareLinkUpdate };
+      }
+      if (table === "share_filter_snapshots") {
+        return { insert: filterSnapshotInsert };
       }
       return { insert: widgetResultInsert };
     })
@@ -59,7 +64,8 @@ function publicPayload(): { snapshot: PublicDashboardSnapshot; payload: PublicSh
   const snapshot = {
     revisionId: "dashboard-1:dataset-1:2026-07-16T00:00:00.000Z",
     widgetResults: [{ widgetId: "widget-1", revisionId: "rev-1", rows: [{ label: "Total", value: 10 }] }],
-    allowedFilters: []
+    allowedFilters: [],
+    filterSnapshots: [{ filterKey: "base", filters: [], revisionId: "rev-1", widgetResults: [{ widgetId: "widget-1", revisionId: "rev-1", rows: [{ label: "Total", value: 10 }] }] }]
   };
   return {
     snapshot,
@@ -77,6 +83,7 @@ describe("share link persistence", () => {
     supabaseMocks.revokeEq.mockClear();
     supabaseMocks.shareLinkUpdate.mockClear();
     supabaseMocks.shareLinkInsert.mockClear();
+    supabaseMocks.filterSnapshotInsert.mockClear();
     supabaseMocks.widgetResultInsert.mockClear();
     supabaseMocks.from.mockClear();
   });
@@ -88,6 +95,7 @@ describe("share link persistence", () => {
     await expect(createShareLink(shareLink(), { snapshot, payload })).rejects.toThrow("No se pudo guardar el snapshot publico");
 
     expect(supabaseMocks.shareLinkInsert).toHaveBeenCalledOnce();
+    expect(supabaseMocks.filterSnapshotInsert).toHaveBeenCalledOnce();
     expect(supabaseMocks.widgetResultInsert).toHaveBeenCalledOnce();
     expect(supabaseMocks.shareLinkUpdate).toHaveBeenCalledWith(expect.objectContaining({ is_active: false, revoked_at: expect.any(String) }));
     expect(supabaseMocks.revokeEq).toHaveBeenCalledWith("id", "share-link-1");

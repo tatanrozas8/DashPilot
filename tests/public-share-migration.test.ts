@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(join(process.cwd(), "supabase/migrations/0004_public_share_security.sql"), "utf8");
+const filterMigration = readFileSync(join(process.cwd(), "supabase/migrations/0005_public_share_filters.sql"), "utf8");
 
 describe("public share security migration", () => {
   it("stores token hashes, revocation metadata, scopes, snapshots and audit logs", () => {
@@ -27,12 +28,23 @@ describe("public share security migration", () => {
   });
 
   it("does not return source dataset rows or dataset profiles from the public RPC", () => {
-    const functionBody = migration.slice(migration.indexOf("create or replace function public.get_public_shared_dashboard"));
+    const functionBody = filterMigration.slice(filterMigration.indexOf("create or replace function public.get_public_shared_dashboard"));
 
     expect(functionBody).not.toContain("dataset_rows");
     expect(functionBody).not.toContain("'rows', data_rows");
     expect(functionBody).not.toContain("'profile'");
     expect(functionBody).toContain("'widgetResults'");
     expect(functionBody).toContain("'allowedFilters'");
+  });
+
+  it("stores allowed public filter values and only returns exact precomputed filter snapshots", () => {
+    expect(filterMigration).toContain("allowed_filters_json");
+    expect(filterMigration).toContain("share_filter_snapshots");
+    expect(filterMigration).toContain("jsonb_array_length(coalesce(requested_filters");
+    expect(filterMigration).toContain("filter_value_not_allowed");
+    expect(filterMigration).toContain("snapshot_not_allowed");
+    expect(filterMigration).toContain("and filters_json = coalesce(requested_filters");
+    expect(filterMigration).toContain("jsonb_array_length(coalesce(requested_filters, '[]'::jsonb)) = 0");
+    expect(filterMigration).toContain("and swr.revision_id = selected_snapshot.revision_id");
   });
 });

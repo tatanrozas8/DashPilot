@@ -126,7 +126,11 @@ export const dashboardSpecSchema = z.object({
     id: z.string(),
     field: z.string(),
     label: z.string(),
-    type: z.enum(["date_range", "multi_select", "single_select", "number_range"])
+    type: z.enum(["date_range", "multi_select", "single_select", "number_range"]),
+    allowedValues: z.array(z.object({
+      label: z.string(),
+      value: z.union([z.string(), z.number(), z.boolean()])
+    })).optional()
   })),
   widgets: z.array(z.object({
     id: z.string(),

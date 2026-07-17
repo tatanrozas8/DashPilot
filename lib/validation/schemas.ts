@@ -89,11 +89,14 @@ export const dashboardQuerySchema = z.object({
     field: z.string(),
     aggregation: z.enum(["sum", "avg", "count", "count_distinct", "min", "max"])
   }).optional(),
+  metricId: z.string().optional(),
   x: z.object({
     field: z.string(),
     granularity: z.enum(["day", "week", "month", "quarter", "year"]).optional()
   }).optional(),
+  timeDimensionId: z.string().optional(),
   groupBy: z.array(z.string()).optional(),
+  dimensionIds: z.array(z.string()).optional(),
   seriesBy: z.string().optional(),
   seriesGranularity: z.enum(["day", "week", "month", "quarter", "year"]).optional(),
   filters: z.array(dashboardFilterSchema).optional(),
@@ -116,6 +119,7 @@ export const dashboardSpecSchema = z.object({
   businessDomain: z.string().optional(),
   datasetId: z.string(),
   datasetVersionId: z.string().optional(),
+  semanticModelId: z.string().optional(),
   design: z.object({
     density: z.enum(["compact", "comfortable"]).optional(),
     accentColor: z.enum(["indigo", "emerald", "sky", "slate"]).optional(),
@@ -138,6 +142,18 @@ export const dashboardSpecSchema = z.object({
     title: z.string(),
     description: z.string().optional(),
     query: dashboardQuerySchema.optional(),
+    lineage: z.object({
+      semanticModelId: z.string(),
+      datasetVersionId: z.string().optional(),
+      metricIds: z.array(z.string()),
+      calculatedMetricIds: z.array(z.string()),
+      dimensionIds: z.array(z.string()),
+      timeDimensionIds: z.array(z.string()),
+      sourceColumnIds: z.array(z.string()),
+      filters: z.array(dashboardFilterSchema),
+      migratedAt: z.string(),
+      warnings: z.array(z.string())
+    }).optional(),
     config: z.record(z.string(), z.unknown()).and(z.object({
       visualConfig: dashboardWidgetVisualConfigSchema.optional(),
       horizontal: z.boolean().optional(),

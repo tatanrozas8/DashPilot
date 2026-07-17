@@ -887,3 +887,67 @@ Debt remaining:
 - Replace the current columnar in-process executor with a DuckDB/Arrow/Parquet adapter once the runtime dependency is approved and benchmarked in this repo.
 - Wire the dashboard renderer/data explorer request path to this service-backed contract in the app shell without staging unrelated dirty UI changes.
 - Add executable database isolation tests when a persisted artifact repository/RLS-backed query store lands.
+
+## 2026-07-17 - governed-semantic-model-metric-catalog-2026-07-17
+
+Commit: `feat: introduce governed semantic model and metric catalog`
+
+Prompt ID: `governed-semantic-model-metric-catalog-2026-07-17`
+
+Objective:
+
+- Create canonical semantic definitions so users, dashboards and Copilot resolve the same metrics and dimensions.
+- Keep existing DashboardSpecs compatible while adding semantic IDs and widget lineage.
+- Prevent execution when semantic resolution is ambiguous or below confidence threshold.
+
+Files changed:
+
+- `types/semantic-model.ts`
+- `types/dashboard.ts`
+- `lib/semantic-model/schemas.ts`
+- `lib/semantic-model/model.ts`
+- `lib/semantic-model/index.ts`
+- `lib/dashboard-spec/generate-dashboard-spec.ts`
+- `lib/validation/schemas.ts`
+- `tests/semantic-model.test.ts`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added canonical `MetricDefinition`, `DimensionDefinition`, `CalculatedMetric`, `Relationship`, `TimeDimension` and `SemanticModel` contracts.
+- Definitions use canonical IDs; names, aliases and source column names are resolution inputs only.
+- Metrics carry aggregation, unit, format, null policy, formula, owner, status and description.
+- Inferred definitions start as `draft`; `approveSemanticDefinition` marks reviewed definitions as `approved`.
+- Dashboard generation now builds a draft semantic model and migrates widgets to include `metricId`, `dimensionIds`, `timeDimensionId` and widget lineage while preserving legacy `field`, `groupBy` and `x.field`.
+- Semantic resolution returns candidates, scores and reasons. Low confidence or ambiguity returns `needsClarification` and no selected definition.
+- Relationship validation rejects missing dimensions, unvalidated relationships and dangerous `many_to_many` relationships.
+- Calculated metric validation detects missing operands and cycles.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run test -- tests/semantic-model.test.ts tests/semantic-layer.test.ts`: passed, 2 files and 11 tests.
+- `npm run lint`: passed.
+- `npm run test`: passed, 36 files and 228 tests.
+- `npm run build`: passed, 23 app routes generated.
+- `npx playwright test --reporter=line --timeout=45000`: passed, 3 Chromium E2E tests.
+
+Known failures:
+
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No environment variables added.
+- No dependency added, so no clean install was required.
+
+Security/privacy notes:
+
+- Copilot-facing semantic resolution cannot select invented metric text like `forecast_ventas`; it asks for clarification unless a canonical definition exists.
+- Existing column validation remains in place for Copilot actions, and semantic model validation reports missing source columns after schema changes.
+
+Debt remaining:
+
+- Persist approved semantic models and review workflow when the product adds a stored metric catalog.
+- Route provider prompts through canonical semantic IDs rather than only column fields once the UI/store dirty worktree is reconciled.

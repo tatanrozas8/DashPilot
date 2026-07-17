@@ -4,6 +4,7 @@ import { parseLocaleNumber } from "@/lib/data/parse-values";
 import { DEFAULT_DASHBOARD_DESIGN } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { executeDashboardQuery } from "@/lib/query-engine/execute-dashboard-query";
 import { inferSemanticLayer, type SemanticField } from "@/lib/semantic-layer";
+import { buildSemanticModel, migrateDashboardSpecToSemanticModel } from "@/lib/semantic-model";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { nameFromFile } from "@/lib/utils/name-from-file";
 
@@ -180,7 +181,8 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[], 
     })
   ];
 
-  return {
+  const semanticModel = buildSemanticModel(profile, { status: "draft" });
+  const dashboardSpec: DashboardSpec = {
     id: `dashboard_${profile.id}`,
     title: `Dashboard de ${nameFromFile(profile.fileName, "dataset")}`,
     subtitle: isSalesDomain ? "Desempeno comercial consolidado con KPIs, filtros e insights accionables." : `Dashboard ${semantic.domain.name} generado desde roles semanticos del dataset.`,
@@ -196,4 +198,5 @@ export function generateDashboardSpec(profile: DatasetProfile, rows: DataRow[], 
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
+  return migrateDashboardSpecToSemanticModel({ dashboardSpec, semanticModel }).dashboardSpec;
 }

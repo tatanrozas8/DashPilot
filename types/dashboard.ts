@@ -1,5 +1,6 @@
 import type { DataRow } from "./dataset";
 import type { PresentationSlide, PresentationTheme } from "./presentation";
+import type { SemanticWidgetLineage } from "./semantic-model";
 
 export type WidgetType =
   | "kpi_card"
@@ -35,6 +36,7 @@ export interface DashboardSpec {
   businessDomain?: string;
   datasetId: string;
   datasetVersionId?: string;
+  semanticModelId?: string;
   design?: DashboardDesignSettings;
   globalFilters: DashboardFilterConfig[];
   widgets: DashboardWidget[];
@@ -65,6 +67,7 @@ export interface DashboardWidget {
   title: string;
   description?: string;
   query?: DashboardQuerySpec;
+  lineage?: SemanticWidgetLineage;
   config: Record<string, unknown> & {
     visualConfig?: DashboardWidgetVisualConfig;
     horizontal?: boolean;
@@ -84,11 +87,14 @@ export interface DashboardQuerySpec {
     field: string;
     aggregation: "sum" | "avg" | "count" | "count_distinct" | "min" | "max";
   };
+  metricId?: string;
   x?: {
     field: string;
     granularity?: "day" | "week" | "month" | "quarter" | "year";
   };
+  timeDimensionId?: string;
   groupBy?: string[];
+  dimensionIds?: string[];
   seriesBy?: string;
   seriesGranularity?: "day" | "week" | "month" | "quarter" | "year";
   filters?: DashboardFilter[];

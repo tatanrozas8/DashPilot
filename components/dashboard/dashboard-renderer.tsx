@@ -425,7 +425,7 @@ function DonutWidget({ widget }: { widget: DashboardWidget }) {
           <ResponsiveContainer width="100%" height={230}>
             <PieChart>
               <Pie data={chartData} dataKey="value" nameKey="label" innerRadius={58} outerRadius={92} paddingAngle={2}>
-                {chartData.map((item, index) => <Cell key={String(item.label ?? index)} fill={colors.palette[index % colors.palette.length]} />)}
+                {chartData.map((item, index) => <Cell key={`${String(item.label ?? "item")}-${index}`} fill={colors.palette[index % colors.palette.length]} />)}
               </Pie>
               <Tooltip formatter={formatChartValue} contentStyle={{ borderRadius: 10, borderColor: "#dfe5f0" }} />
             </PieChart>
@@ -716,7 +716,7 @@ export function DashboardFilters() {
                 }}
               >
                 <option>Todos</option>
-                {optionsFor(filter.field).map((option) => <option key={String(option)}>{String(option)}</option>)}
+                {optionsFor(filter.field).map((option, index) => <option key={`${String(option)}-${index}`}>{String(option)}</option>)}
               </select>
             )}
           </div>
@@ -771,7 +771,7 @@ export function DashboardFilters() {
           ) : (
             <select className="mt-3 h-10 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" defaultValue="" onChange={(event) => event.target.value && setFilter(selectedFilterColumn.normalizedName, [event.target.value])}>
               <option value="">Selecciona valor</option>
-              {optionsFor(selectedFilterColumn.normalizedName).map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}
+              {optionsFor(selectedFilterColumn.normalizedName).map((option, index) => <option key={`${String(option)}-${index}`} value={String(option)}>{String(option)}</option>)}
             </select>
           )}
         </div>

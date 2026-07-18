@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BarChart3, Copy, Eye, EyeOff, Palette, Save, Trash2 } from "lucide-react";
+import { StatusBadge, Tabs } from "@/components/shared/ui";
 import { compatibleWidgetTypes, normalizeDashboardDesign } from "@/lib/dashboard-spec/edit-dashboard-spec";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,14 @@ const densityOptions: Array<[Required<DashboardDesignSettings>["density"], strin
 const accentOptions: Array<[Required<DashboardDesignSettings>["accentColor"], string]> = [["indigo", "Azul"], ["emerald", "Verde"], ["sky", "Celeste"], ["slate", "Sobrio"]];
 const cardStyleOptions: Array<[Required<DashboardDesignSettings>["cardStyle"], string]> = [["soft", "Suave"], ["bordered", "Bordeado"]];
 const paletteOptions: Array<[Required<DashboardDesignSettings>["chartPalette"], string]> = [["default", "Default"], ["business", "Business"], ["contrast", "Contraste"]];
+type EditorTab = "data" | "visual" | "format" | "interaction";
+
+const editorTabs: Array<{ value: EditorTab; label: string }> = [
+  { value: "data", label: "Datos" },
+  { value: "visual", label: "Visual" },
+  { value: "format", label: "Formato" },
+  { value: "interaction", label: "Interaccion" }
+];
 
 function unique(items: string[]) {
   return Array.from(new Set(items.filter(Boolean)));
@@ -79,6 +88,7 @@ export function DashboardEditor() {
   const setHidden = useDashPilotStore((state) => state.setDashboardDraftWidgetHidden);
 
   const [themeName, setThemeName] = useState("");
+  const [activeTab, setActiveTab] = useState<EditorTab>("data");
 
   if (!draft) return null;
 
@@ -93,6 +103,7 @@ export function DashboardEditor() {
     ...profile.detectedDimensionColumns,
     ...profile.columns.filter((column) => !metricOptions.includes(column.normalizedName)).map((column) => column.normalizedName)
   ]);
+  const hasQueryInputs = metricOptions.length > 0 || dimensionOptions.length > 0;
 
   return (
     <aside className="fixed bottom-0 right-0 top-20 z-20 hidden w-[360px] overflow-y-auto border-l border-[#e3e8f5] bg-white p-5 xl:block" aria-label="Editor de dashboard">
@@ -106,6 +117,15 @@ export function DashboardEditor() {
         </div>
       </div>
 
+      <Tabs value={activeTab} items={editorTabs} onChange={setActiveTab} ariaLabel="Secciones del editor de dashboard" className="mt-5 w-full justify-between" />
+      <div className="mt-4 rounded-lg border border-[#edf1fa] bg-[#fbfcff] p-3 text-xs font-semibold leading-5 text-[#536088]">
+        {activeTab === "data" && (hasQueryInputs ? "Valida metrica, dimension y limite antes de guardar." : "No hay columnas suficientes para editar consultas. Revisa el preview del dataset.")}
+        {activeTab === "visual" && "Cambia el tipo de widget solo entre visualizaciones compatibles."}
+        {activeTab === "format" && "Ajusta texto, densidad, color, tarjetas y temas guardados."}
+        {activeTab === "interaction" && "Configura visibilidad, limites e interacciones sin mutar filas fuente."}
+      </div>
+
+      {activeTab === "format" && <>
       <label className="mt-6 block text-sm font-bold text-[#34405f]" htmlFor="dashboard-title">
         Titulo del dashboard
       </label>
@@ -199,6 +219,7 @@ export function DashboardEditor() {
           </div>
         </div>
       </section>
+      </>}
 
       <div className="mt-7 space-y-4">
         {draft.widgets.map((widget) => {
@@ -214,7 +235,8 @@ export function DashboardEditor() {
                   <p className="truncate text-sm font-bold text-[#071334]">{widget.title}</p>
                   <p className="mt-1 text-xs font-semibold text-[#697597]">{widget.type}</p>
                 </div>
-                <div className="flex shrink-0 gap-1">
+                <StatusBadge tone={hidden ? "neutral" : "success"}>{hidden ? "Oculto" : "Visible"}</StatusBadge>
+                {(activeTab === "visual" || activeTab === "interaction") && <div className="flex shrink-0 gap-1">
                   <button type="button" className="focus-ring grid size-8 place-items-center rounded-md text-[#536088] hover:bg-[#f1f4ff]" onClick={() => duplicateWidget(widget.id)} aria-label={`Duplicar ${widget.title}`}>
                     <Copy className="size-4" />
                   </button>
@@ -224,20 +246,20 @@ export function DashboardEditor() {
                   <button type="button" className="focus-ring grid size-8 place-items-center rounded-md text-red-600 hover:bg-red-50" onClick={() => removeWidget(widget.id)} aria-label={`Eliminar ${widget.title}`}>
                     <Trash2 className="size-4" />
                   </button>
-                </div>
+                </div>}
               </div>
 
               <div className="mt-4 space-y-3">
-                <label className="block text-xs font-bold text-[#34405f]">
+                {activeTab === "format" && <label className="block text-xs font-bold text-[#34405f]">
                   Titulo del widget
                   <input
                     className="focus-ring mt-1 h-9 w-full rounded-md border border-[#dfe5f0] px-3 text-sm font-medium"
                     value={widget.title}
                     onChange={(event) => updateWidget(widget.id, { title: event.target.value })}
                   />
-                </label>
+                </label>}
 
-                <label className="block text-xs font-bold text-[#34405f]">
+                {activeTab === "visual" && <label className="block text-xs font-bold text-[#34405f]">
                   Tipo compatible
                   <select
                     className="focus-ring mt-1 h-9 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm"
@@ -247,9 +269,9 @@ export function DashboardEditor() {
                   >
                     {typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
                   </select>
-                </label>
+                </label>}
 
-                {supportsQueryControls(widget) && (
+                {activeTab === "data" && supportsQueryControls(widget) && (
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-bold text-[#34405f]">
                       Metrica
@@ -275,7 +297,7 @@ export function DashboardEditor() {
                   </div>
                 )}
 
-                {supportsDimension(widget) && (
+                {activeTab === "data" && supportsDimension(widget) && (
                   <label className="block text-xs font-bold text-[#34405f]">
                     Dimension
                     <select
@@ -289,7 +311,7 @@ export function DashboardEditor() {
                   </label>
                 )}
 
-                {supportsLimit(widget) && (
+                {(activeTab === "data" || activeTab === "interaction") && supportsLimit(widget) && (
                   <label className="block text-xs font-bold text-[#34405f]">
                     Limite top N
                     <input
@@ -301,6 +323,11 @@ export function DashboardEditor() {
                       onChange={(event) => updateWidget(widget.id, { query: queryWithLimit(widget.query, Number(event.target.value) || 1), config: widget.type === "table" ? { limit: Number(event.target.value) || 1 } : undefined })}
                     />
                   </label>
+                )}
+                {activeTab === "interaction" && (
+                  <div className="rounded-lg border border-[#edf1fa] bg-[#fbfcff] p-3 text-xs font-semibold leading-5 text-[#536088]">
+                    Las interacciones usan filtros, seleccion de widget, Data Explorer y Copiloto. Las filas fuente no se modifican desde este editor.
+                  </div>
                 )}
               </div>
             </section>

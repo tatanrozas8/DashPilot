@@ -5,6 +5,11 @@ function hasQueryWarnings(dashboard: DashboardSpec) {
   return dashboard.widgets.some((widget) => Array.isArray(widget.config.queryWarnings) && widget.config.queryWarnings.length > 0);
 }
 
+function dashboardRevisionId(dashboard: DashboardSpec) {
+  const source = dashboard.updatedAt || dashboard.createdAt || dashboard.id;
+  return `dashboard_revision_${dashboard.id}_${source.replace(/[^a-zA-Z0-9]+/g, "_")}`;
+}
+
 export function generatePresentationSpec(dashboard: DashboardSpec, theme: PresentationTheme = "executive"): PresentationSpec {
   const kpis = dashboard.widgets.filter((widget) => widget.type === "kpi_card").map((widget) => widget.id);
   const charts = dashboard.widgets.filter((widget) => ["line_chart", "bar_chart", "area_chart", "donut_chart"].includes(widget.type));
@@ -18,6 +23,10 @@ export function generatePresentationSpec(dashboard: DashboardSpec, theme: Presen
   return {
     id: `presentation_${dashboard.id}`,
     dashboardId: dashboard.id,
+    sourceDashboardRevisionId: dashboardRevisionId(dashboard),
+    sourceDashboardTitle: dashboardTitle,
+    sourceDashboardUpdatedAt: dashboard.updatedAt || dashboard.createdAt,
+    snapshotMode: "snapshot",
     title: presentationTitle,
     subtitle: "Presentacion interactiva generada desde dashboard vivo.",
     theme,

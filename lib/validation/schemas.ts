@@ -284,6 +284,10 @@ export const dashboardSpecSchema = z.object({
 export const presentationSpecSchema = z.object({
   id: z.string(),
   dashboardId: z.string(),
+  sourceDashboardRevisionId: z.string(),
+  sourceDashboardTitle: z.string(),
+  sourceDashboardUpdatedAt: z.string(),
+  snapshotMode: z.literal("snapshot"),
   title: z.string(),
   subtitle: z.string().optional(),
   theme: z.enum(["executive", "commercial", "financial", "operations"]),

@@ -65,6 +65,10 @@ function presentation(): PresentationSpec {
   return {
     id: "presentation_dashboard-1",
     dashboardId: "dashboard-1",
+    sourceDashboardRevisionId: "dashboard_revision_dashboard-1_2026_07_17T00_00_00_000Z",
+    sourceDashboardTitle: "Ventas",
+    sourceDashboardUpdatedAt: "2026-07-17T00:00:00.000Z",
+    snapshotMode: "snapshot",
     title: "Presentacion de Ventas",
     theme: "executive",
     slides: [],

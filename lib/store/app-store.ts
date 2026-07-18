@@ -245,6 +245,10 @@ function createEmptyPresentation(): PresentationSpec {
   return {
     id: "presentation_empty",
     dashboardId: "dashboard_empty",
+    sourceDashboardRevisionId: "dashboard_revision_empty",
+    sourceDashboardTitle: "Aun no hay dashboards",
+    sourceDashboardUpdatedAt: now,
+    snapshotMode: "snapshot",
     title: "Aún no hay presentaciones",
     subtitle: "Genera un dashboard desde un dataset para crear una presentacion.",
     theme: "executive",

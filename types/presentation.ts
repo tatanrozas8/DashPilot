@@ -5,6 +5,10 @@ export type PresentationTheme = "executive" | "commercial" | "financial" | "oper
 export interface PresentationSpec {
   id: string;
   dashboardId: string;
+  sourceDashboardRevisionId: string;
+  sourceDashboardTitle: string;
+  sourceDashboardUpdatedAt: string;
+  snapshotMode: "snapshot";
   title: string;
   subtitle?: string;
   theme: PresentationTheme;

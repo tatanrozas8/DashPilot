@@ -11,6 +11,9 @@ describe("presentation spec", () => {
 
     expect(presentation.slides.length).toBeGreaterThan(4);
     expect(presentation.title).toBe(`Presentacion de ${dashboard.title}`);
+    expect(presentation.snapshotMode).toBe("snapshot");
+    expect(presentation.sourceDashboardRevisionId).toContain(dashboard.id);
+    expect(presentation.sourceDashboardUpdatedAt).toBe(dashboard.updatedAt);
     expect(presentation.slides.some((slide) => slide.widgetIds.some((widgetId) => dashboard.widgets.some((widget) => widget.id === widgetId)))).toBe(true);
   });
 

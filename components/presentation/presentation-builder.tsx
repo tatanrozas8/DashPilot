@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Edit3, GripVertical, Languages, Play, Save, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/shared/app-shell";
 import { Button } from "@/components/shared/button";
+import { StatusBadge } from "@/components/shared/ui";
 import { DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { useToast } from "@/components/shared/toast";
@@ -128,6 +129,16 @@ export function PresentationBuilder() {
             <div className="mt-6 rounded-lg border border-[#e3e8f5] p-4 text-sm">
               <p className="font-bold">Fuente de datos</p>
               <p className="mt-2 text-[#617094]">Dashboard: {hasDashboard ? dashboard.title : "Aún no hay dashboards"}</p>
+            </div>
+            <div className="mt-4 rounded-lg border border-[#dfe5fb] bg-[#fbfcff] p-4 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-bold">Revision vinculada</p>
+                <StatusBadge tone="info">{presentation.snapshotMode}</StatusBadge>
+              </div>
+              <p className="mt-2 break-all text-xs font-semibold text-[#536088]">{presentation.sourceDashboardRevisionId}</p>
+              <p className="mt-2 text-xs text-[#697597]">
+                {hasDashboard ? `Snapshot de ${presentation.sourceDashboardTitle} actualizado ${new Date(presentation.sourceDashboardUpdatedAt).toLocaleString("es-CL")}.` : "Genera un dashboard para crear una revision de presentacion."}
+              </p>
             </div>
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-[#e3e8f5] p-3 text-sm">
               <Languages className="size-4 text-[#3d35ff]" /> Espanol (Latinoamerica)

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Edit3, GripVertical, Languages, Play, Save, Sparkles } from "lucide-react";
+import { Download, Edit3, FileImage, GripVertical, Languages, Play, Save, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/shared/app-shell";
 import { Button } from "@/components/shared/button";
 import { StatusBadge } from "@/components/shared/ui";
@@ -11,8 +11,12 @@ import { DashboardRenderer } from "@/components/dashboard/dashboard-renderer";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { useToast } from "@/components/shared/toast";
 import { persistPresentation } from "@/lib/data-access";
+import { completeExportJob, createExportRequest, createQueuedExportJob, dashboardExportRevisionId, failExportJob, transitionExportJob, type ExportJob } from "@/lib/export/contracts";
+import { downloadExportArtifact } from "@/lib/export/download";
+import { generatePresentationExport } from "@/lib/export/renderers";
 import { applyPresentationPrompt } from "@/lib/presentation-spec/apply-presentation-prompt";
 import { capability } from "@/lib/product/capabilities";
+import { getQueryableRowsForExport } from "@/lib/query-service/client";
 import type { PresentationTheme } from "@/types/presentation";
 
 export function PresentationBuilder() {
@@ -21,6 +25,8 @@ export function PresentationBuilder() {
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const profile = useDashPilotStore((state) => state.profile);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
+  const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
+  const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
   const generatePresentation = useDashPilotStore((state) => state.generatePresentation);
   const options = useDashPilotStore((state) => state.presentationOptions);
   const setOptions = useDashPilotStore((state) => state.setPresentationOptions);
@@ -29,6 +35,7 @@ export function PresentationBuilder() {
   const toast = useToast();
   const [chat, setChat] = useState("");
   const [responses, setResponses] = useState(["Cuando tengas un dashboard, aplicare reglas locales para convertirlo en una presentacion ejecutiva."]);
+  const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const hasDashboard = Boolean(activeDatasetId && profile.rowCount > 0 && dashboard.widgets.length > 0);
   const canPresent = hasDashboard && presentation.slides.length > 0 && Boolean(activePresentationId);
   const presentationSaveCapability = capability("presentation.save");
@@ -83,6 +90,55 @@ export function PresentationBuilder() {
     }
   }
 
+  function rowsForExport() {
+    return getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
+  }
+
+  function exportPresentation(format: "pptx" | "png") {
+    const rows = rowsForExport();
+    const slide = presentation.slides[0];
+    if (!hasDashboard || !presentation.slides.length || !rows.length) {
+      toast("Genera una presentacion con datos consultables antes de exportar.");
+      return;
+    }
+    const request = createExportRequest({
+      target: format === "png" ? { type: "slide", id: slide.id } : { type: "presentation" },
+      format,
+      scope: "private_workspace",
+      dashboardId: activeDashboardId || dashboard.id,
+      dashboardRevisionId: dashboardExportRevisionId(dashboard),
+      presentationId: presentation.id,
+      presentationRevisionId: `${presentation.id}:${presentation.updatedAt}`,
+      filters: slide.viewState?.filters ?? [],
+      actor: { id: "local-user", role: "editor" },
+      allowDownload: true
+    });
+    let job = createQueuedExportJob(request);
+    setExportJob(job);
+    try {
+      job = transitionExportJob(job, "rendering", format === "png" ? "Renderizando snapshot del slide" : "Preparando slides ordenadas");
+      setExportJob(job);
+      const artifact = generatePresentationExport({
+        dashboard,
+        presentation,
+        viewState: slide.viewState ?? { filters: [] },
+        rows,
+        profile,
+        format,
+        request,
+        target: format === "png" ? { type: "slide", id: slide.id } : { type: "presentation" }
+      });
+      job = transitionExportJob(job, "generating", format === "png" ? "Generando PNG" : "Generando PPTX");
+      setExportJob(job);
+      downloadExportArtifact(artifact);
+      setExportJob(completeExportJob(job, artifact.result));
+      toast(`${artifact.fileName} generado y descargado.`);
+    } catch (error) {
+      setExportJob(failExportJob(job, { code: "render_failed", message: error instanceof Error ? error.message : "No se pudo exportar la presentacion.", recoverable: true }));
+      toast(error instanceof Error ? error.message : "No se pudo exportar la presentacion.");
+    }
+  }
+
   return (
     <AppShell>
       <div className="p-5 lg:p-8">
@@ -94,6 +150,8 @@ export function PresentationBuilder() {
           <div className="flex gap-3">
             <Button onClick={() => hasDashboard ? void saveDraft() : toast("Sube un dataset para guardar una presentacion.")} variant="secondary" title={presentationSaveCapability.description}><Save className="size-4" /> Guardar borrador {presentationSaveCapability.beta ? "(beta)" : ""}</Button>
             <Button onClick={() => hasDashboard ? void savePresentation() : toast("Sube un dataset para comenzar.")}><Sparkles className="size-4" /> Generar presentacion</Button>
+            <Button onClick={() => exportPresentation("png")} disabled={!presentation.slides.length} variant="secondary"><FileImage className="size-4" /> Slide PNG</Button>
+            <Button onClick={() => exportPresentation("pptx")} disabled={!presentation.slides.length} variant="secondary"><Download className="size-4" /> PPTX</Button>
             {canPresent ? (
               <Link href={`/app/present/${activePresentationId}`} className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#bfc7ff] bg-white px-5 text-sm font-semibold text-[#3d35ff]"><Play className="size-4" /> Presentar ahora</Link>
             ) : (
@@ -103,6 +161,13 @@ export function PresentationBuilder() {
         </div>
 
         <div className="mt-7 grid gap-6 xl:grid-cols-[310px_1fr_330px]">
+          {exportJob && (
+            <div className="xl:col-span-3 rounded-xl border border-[#dfe5f0] bg-white px-5 py-4 text-sm shadow-sm">
+              <p className="font-bold">Exportacion: {exportJob.status}</p>
+              <p className="mt-1 text-[#617094]">{exportJob.error?.message ?? exportJob.progressLabel}</p>
+              {exportJob.result && <p className="mt-1 text-xs text-[#697597]">{exportJob.result.fileName} - revision {exportJob.result.metadata.presentationRevisionId}</p>}
+            </div>
+          )}
           <section className="soft-card rounded-xl p-5">
             <h2 className="font-bold">1. Configura tu presentacion</h2>
             <p className="mt-5 text-sm font-bold">Tipo de presentacion</p>

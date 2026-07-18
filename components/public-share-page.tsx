@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import { PublicDashboardSnapshot } from "@/components/public-dashboard-snapshot";
 import { Logo } from "@/components/shared/logo";
 import { loadPublicShare } from "@/lib/data-access";
+import { downloadExportArtifact } from "@/lib/export/download";
+import { generatePublicDashboardExport } from "@/lib/export/renderers";
 import type { DashboardFilter, DashboardFilterOption } from "@/types/dashboard";
 import type { PublicSharedDashboard } from "@/lib/data-access/types";
 
@@ -25,6 +27,7 @@ export function PublicSharePage() {
   const [activeFilters, setActiveFilters] = useState<DashboardFilter[]>([]);
   const [error, setError] = useState("");
   const [filterError, setFilterError] = useState("");
+  const [exportError, setExportError] = useState("");
 
   useEffect(() => {
     if (token === "demo") return;
@@ -124,6 +127,17 @@ export function PublicSharePage() {
     return option.label || String(option.value);
   }
 
+  function exportPublicSnapshot(format: "pdf" | "png") {
+    if (!payload) return;
+    setExportError("");
+    try {
+      const artifact = generatePublicDashboardExport(payload, format);
+      downloadExportArtifact(artifact);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "No se pudo exportar este snapshot.");
+    }
+  }
+
   if (loading) {
     return (
       <div className="grid min-h-[100dvh] place-items-center bg-[#f8faff] text-[#071334]">
@@ -179,8 +193,29 @@ export function PublicSharePage() {
           <p className="font-semibold">{payload.dashboard.title}</p>
           <span className="rounded-full bg-[#f0f1ff] px-3 py-1 text-xs font-semibold text-[#3d35ff]">Vista compartida</span>
         </div>
-        <Link href="/" className="rounded-lg bg-[#3d35ff] px-4 py-2 text-sm font-semibold text-white">Crear mi dashboard</Link>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => exportPublicSnapshot("png")}
+            disabled={!payload.link.allowDownload}
+            className="rounded-lg border border-[#dce3f4] bg-white px-4 py-2 text-sm font-semibold text-[#34405f] disabled:cursor-not-allowed disabled:opacity-50"
+            title={payload.link.allowDownload ? "Descargar PNG del snapshot permitido." : "Este enlace no permite descargas."}
+          >
+            PNG
+          </button>
+          <button
+            type="button"
+            onClick={() => exportPublicSnapshot("pdf")}
+            disabled={!payload.link.allowDownload}
+            className="rounded-lg border border-[#dce3f4] bg-white px-4 py-2 text-sm font-semibold text-[#34405f] disabled:cursor-not-allowed disabled:opacity-50"
+            title={payload.link.allowDownload ? "Descargar PDF del snapshot permitido." : "Este enlace no permite descargas."}
+          >
+            PDF
+          </button>
+          <Link href="/" className="rounded-lg bg-[#3d35ff] px-4 py-2 text-sm font-semibold text-white">Crear mi dashboard</Link>
+        </div>
       </header>
+      {exportError && <p className="mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{exportError}</p>}
       <main className={`grid gap-5 p-6 ${payload.link.allowFilters ? "xl:grid-cols-[1fr_280px]" : "grid-cols-1"}`}>
         <section>
           <PublicDashboardSnapshot payload={payload} />

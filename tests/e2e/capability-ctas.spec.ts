@@ -20,11 +20,23 @@ test("main capability CTAs reflect real, beta and disabled behavior", async ({ p
   await expect(page.getByText("Requerir contrasena")).toBeVisible();
   await expect(page.getByText(/resultados agregados por widget/)).toBeVisible();
 
-  await expect(page.getByRole("button", { name: "No disponible" })).toHaveCount(4);
-  for (const title of ["Manifest interactivo", "Exportar PDF", "Exportar PNG", "Exportar PowerPoint"]) {
+  await expect(page.getByRole("button", { name: "No disponible" })).toHaveCount(1);
+  for (const title of ["Manifest interactivo"]) {
     const card = page.locator("article").filter({ has: page.getByRole("heading", { name: title }) });
     await expect(card.getByRole("button", { name: "No disponible" })).toBeDisabled();
   }
+
+  const pdfDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar PDF" }).click();
+  expect((await pdfDownload).suggestedFilename()).toMatch(/\.pdf$/);
+
+  const pngDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar PNG" }).click();
+  expect((await pngDownload).suggestedFilename()).toMatch(/\.png$/);
+
+  const pptxDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar PPTX" }).click();
+  expect((await pptxDownload).suggestedFilename()).toMatch(/\.pptx$/);
 
   const specDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Descargar JSON" }).click();
@@ -52,6 +64,15 @@ test("public share links expose usable allowlisted filters", async ({ page }) =>
 
   await expect(page).toHaveURL(/\/share\/share_/);
   await expect(page.getByText("Filtros permitidos")).toBeVisible();
+
+  const publicPngDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "PNG" }).click();
+  expect((await publicPngDownload).suggestedFilename()).toMatch(/\.png$/);
+
+  const publicPdfDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "PDF" }).click();
+  expect((await publicPdfDownload).suggestedFilename()).toMatch(/\.pdf$/);
+
   const firstFilter = page.getByRole("combobox").first();
   await firstFilter.selectOption({ index: 1 });
   await page.getByRole("button", { name: "Aplicar filtros" }).click();

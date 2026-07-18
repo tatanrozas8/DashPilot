@@ -11,6 +11,9 @@ import { AppShell } from "@/components/shared/app-shell";
 import { Button } from "@/components/shared/button";
 import { useToast } from "@/components/shared/toast";
 import { loadPersistedDashboard, updatePersistedDashboard } from "@/lib/data-access";
+import { completeExportJob, createExportRequest, createQueuedExportJob, dashboardExportRevisionId, failExportJob, transitionExportJob, type ExportFormat, type ExportJob } from "@/lib/export/contracts";
+import { downloadExportArtifact } from "@/lib/export/download";
+import { generateDashboardExport, generatePresentationExport } from "@/lib/export/renderers";
 import { getQueryableRowsForExport } from "@/lib/query-service/client";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
@@ -26,11 +29,13 @@ export function DashboardWorkspace() {
   const toast = useToast();
   const params = useParams<{ dashboardId?: string }>();
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [selectedView, setSelectedView] = useState<DashboardWorkspaceView>("dashboard");
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const viewState = useDashPilotStore((state) => state.viewState);
   const setViewState = useDashPilotStore((state) => state.setViewState);
   const profile = useDashPilotStore((state) => state.profile);
+  const presentation = useDashPilotStore((state) => state.presentation);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
   const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
   const activeDashboardId = useDashPilotStore((state) => state.activeDashboardId);
@@ -47,6 +52,7 @@ export function DashboardWorkspace() {
   const shareHref = `/app/dashboards/${dashboardId}/compartir`;
   const visibleDashboard = isDashboardEditing && dashboardEditDraft ? dashboardEditDraft : dashboard;
   const hasRows = Boolean(activeDatasetId && profile.rowCount > 0);
+  const hasPresentation = hasRows && presentation.slides.length > 0;
   const activeView = viewState.dataExplorer?.isOpen ? "data" : selectedView;
 
   function downloadText(fileName: string, content: string, type: string) {
@@ -74,6 +80,80 @@ export function DashboardWorkspace() {
     const body = rows.map((row) => columns.map((column) => `"${String(row[column] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     downloadText(`${profile.id || "dataset"}-completo.csv`, [header, body].filter(Boolean).join("\n"), "text/csv;charset=utf-8");
     toast("Dataset completo exportado en CSV.");
+  }
+
+  function rowsForExport() {
+    return getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
+  }
+
+  function exportDashboardStatic(format: Extract<ExportFormat, "pdf" | "png">) {
+    const rows = rowsForExport();
+    if (!hasRows || !rows.length) {
+      toast("No hay filas consultables para exportar este dashboard.");
+      return;
+    }
+    const request = createExportRequest({
+      target: { type: "dashboard" },
+      format,
+      scope: "private_workspace",
+      dashboardId: activeDashboardId || dashboard.id,
+      dashboardRevisionId: dashboardExportRevisionId(dashboard),
+      filters: viewState.filters ?? [],
+      actor: { id: "local-user", role: "editor" },
+      allowDownload: true
+    });
+    let job = createQueuedExportJob(request);
+    setExportJob(job);
+    try {
+      job = transitionExportJob(job, "rendering", "Preparando snapshot reproducible");
+      setExportJob(job);
+      const artifact = generateDashboardExport({ dashboard, viewState, rows, profile, format, request });
+      job = transitionExportJob(job, "generating", "Generando archivo");
+      setExportJob(job);
+      downloadExportArtifact(artifact);
+      setExportJob(completeExportJob(job, artifact.result));
+      setExportOpen(false);
+      toast(`${artifact.fileName} generado y descargado.`);
+    } catch (error) {
+      setExportJob(failExportJob(job, { code: "render_failed", message: error instanceof Error ? error.message : "No se pudo exportar el dashboard.", recoverable: true }));
+      toast(error instanceof Error ? error.message : "No se pudo exportar el dashboard.");
+    }
+  }
+
+  function exportPresentationPptx() {
+    const rows = rowsForExport();
+    if (!hasPresentation || !rows.length) {
+      toast("Crea una presentacion desde este dashboard antes de exportar PowerPoint.");
+      return;
+    }
+    const request = createExportRequest({
+      target: { type: "presentation" },
+      format: "pptx",
+      scope: "private_workspace",
+      dashboardId: activeDashboardId || dashboard.id,
+      dashboardRevisionId: dashboardExportRevisionId(dashboard),
+      presentationId: presentation.id,
+      presentationRevisionId: `${presentation.id}:${presentation.updatedAt}`,
+      filters: viewState.filters ?? [],
+      actor: { id: "local-user", role: "editor" },
+      allowDownload: true
+    });
+    let job = createQueuedExportJob(request);
+    setExportJob(job);
+    try {
+      job = transitionExportJob(job, "rendering", "Preparando slides y notas");
+      setExportJob(job);
+      const artifact = generatePresentationExport({ dashboard, presentation, viewState, rows, profile, format: "pptx", request });
+      job = transitionExportJob(job, "generating", "Empaquetando PPTX");
+      setExportJob(job);
+      downloadExportArtifact(artifact);
+      setExportJob(completeExportJob(job, artifact.result));
+      setExportOpen(false);
+      toast(`${artifact.fileName} generado y descargado.`);
+    } catch (error) {
+      setExportJob(failExportJob(job, { code: "render_failed", message: error instanceof Error ? error.message : "No se pudo exportar PowerPoint.", recoverable: true }));
+      toast(error instanceof Error ? error.message : "No se pudo exportar PowerPoint.");
+    }
   }
 
   useEffect(() => {
@@ -155,9 +235,9 @@ export function DashboardWorkspace() {
                   <Link href="/app/presentaciones/crear" className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-[#f6f7ff]"><MonitorPlay className="size-4" /> Crear presentacion interactiva</Link>
                   <button onClick={exportDatasetCsv} disabled={!hasRows} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="size-4" /> Exportar datos CSV</button>
                   <button onClick={exportDashboardJson} disabled={!hasRows} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="size-4" /> Exportar DashboardSpec</button>
-                  <button disabled title="PDF requiere el motor de exportacion visual; usa compartir enlace o CSV por ahora." className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold opacity-50"><FileText className="size-4" /> Exportar PDF</button>
-                  <button disabled title="PNG requiere captura visual del dashboard; usa compartir enlace por ahora." className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold opacity-50"><FileImage className="size-4" /> Exportar PNG</button>
-                  <button disabled title="PowerPoint se genera desde Presentaciones interactivas." className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold opacity-50"><FileText className="size-4" /> Exportar PowerPoint</button>
+                  <button onClick={() => exportDashboardStatic("pdf")} disabled={!hasRows} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="size-4" /> Exportar PDF</button>
+                  <button onClick={() => exportDashboardStatic("png")} disabled={!hasRows} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileImage className="size-4" /> Exportar PNG</button>
+                  <button onClick={exportPresentationPptx} disabled={!hasPresentation} title={hasPresentation ? undefined : "Crea una presentacion antes de exportar PowerPoint."} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-50"><FileText className="size-4" /> Exportar PowerPoint</button>
                 </div>
               )}
             </div>
@@ -166,6 +246,13 @@ export function DashboardWorkspace() {
         </div>
         {hasRows ? (
           <>
+            {exportJob && (
+              <div className="mb-5 rounded-xl border border-[#dfe5f0] bg-white px-5 py-4 text-sm shadow-sm">
+                <p className="font-bold">Exportacion: {exportJob.status}</p>
+                <p className="mt-1 text-[#617094]">{exportJob.error?.message ?? exportJob.progressLabel}</p>
+                {exportJob.result && <p className="mt-1 text-xs text-[#697597]">{exportJob.result.fileName} - revision {exportJob.result.metadata.dashboardRevisionId}</p>}
+              </div>
+            )}
             <div className="mb-5 flex flex-wrap gap-2">
               {dashboardWorkspaceViews.map(({ value, label }) => (
                 <button

@@ -8,6 +8,9 @@ import { AppShell } from "@/components/shared/app-shell";
 import { Button } from "@/components/shared/button";
 import { useToast } from "@/components/shared/toast";
 import { persistShareLink } from "@/lib/data-access";
+import { completeExportJob, createExportRequest, createQueuedExportJob, dashboardExportRevisionId, failExportJob, transitionExportJob, type ExportFormat, type ExportJob } from "@/lib/export/contracts";
+import { downloadExportArtifact } from "@/lib/export/download";
+import { generateDashboardExport, generatePresentationExport } from "@/lib/export/renderers";
 import { capability, type CapabilityId, type CapabilityStatus } from "@/lib/product/capabilities";
 import { getQueryableRowsForExport } from "@/lib/query-service/client";
 import { useDashPilotStore } from "@/lib/store/app-store";
@@ -20,6 +23,7 @@ interface ExportCard {
   actionLabel: string;
   href?: string;
   onAction?: () => void;
+  disabledReason?: string;
 }
 
 function capabilityBadge(status: CapabilityStatus, beta: boolean) {
@@ -51,6 +55,7 @@ export function ShareExportPage() {
   const toast = useToast();
   const [generatedUrl, setGeneratedUrl] = useState("");
   const [sharePassword, setSharePassword] = useState("");
+  const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const shareSettings = useDashPilotStore((state) => state.shareSettings);
   const setShareSettings = useDashPilotStore((state) => state.setShareSettings);
   const dashboard = useDashPilotStore((state) => state.dashboard);
@@ -58,9 +63,11 @@ export function ShareExportPage() {
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
   const activeDatasetVersionId = useDashPilotStore((state) => state.activeDatasetVersionId);
   const profile = useDashPilotStore((state) => state.profile);
+  const presentation = useDashPilotStore((state) => state.presentation);
   const viewState = useDashPilotStore((state) => state.viewState);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const hasDashboard = Boolean(activeDatasetId && profile.rowCount > 0 && dashboard.widgets.length > 0);
+  const hasPresentation = hasDashboard && presentation.slides.length > 0;
   const url = generatedUrl || "Aun no hay enlaces compartidos";
   const dashboardHref = `/app/dashboards/${activeDashboardId || dashboard.id}`;
   const shareLinkCapability = capability("share.interactiveLink");
@@ -144,14 +151,86 @@ export function ShareExportPage() {
     toast("Dataset CSV descargado.");
   }
 
+  function rowsForExport() {
+    return getQueryableRowsForExport(activeDatasetVersionId || profile.datasetVersionId || activeDatasetId);
+  }
+
+  function runDashboardExport(format: Extract<ExportFormat, "pdf" | "png">) {
+    const rows = rowsForExport();
+    if (!hasDashboard || !rows.length) {
+      toast("Genera un dashboard con datos consultables antes de exportar.");
+      return;
+    }
+    const request = createExportRequest({
+      target: { type: "dashboard" },
+      format,
+      scope: "private_workspace",
+      dashboardId: activeDashboardId || dashboard.id,
+      dashboardRevisionId: dashboardExportRevisionId(dashboard),
+      filters: viewState.filters ?? [],
+      actor: { id: "local-user", role: "editor" },
+      allowDownload: true
+    });
+    let job = createQueuedExportJob(request);
+    setExportJob(job);
+    try {
+      job = transitionExportJob(job, "rendering", "Consultando specs y resultados agregados");
+      setExportJob(job);
+      const artifact = generateDashboardExport({ dashboard, viewState, rows, profile, format, request });
+      job = transitionExportJob(job, "generating", "Generando archivo verificable");
+      setExportJob(job);
+      downloadExportArtifact(artifact);
+      setExportJob(completeExportJob(job, artifact.result));
+      toast(`${artifact.fileName} generado y descargado.`);
+    } catch (error) {
+      setExportJob(failExportJob(job, { code: "render_failed", message: error instanceof Error ? error.message : "No se pudo generar la exportacion.", recoverable: true }));
+      toast(error instanceof Error ? error.message : "No se pudo generar la exportacion.");
+    }
+  }
+
+  function runPresentationPptxExport() {
+    const rows = rowsForExport();
+    if (!hasPresentation || !rows.length) {
+      toast("Crea una presentacion guardada desde el dashboard antes de exportar PPTX.");
+      return;
+    }
+    const request = createExportRequest({
+      target: { type: "presentation" },
+      format: "pptx",
+      scope: "private_workspace",
+      dashboardId: activeDashboardId || dashboard.id,
+      dashboardRevisionId: dashboardExportRevisionId(dashboard),
+      presentationId: presentation.id,
+      presentationRevisionId: `${presentation.id}:${presentation.updatedAt}`,
+      filters: viewState.filters ?? [],
+      actor: { id: "local-user", role: "editor" },
+      allowDownload: true
+    });
+    let job = createQueuedExportJob(request);
+    setExportJob(job);
+    try {
+      job = transitionExportJob(job, "rendering", "Leyendo PresentationSpec y revision vinculada");
+      setExportJob(job);
+      const artifact = generatePresentationExport({ dashboard, presentation, viewState, rows, profile, format: "pptx", request });
+      job = transitionExportJob(job, "generating", "Empaquetando PPTX Open XML");
+      setExportJob(job);
+      downloadExportArtifact(artifact);
+      setExportJob(completeExportJob(job, artifact.result));
+      toast(`${artifact.fileName} generado y descargado.`);
+    } catch (error) {
+      setExportJob(failExportJob(job, { code: "render_failed", message: error instanceof Error ? error.message : "No se pudo generar PPTX.", recoverable: true }));
+      toast(error instanceof Error ? error.message : "No se pudo generar PPTX.");
+    }
+  }
+
   const exportCards: ExportCard[] = [
     { capabilityId: "dashboard.exportSpecJson", icon: FileJson, title: "Exportar DashboardSpec JSON", description: "Descarga el spec real del dashboard y su estado visual actual.", actionLabel: "Descargar JSON", onAction: exportDashboardSpec },
     { capabilityId: "dashboard.exportCsv", icon: Download, title: "Exportar dataset CSV", description: "Descarga las filas actuales del dataset activo.", actionLabel: "Descargar CSV", onAction: exportDatasetCsv },
     { capabilityId: "presentation.generate", icon: MonitorPlay, title: "Crear presentacion interactiva", description: "Crea slides navegables desde el DashboardSpec actual.", actionLabel: "Crear presentacion", href: "/app/presentaciones/crear" },
     { capabilityId: "export.interactiveManifest", icon: Lock, title: "Manifest interactivo", description: capability("export.interactiveManifest").description, actionLabel: "No disponible" },
-    { capabilityId: "export.staticPdf", icon: FileText, title: "Exportar PDF", description: capability("export.staticPdf").description, actionLabel: "No disponible" },
-    { capabilityId: "export.staticPng", icon: FileImage, title: "Exportar PNG", description: capability("export.staticPng").description, actionLabel: "No disponible" },
-    { capabilityId: "export.staticPptx", icon: FileText, title: "Exportar PowerPoint", description: capability("export.staticPptx").description, actionLabel: "No disponible" }
+    { capabilityId: "export.staticPdf", icon: FileText, title: "Exportar PDF", description: capability("export.staticPdf").description, actionLabel: "Descargar PDF", onAction: () => runDashboardExport("pdf") },
+    { capabilityId: "export.staticPng", icon: FileImage, title: "Exportar PNG", description: capability("export.staticPng").description, actionLabel: "Descargar PNG", onAction: () => runDashboardExport("png") },
+    { capabilityId: "export.staticPptx", icon: FileText, title: "Exportar PowerPoint", description: capability("export.staticPptx").description, actionLabel: "Descargar PPTX", onAction: runPresentationPptxExport, disabledReason: "Crea una presentacion antes de exportar PPTX." }
   ];
 
   return (
@@ -244,11 +323,23 @@ export function ShareExportPage() {
         </div>
 
         <section className="mt-6 soft-card rounded-xl p-6">
-          <h2 className="text-xl font-bold">Opciones de exportacion</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Opciones de exportacion</h2>
+              <p className="mt-1 text-sm text-[#617094]">Los archivos estaticos se generan desde specs, revision, filtros y resultados consultados.</p>
+            </div>
+            {exportJob && (
+              <div className="rounded-lg border border-[#dfe5f0] bg-white px-4 py-3 text-sm">
+                <p className="font-bold">Estado: {exportJob.status}</p>
+                <p className="text-[#617094]">{exportJob.error?.message ?? exportJob.progressLabel}</p>
+                {exportJob.result && <p className="mt-1 text-xs text-[#697597]">Revision {exportJob.result.metadata.dashboardRevisionId}</p>}
+              </div>
+            )}
+          </div>
           <div className="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {exportCards.filter((card) => capability(card.capabilityId).visible).map((item) => {
               const itemCapability = capability(item.capabilityId);
-              const disabled = !itemCapability.enabled || (item.capabilityId === "dashboard.exportCsv" ? !hasDashboard : !hasDashboard);
+              const disabled = !itemCapability.enabled || (item.capabilityId === "export.staticPptx" ? !hasPresentation : !hasDashboard);
               return (
                 <article key={item.title} className="rounded-xl border border-[#e3e8f5] p-5">
                   <item.icon className="size-11 rounded-lg bg-[#f0f1ff] p-2 text-[#3d35ff]" />
@@ -261,7 +352,7 @@ export function ShareExportPage() {
                     <Link href={item.href} className="mt-4 inline-flex h-9 items-center rounded-lg border border-[#dce3f4] px-4 text-sm font-semibold">{item.actionLabel}</Link>
                   ) : (
                     <Button onClick={item.onAction} disabled={disabled} variant="secondary" className="mt-4 h-9 px-4" title={disabled ? item.description : undefined}>
-                      {item.actionLabel}
+                      {disabled && item.disabledReason ? item.disabledReason : item.actionLabel}
                     </Button>
                   )}
                 </article>

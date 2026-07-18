@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("visible capability CTAs", () => {
-  it("keeps future share/export controls disabled and executes only real downloads", async () => {
+  it("keeps unavailable manifest disabled and executes real export downloads", async () => {
     useDashPilotStore.getState().loadDemo();
     renderWithToast(<ShareExportPage />);
 
@@ -53,16 +53,22 @@ describe("visible capability CTAs", () => {
     expect(screen.getByText(/resultados agregados por widget/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abrir vista previa" })).toBeDisabled();
 
-    for (const title of ["Manifest interactivo", "Exportar PDF", "Exportar PNG", "Exportar PowerPoint"]) {
-      expect(scopedArticle(title).getByRole("button", { name: "No disponible" })).toBeDisabled();
+    expect(scopedArticle("Manifest interactivo").getByRole("button", { name: "No disponible" })).toBeDisabled();
+    for (const title of ["Exportar PDF", "Exportar PNG", "Exportar PowerPoint"]) {
+      expect(scopedArticle(title).getByRole("button")).toBeEnabled();
     }
 
+    for (const title of ["Exportar PDF", "Exportar PNG", "Exportar PowerPoint"]) {
+      fireEvent.click(scopedArticle(title).getByRole("button"));
+    }
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(3);
+
     fireEvent.click(scopedArticle("Exportar DashboardSpec JSON").getByRole("button", { name: "Descargar JSON" }));
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(4);
     expect(await screen.findByText("DashboardSpec JSON descargado.")).toBeInTheDocument();
 
     fireEvent.click(scopedArticle("Exportar dataset CSV").getByRole("button", { name: "Descargar CSV" }));
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(5);
     expect(await screen.findByText("Dataset CSV descargado.")).toBeInTheDocument();
   });
 

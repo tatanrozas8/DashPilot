@@ -22,6 +22,7 @@ export function AppHome() {
   const activePresentationId = useDashPilotStore((state) => state.activePresentationId);
   const isExampleMode = useDashPilotStore((state) => state.isDemoMode);
   const setParsedDataset = useDashPilotStore((state) => state.setParsedDataset);
+  const hydrateDataset = useDashPilotStore((state) => state.hydrateDataset);
   const setPersistenceState = useDashPilotStore((state) => state.setPersistenceState);
   const inputRef = useRef<HTMLInputElement>(null);
   const [importStatus, setImportStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -57,6 +58,7 @@ export function AppHome() {
       setParsedDataset(parsed);
       toast("Guardando dataset...");
       const result = await persistParsedDataset({ file, parsed });
+      hydrateDataset({ rows: result.rows, profile: result.profile, datasetId: result.datasetId });
       setPersistenceState({
         activeDatasetId: result.datasetId,
         activeDatasetVersionId: result.datasetVersionId ?? "",

@@ -48,7 +48,19 @@ test("professional product workflow from import to share/export", async ({ page 
   await expect(page).toHaveURL(/\/app\/dashboards\/dashboard_/);
   await page.getByRole("link", { name: "Compartir" }).click();
   await expect(page.getByText("Compartir enlace interactivo")).toBeVisible();
-  await expect(page.getByRole("button", { name: "No disponible" })).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "No disponible" })).toHaveCount(1);
+
+  const pdfDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar PDF" }).click();
+  expect((await pdfDownload).suggestedFilename()).toMatch(/\.pdf$/);
+
+  const pngDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar PNG" }).click();
+  expect((await pngDownload).suggestedFilename()).toMatch(/\.png$/);
+
+  const pptxDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar PPTX" }).click();
+  expect((await pptxDownload).suggestedFilename()).toMatch(/\.pptx$/);
 
   const specDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Descargar JSON" }).click();

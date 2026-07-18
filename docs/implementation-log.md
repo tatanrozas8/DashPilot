@@ -1205,3 +1205,75 @@ Debt remaining:
 
 - Transaction undo/redo is durable through configured dashboard version syncing; local browser-only sessions keep the transaction stack in memory.
 - Existing duplicate-key warnings in dashboard chart labels should be fixed separately.
+
+## 2026-07-18 - product-workflow-goal-2026-07-18
+
+Commit: pending
+
+Prompt ID: `product-workflow-goal-2026-07-18`
+
+Objective:
+
+- Convert DashPilot into a clearer professional product workflow from project/import through preview, dashboard editing, Copilot, presentation, sharing and real export/gating.
+- Keep export/share honest and avoid fake CTAs or demo-only primary paths.
+
+Files changed:
+
+- `app/layout.tsx`
+- `components/shared/ui.tsx`
+- `components/layout/AppShell.tsx`
+- `components/app-home.tsx`
+- `components/landing-page.tsx`
+- `components/dashboard/dashboard-editor.tsx`
+- `components/dashboard/dashboard-renderer.tsx`
+- `components/presentation/presentation-builder.tsx`
+- `types/presentation.ts`
+- `lib/presentation-spec/generate-presentation-spec.ts`
+- `lib/store/app-store.ts`
+- `lib/validation/schemas.ts`
+- `tests/product-workflow-ui.test.tsx`
+- `tests/e2e/product-workflow.spec.ts`
+- Existing presentation/domain tests updated for the explicit presentation snapshot contract.
+
+Architecture notes:
+
+- Added reusable product UI primitives for status badges, panels, tabs, empty/error/loading states, table wrappers, dialog/drawer shells, tooltip and form controls.
+- App shell navigation now prefers active dataset/dashboard/share IDs instead of demo routes when IDs exist, and exposes breadcrumbs, command search and explicit sync/mode/session status.
+- Internal home now presents an honest import workflow map with real loading/error states and next-step status.
+- Dashboard editor is organized into required tabs: Datos, Visual, Formato and Interaccion, while keeping edits bound to DashboardSpec and dataset columns.
+- PresentationSpec now records the source dashboard revision ID, title, updated timestamp and snapshot mode so presentations are visibly linked to the dashboard state used to create them.
+- Removed dead-looking public marketing CTAs and routed demo suggestions through the real generation flow instead of a demo dashboard shortcut.
+- Fixed duplicate React keys in chart cells/filter options and added the Next-recommended `data-scroll-behavior="smooth"` attribute.
+
+Validation:
+
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run test`: passed, 47 files and 265 tests.
+- `npm.cmd run build`: passed, 24/24 static pages generated.
+- `npm.cmd run test:e2e`: passed, 6 Chromium tests.
+- Targeted preflight: `npm.cmd run test -- tests/product-workflow-ui.test.tsx tests/presentation.test.ts tests/cta-capabilities.test.tsx tests/render.test.tsx`: passed, 4 files and 11 tests.
+- Targeted E2E: `npm.cmd run test:e2e -- tests/e2e/product-workflow.spec.ts`: passed, 1 Chromium test.
+
+Known warnings:
+
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+- Playwright/Next logs `NO_COLOR` ignored because `FORCE_COLOR` is set by the environment.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No dependency added.
+- No environment variable added.
+
+Security/privacy notes:
+
+- No `.env`, Supabase service-role key, `AI_API_KEY` value, `node_modules`, `.next`, `test-results` or `playwright-report` files were intentionally staged.
+- Presentation linkage stores dashboard revision metadata only, not additional raw rows.
+- Export/share CTAs remain real downloads, real interactive share, or disabled/gated future exports.
+
+Debt remaining:
+
+- Static PDF/PNG/PPTX export remains disabled until real render pipelines exist.
+- Dependency advisories for `xlsx` and transitive `postcss` remain tracked in dependency docs.
+- Supabase generated types and database-level RLS/share tests remain broader production hardening items.

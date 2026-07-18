@@ -32,9 +32,9 @@ export interface Capability {
 
 export const featureFlags = {
   interactiveManifestExport: false,
-  staticPdfExport: false,
-  staticPngExport: false,
-  staticPptxExport: false,
+  staticPdfExport: true,
+  staticPngExport: true,
+  staticPptxExport: true,
   passwordProtectedShares: false,
   providerCopilot: false
 } as const;
@@ -50,9 +50,9 @@ export const capabilities: Capability[] = [
   { id: "share.interactiveLink", label: "Interactive share link", status: "partial", visible: true, enabled: true, beta: true, description: "Creates Supabase-backed links when authenticated; local sandbox links are session-scoped only." },
   { id: "share.password", label: "Password-protected share", status: "future", visible: false, enabled: false, beta: false, description: "Hidden until server-side password validation is implemented." },
   { id: "export.interactiveManifest", label: "Interactive manifest", status: "future", visible: true, enabled: featureFlags.interactiveManifestExport, beta: true, description: "Disabled until import/open support exists." },
-  { id: "export.staticPdf", label: "Static PDF export", status: "future", visible: true, enabled: featureFlags.staticPdfExport, beta: false, description: "Disabled until a real PDF renderer exists." },
-  { id: "export.staticPng", label: "Static PNG export", status: "future", visible: true, enabled: featureFlags.staticPngExport, beta: false, description: "Disabled until a real image capture pipeline exists." },
-  { id: "export.staticPptx", label: "PowerPoint export", status: "future", visible: true, enabled: featureFlags.staticPptxExport, beta: false, description: "Disabled until a real PPTX pipeline exists." },
+  { id: "export.staticPdf", label: "Static PDF export", status: "real", visible: true, enabled: featureFlags.staticPdfExport, beta: false, description: "Generates a real PDF from DashboardSpec or PresentationSpec with revision, source and filters." },
+  { id: "export.staticPng", label: "Static PNG export", status: "real", visible: true, enabled: featureFlags.staticPngExport, beta: false, description: "Generates a real PNG snapshot from dashboard or slide specs with deterministic dimensions." },
+  { id: "export.staticPptx", label: "PowerPoint export", status: "real", visible: true, enabled: featureFlags.staticPptxExport, beta: false, description: "Generates a real PPTX package from PresentationSpec; charts are represented as raster-ready summaries." },
   { id: "presentation.generate", label: "Interactive presentation generation", status: "real", visible: true, enabled: true, beta: false, description: "Generates PresentationSpec from the active DashboardSpec." },
   { id: "presentation.save", label: "Presentation persistence", status: "partial", visible: true, enabled: true, beta: true, description: "Persists through the same Supabase/local sandbox adapter." },
   { id: "presentation.present", label: "Presentation mode", status: "real", visible: true, enabled: true, beta: false, description: "Shows generated slides and dashboard widgets interactively." },

@@ -6,6 +6,18 @@ export type ExportType =
   | "static_png"
   | "static_pptx";
 
+export type {
+  ExportError,
+  ExportFormat,
+  ExportJob,
+  ExportRequest,
+  ExportResult,
+  ExportScope,
+  ExportStatus,
+  ExportTarget,
+  ExportTargetType
+} from "@/lib/export/contracts";
+
 export interface ShareLink {
   id: string;
   dashboardId: string;

@@ -89,12 +89,16 @@ Expected states:
 ## 7. Verification Commands
 
 ```bash
+npm run lint
 npm run typecheck
 npm run test
+npm run test:coverage
 npm run build
+npm run test:e2e
+npm run audit:ci
 ```
 
-`npm run lint` is currently an alias of `tsc --noEmit`.
+`npm run lint` runs ESLint. `npm run typecheck` remains a separate TypeScript gate.
 
 ## Security Notes
 

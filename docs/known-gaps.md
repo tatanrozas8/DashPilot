@@ -14,8 +14,7 @@ Classification:
 | --- | --- | --- | --- | --- |
 | High | Dependency security | `xlsx` has high-severity advisories for prototype pollution and ReDoS; npm reports no fix available. | `npm.cmd audit` exits 1. | `package.json`, `package-lock.json`, `lib/files/parse-excel.ts` |
 | Medium | Dependency security | `next` currently depends on vulnerable `postcss <8.5.10`; npm suggests `audit fix --force` but that would install a breaking Next version path according to npm output. | `npm.cmd audit` reports 2 moderate vulnerabilities. | `package.json`, `package-lock.json` |
-| Medium | Tooling | `lint` is misleading because it runs `tsc --noEmit`, exactly like `typecheck`; no ESLint script is configured. | `package.json`; `npm.cmd run lint` output. | `package.json` |
-| High | Type safety | Supabase generated types are placeholders using `Record<string, any>`. This weakens table contracts at the persistence boundary. | `types/supabase.ts`. | `types/supabase.ts` |
+| High | Type safety | Supabase generated types remain broad placeholders instead of generated table contracts. This weakens table contracts at the persistence boundary. | `types/supabase.ts`. | `types/supabase.ts` |
 | Medium | API boundary | Copilot API validates major payload objects with Zod, but still casts `semanticModel`, `viewState`, `messages`, `copilotContext`, and `rows` after broad object checks. | `parseContext` casts raw input. | `app/api/copilot/route.ts` |
 | Medium | Error visibility | Copilot provider failures silently degrade to mock responses, including non-OK provider responses and catch-all exceptions. This protects UX but can hide provider outages. | `if (!response.ok) return createMock...`; empty `catch`. | `app/api/copilot/route.ts` |
 | Medium | Persistence visibility | Several Supabase failures fall back to localStorage with warning strings. This preserves the flow but can make production persistence failures look like successful local work. | `catch` blocks in data-access facade. | `lib/data-access/index.ts` |
@@ -28,6 +27,7 @@ Classification:
 | Medium | Export | PDF/PNG/PPTX exports are not real pipelines. Dashboard menu disables them; share/export page cards only show toast messages. | UI code inspection. | `components/dashboard/dashboard-workspace.tsx`, `components/share-export-page.tsx` |
 | Low | Build reproducibility | PowerShell `npm` command is blocked by system execution policy on this machine; docs/checks should use `npm.cmd`. | `npm -v` failed with `PSSecurityException`. | Local environment |
 | Low | Git environment | Git emits permission warnings reading the global ignore file. | `git status` output. | Local environment |
+| Medium | Test quality | Coverage can be generated but no minimum coverage threshold is enforced yet. | `npm.cmd run test:coverage` passes and reports coverage without thresholds. | `vitest.config.ts`, `package.json` |
 | Low | Architecture artifacts | No existing `graphify-out/graph.json` was present for graph-based architecture querying. | `Test-Path graphify-out\graph.json` returned `False`. | Local repository |
 
 ## Hypotheses To Validate
@@ -37,9 +37,9 @@ Classification:
 | High | Production import security | Client-side XLSX parsing may remain exposed to malicious workbook edge cases while `xlsx` has no fixed version. | Evaluate a maintained parser alternative, sandbox parsing, or server-side scanning before production upload hardening. |
 | Medium | Share privacy | `allowDownload` and `allowFilters` are UI/share settings, but public-share server enforcement may need stricter server-side filtering/export controls before production. | Add RPC tests and explicit server-side policy checks for public share settings. |
 | Medium | Accessibility | Basic accessible controls exist, but there is no automated accessibility check or manual screen-reader baseline in the repo. | Add axe/Playwright or documented manual a11y pass for critical flows. |
-| Medium | Responsive UX | Build and Vitest pass, but no E2E viewport checks exist for upload, dashboard, share, and presentation flows. | Add browser E2E coverage for desktop and mobile widths. |
+| Medium | Responsive UX | Browser E2E covers core flows, but there is no dedicated mobile/responsive viewport matrix for upload, dashboard, share, and presentation flows. | Add browser E2E coverage for desktop and mobile widths. |
 | Medium | Operational monitoring | Local-first fallbacks are useful for MVP, but production may need telemetry/alerts when Supabase or AI provider failures occur. | Define observability requirements and log/report failure modes without exposing sensitive data. |
-| Low | Version drift | Dependencies use many `latest` ranges, but `package-lock.json` pins the current install. Future dependency updates may be broad unless controlled. | Adopt explicit update policy or dependency bot grouping. |
+| Low | Version drift | Root dependency ranges are now exact, but transitive updates still require conservative Dependabot review and lockfile diffs. | Review Dependabot PRs and update policy after the first dependency cycle. |
 
 ## Current Check Failures and Warnings
 
@@ -55,8 +55,12 @@ Classification:
 
 - `npm.cmd ci`
 - `npm.cmd run typecheck`
-- `npm.cmd run lint` as currently defined
+- `npm.cmd run lint`
+- `npm.cmd run typecheck`
 - `npm.cmd run test`
+- `npm.cmd run test:coverage`
 - `npm.cmd run build`
+- `npm.cmd run test:e2e`
+- `npm.cmd run audit:ci`
 
 These passing checks do not mean the product is production-hardened; they establish the current reproducible baseline.

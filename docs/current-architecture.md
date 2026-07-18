@@ -18,11 +18,12 @@ Use these commands from the repository root:
 
 ```powershell
 npm.cmd ci
-npm.cmd run typecheck
 npm.cmd run lint
+npm.cmd run typecheck
 npm.cmd run test
+npm.cmd run test:coverage
 npm.cmd run build
-npm.cmd audit
+npm.cmd run audit:ci
 ```
 
 Observed results:
@@ -31,12 +32,14 @@ Observed results:
 | --- | --- | --- |
 | `node -v` | Passed | `v24.14.0` |
 | `npm.cmd -v` | Passed | `11.9.0` |
-| `npm.cmd ci` | Passed after sandbox escalation | `added 211 packages`, `audited 212 packages`, `3 vulnerabilities (2 moderate, 1 high)` |
+| `npm.cmd ci` | Passed after sandbox escalation | `added 526 packages`, `audited 527 packages`, `3 vulnerabilities (2 moderate, 1 high)` |
+| `npm.cmd run lint` | Passed | Runs real ESLint via `eslint . --max-warnings=0` |
 | `npm.cmd run typecheck` | Passed | Runs `tsc --noEmit` |
-| `npm.cmd run lint` | Passed | Runs `tsc --noEmit`; this is not a real lint command |
-| `npm.cmd run test` | Passed | `21 passed`, `134 passed`, duration `31.15s` |
-| `npm.cmd run build` | Passed | Next `16.2.10` with Turbopack, `23/23` static pages generated |
-| `npm.cmd audit` | Failed by design due advisories | `postcss <8.5.10` through `next`, `xlsx *` high severity, no fix available for `xlsx` |
+| `npm.cmd run test` | Passed | 45 files and 260 tests passed |
+| `npm.cmd run test:coverage` | Passed | V8 coverage summary: statements `67.16%`, branches `60.7%`, functions `72.66%`, lines `70.75%` |
+| `npm.cmd run build` | Passed | Next `16.2.10` with Turbopack, `24/24` static pages generated |
+| `npm.cmd run test:e2e` | Passed after sandbox escalation | 5 Chromium Playwright tests passed |
+| `npm.cmd run audit:ci` | Passed after sandbox escalation | Blocks critical vulnerabilities; current report still shows known moderate/high advisories |
 
 The first sandboxed `npm.cmd ci` attempt failed with `EPERM` while reading `C:\Users\Cristián\AppData\Local\npm-cache`. The same command passed outside the sandbox.
 
@@ -49,17 +52,25 @@ Source: `package.json`.
 | `dev` | `next dev` | Local dev server |
 | `build` | `next build` | Verified passing |
 | `start` | `next start` | Production server for built app |
-| `lint` | `tsc --noEmit` | Misleading duplicate of `typecheck`; no ESLint configured |
+| `lint` | `eslint . --max-warnings=0` | Real ESLint gate for Next.js, React, and TypeScript |
 | `typecheck` | `tsc --noEmit` | Verified passing |
 | `test` | `vitest run` | Verified passing |
+| `test:e2e` | `playwright test --reporter=line --timeout=45000` | Verified passing with Chromium |
+| `test:coverage` | `vitest run --coverage` | Verified passing with V8 provider |
 | `test:watch` | `vitest` | Watch mode, not part of baseline checks |
+| `audit` | `npm audit` | Full advisory report; currently exits non-zero due known advisories |
+| `audit:ci` | `npm audit --audit-level=critical` | CI gate for critical vulnerabilities |
 
 ## Configuration Inventory
 
 - `next.config.ts`: `reactStrictMode: true`.
 - `tsconfig.json`: strict TypeScript, `moduleResolution: bundler`, path alias `@/*`.
 - `vitest.config.ts`: React plugin, `jsdom`, `tests/setup.ts`, globals enabled, alias `@`.
+- `eslint.config.mjs`: flat ESLint config using `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript`.
 - `postcss.config.mjs`: Tailwind PostCSS plugin.
+- `.nvmrc` and `.node-version`: Node `24.14.0`.
+- `.github/workflows/quality-gates.yml`: PR/main quality gate for clean install, lint, typecheck, tests, coverage, build, and critical audit.
+- `.github/dependabot.yml`: conservative weekly grouped dependency updates; major updates ignored for manual review.
 - `.gitignore`: ignores `node_modules`, `.next`, `out`, `dist`, `coverage`, `*.tsbuildinfo`, `.env`, `.env.*`, logs.
 - `proxy.ts`: Next proxy/middleware-style auth gate for `/app` when Supabase env vars exist.
 
@@ -230,8 +241,8 @@ Current Vitest coverage areas:
 - Share token validity.
 - Rendering smoke tests.
 
-No Playwright or browser E2E suite is configured in `package.json`.
+Browser E2E coverage is configured through `npm run test:e2e` with Playwright.
 
 ## Current Baseline Conclusion
 
-The repository builds and tests successfully from a clean install on the observed machine using `npm.cmd`. The baseline is suitable for controlled functional work, with the important caveat that `lint` is not a real lint script and security advisories currently exist in transitive `postcss` and direct `xlsx`.
+The repository builds, lints, typechecks, tests, and generates coverage successfully from a clean install on the observed machine using `npm.cmd`. The baseline is suitable for controlled functional work, with the important caveat that security advisories currently exist in transitive `postcss` and direct `xlsx`.

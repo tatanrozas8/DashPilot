@@ -1,0 +1,85 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:00"
+      timezone: America/Santiago
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      app-runtime-minor-patch:
+        patterns:
+          - "@supabase/*"
+          - "@tailwindcss/*"
+          - clsx
+          - lucide-react
+          - next
+          - papaparse
+          - react
+          - react-dom
+          - recharts
+          - tailwind-merge
+          - tailwindcss
+          - zod
+          - zustand
+        update-types:
+          - minor
+          - patch
+      tooling-minor-patch:
+        patterns:
+          - "@eslint/*"
+          - "@testing-library/*"
+          - "@types/*"
+          - "@vitejs/*"
+          - "@vitest/*"
+          - eslint
+          - eslint-config-next
+          - jsdom
+          - typescript
+          - vitest
+        update-types:
+          - minor
+          - patch
+      spreadsheet-parser-patches:
+        patterns:
+          - xlsx
+        update-types:
+          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "10:30"
+      timezone: America/Santiago
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major

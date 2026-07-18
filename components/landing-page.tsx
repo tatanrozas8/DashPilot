@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { BarChart3, FileUp, Lock, MessageCircle, Presentation, Sparkles, Upload, WandSparkles, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/shared/button";
 import { Logo } from "@/components/shared/logo";
+import { StatusBadge } from "@/components/shared/ui";
 import { startDatasetImport } from "@/lib/data-access";
 import { useDashPilotStore } from "@/lib/store/app-store";
 
@@ -48,7 +49,7 @@ export function LandingPage() {
 
   function startDemoDashboard() {
     loadDemo();
-    router.push("/app/dashboards/demo");
+    router.push("/app/generando");
   }
 
   return (
@@ -57,10 +58,10 @@ export function LandingPage() {
         <nav className="mx-auto flex h-[88px] max-w-[1440px] items-center justify-between px-6">
           <Logo />
           <div className="hidden items-center gap-12 text-sm font-medium text-[#071334] lg:flex">
-            <span>Producto⌄</span>
-            <span>Soluciones⌄</span>
-            <span>Precios</span>
-            <span>Recursos⌄</span>
+            <a href="#flujo" className="hover:text-[#3d35ff]">Flujo</a>
+            <a href="#capacidades" className="hover:text-[#3d35ff]">Capacidades</a>
+            <Link href="/app/proyectos" className="hover:text-[#3d35ff]">Proyectos</Link>
+            <Link href="/app/configuracion" className="hover:text-[#3d35ff]">Configuracion</Link>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login" className="hidden h-11 items-center rounded-lg border border-[#dce3f4] bg-white px-5 text-sm font-semibold text-[#071334] transition hover:border-[#bfc9ea] sm:inline-flex">
@@ -74,7 +75,7 @@ export function LandingPage() {
       </header>
 
       <main className="mx-auto max-w-[1440px] px-6 pb-10 pt-14">
-        <section className="grid items-center gap-14 lg:grid-cols-[0.82fr_1fr]">
+        <section id="flujo" className="grid items-center gap-14 lg:grid-cols-[0.82fr_1fr]">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-[#dce0ff] bg-[#f6f5ff] px-4 py-2 text-sm font-semibold text-[#3d35ff]">
               <Sparkles className="size-4" /> Analisis automatico + copiloto beta
@@ -173,7 +174,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="mt-16 grid gap-7 lg:grid-cols-3">
+        <section id="capacidades" className="mt-16 grid gap-7 lg:grid-cols-3">
           {([
             [WandSparkles, "Generacion automatica", "El motor deterministico perfila tus datos y construye dashboards con KPIs, graficos y tablas relevantes."],
             [MessageCircle, "Edicion asistida", "Pide cambios en lenguaje natural. DashPilot muestra el modo usado antes de aplicar resultados."],
@@ -183,7 +184,7 @@ export function LandingPage() {
               <Icon className="size-12 rounded-xl bg-[#f0f1ff] p-3 text-[#3d35ff]" />
               <h3 className="mt-6 text-2xl font-bold tracking-[-0.03em]">{String(title)}</h3>
               <p className="mt-3 leading-7 text-[#617094]">{String(copy)}</p>
-              <p className="mt-6 font-bold text-[#3d35ff]">Saber mas →</p>
+              <StatusBadge tone="info" className="mt-6">Disponible en el flujo principal</StatusBadge>
             </article>
           ))}
         </section>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Boxes, ChartNoAxesCombined, FileStack, Home, MonitorPlay, Search, Settings, Share2 } from "lucide-react";
 import { Logo } from "@/components/shared/logo";
 import { useAuth } from "@/components/shared/auth-provider";
@@ -14,16 +14,7 @@ import { purgeDashPilotBrowserState } from "@/lib/security/browser-storage";
 import { cn } from "@/lib/utils";
 import { modeLabel, syncStatusLabel } from "@/lib/observability/modes";
 import { capability } from "@/lib/product/capabilities";
-
-const nav = [
-  { href: "/app", label: "Inicio", icon: Home },
-  { href: "/app/proyectos", label: "Proyectos", icon: FileStack },
-  { href: "/app/datasets/preview", label: "Datasets", icon: Boxes },
-  { href: "/app/dashboards/demo", label: "Dashboards", icon: ChartNoAxesCombined },
-  { href: "/app/presentaciones/crear", label: "Presentaciones", icon: MonitorPlay },
-  { href: "/app/dashboards/demo/compartir", label: "Compartidos", icon: Share2 },
-  { href: "/app/configuracion", label: "Configuracion", icon: Settings }
-];
+import { StatusBadge, Tooltip } from "@/components/shared/ui";
 
 function isActive(pathname: string, href: string) {
   if (href === "/app") return pathname === href;
@@ -34,6 +25,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
+  const searchRef = useRef<HTMLInputElement>(null);
   const { configured, user, isLocalMode } = useAuth();
   const currentProject = useDashPilotStore((state) => state.currentProject);
   const activeDatasetId = useDashPilotStore((state) => state.activeDatasetId);
@@ -55,6 +47,34 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
   const hasCriticalUnsavedChanges = ["pending", "retrying", "failed", "conflict"].includes(syncStatus);
   const syncTone = syncStatus === "saved" ? "bg-emerald-50 text-emerald-700" : syncStatus === "failed" || syncStatus === "conflict" ? "bg-rose-50 text-rose-700" : syncStatus === "retrying" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600";
   const copilotCapability = capability("copilot.provider");
+  const dashboardHref = activeDashboardId ? `/app/dashboards/${activeDashboardId}` : "/app/proyectos";
+  const datasetHref = activeDatasetId ? `/app/datasets/${activeDatasetId}/preview` : "/app";
+  const shareHref = activeDashboardId ? `/app/dashboards/${activeDashboardId}/compartir` : "/app/proyectos";
+  const presentationHref = activeDashboardId ? "/app/presentaciones/crear" : "/app/proyectos";
+  const nav = useMemo(
+    () => [
+      { href: "/app", label: "Inicio", icon: Home, group: "/app" },
+      { href: "/app/proyectos", label: "Proyectos", icon: FileStack, group: "/app/proyectos" },
+      { href: datasetHref, label: "Datasets", icon: Boxes, group: "/app/datasets" },
+      { href: dashboardHref, label: "Dashboards", icon: ChartNoAxesCombined, group: "/app/dashboards" },
+      { href: presentationHref, label: "Presentaciones", icon: MonitorPlay, group: "/app/present" },
+      { href: shareHref, label: "Compartidos", icon: Share2, group: "/app/dashboards" },
+      { href: "/app/configuracion", label: "Configuracion", icon: Settings, group: "/app/configuracion" }
+    ],
+    [dashboardHref, datasetHref, presentationHref, shareHref]
+  );
+  const breadcrumbs = useMemo(() => {
+    if (pathname === "/app") return ["Inicio"];
+    if (pathname.includes("/datasets")) return ["Inicio", "Datasets", activeDatasetId ? "Preview" : "Nuevo dataset"];
+    if (pathname.includes("/generando")) return ["Inicio", "Datasets", "Generacion"];
+    if (pathname.includes("/dashboards") && pathname.includes("/compartir")) return ["Inicio", "Dashboards", "Compartir"];
+    if (pathname.includes("/dashboards")) return ["Inicio", "Dashboards", activeDashboardId ? "Editor" : "Sin dashboard"];
+    if (pathname.includes("/presentaciones")) return ["Inicio", "Presentaciones", "Crear"];
+    if (pathname.includes("/present/")) return ["Inicio", "Presentaciones", "Presentar"];
+    if (pathname.includes("/proyectos")) return ["Inicio", "Proyectos"];
+    if (pathname.includes("/configuracion")) return ["Inicio", "Configuracion"];
+    return ["Inicio"];
+  }, [activeDashboardId, activeDatasetId, pathname]);
 
   useEffect(() => {
     if (!hasCriticalUnsavedChanges) return;
@@ -65,6 +85,17 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasCriticalUnsavedChanges]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   async function logout() {
     try {
@@ -85,7 +116,7 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       return;
     }
     setViewState({ dataExplorer: { isOpen: true, search: query } });
-    router.push(`/app/dashboards/${activeDashboardId || "demo"}`);
+    router.push(dashboardHref);
   }
 
   return (
@@ -96,7 +127,13 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
         </Link>
         <nav className="mt-14 space-y-2" aria-label="Navegacion interna">
           {nav.map((item) => {
-            const active = isActive(pathname, item.href);
+            const active = item.label === "Compartidos"
+              ? pathname.includes("/compartir")
+              : item.label === "Dashboards"
+                ? isActive(pathname, item.group) && !pathname.includes("/compartir")
+                : item.label === "Presentaciones"
+                  ? pathname.includes("/present")
+                : isActive(pathname, item.group);
             return (
               <Link
                 key={item.label}
@@ -116,9 +153,9 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
           <div className="rounded-lg border border-[#e3e8f5] bg-white p-4">
             <p className="text-sm font-semibold">{configured ? "Workspace Supabase" : "Sandbox local"}</p>
             <p className="mt-4 text-xs text-[#657095]">Proveedor IA</p>
-            <div className="mt-3 rounded-lg bg-[#f6f7ff] px-3 py-2 text-xs font-semibold text-[#536088]">
+            <StatusBadge tone={copilotCapability.beta ? "info" : "neutral"} className="mt-3 rounded-lg">
               {copilotCapability.beta ? "Beta parcial" : copilotCapability.status}
-            </div>
+            </StatusBadge>
             <p className="mt-3 text-xs leading-5 text-[#657095]">Sin consumo simulado. {copilotCapability.description}</p>
           </div>
         </div>
@@ -127,7 +164,14 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
       <header className="sticky top-0 z-20 border-b border-[#e3e8f5] bg-white/92 backdrop-blur lg:ml-[268px]">
         <div className="flex h-20 items-center justify-between gap-4 px-5 lg:px-8">
           <div>
-            <p className="text-xs text-[#6b7698]">Proyecto</p>
+            <nav aria-label="Breadcrumb" className="mb-1 flex flex-wrap items-center gap-1 text-xs font-semibold text-[#6b7698]">
+              {breadcrumbs.map((crumb, index) => (
+                <span key={`${crumb}-${index}`} className="inline-flex items-center gap-1">
+                  {index > 0 && <span className="text-[#a2abc8]">/</span>}
+                  {crumb}
+                </span>
+              ))}
+            </nav>
             <div className="mt-1 flex items-center gap-3">
               <h1 className="text-sm font-bold lg:text-base">{projectName}</h1>
               <span className={cn("size-2.5 rounded-full", hasProject ? "bg-emerald-500" : "bg-slate-300")} />
@@ -142,19 +186,19 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
             className="hidden h-11 w-[380px] items-center gap-3 rounded-lg border border-[#dfe5f0] bg-[#fbfcff] px-4 text-sm text-[#7a85a6] xl:flex"
           >
             <Search className="size-5" />
-            <input className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Buscar en DashPilot..." value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} />
-            <span className="ml-auto rounded border border-[#dfe5f0] px-1.5 text-xs">⌘ K</span>
+            <input ref={searchRef} className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Buscar en DashPilot..." value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} />
+            <span className="ml-auto rounded border border-[#dfe5f0] px-1.5 text-xs">Ctrl K</span>
           </form>
           <div className="flex items-center gap-4">
             {isLocalMode && (
-              <span className="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 md:inline">
+              <StatusBadge tone="warning" className="hidden md:inline-flex">
                 Sandbox local
-              </span>
+              </StatusBadge>
             )}
             {configured && user && (
-              <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 md:inline">
+              <StatusBadge tone="success" className="hidden md:inline-flex">
                 Conectado a Supabase
-              </span>
+              </StatusBadge>
             )}
             {configured && !user && (
               <Link href="/login" className="rounded-lg border border-[#dce3f4] px-3 py-2 text-sm font-semibold text-[#3d35ff]">
@@ -163,17 +207,19 @@ export function AppShell({ children, right }: { children: React.ReactNode; right
             )}
             {hasProject && (
               <button
-                onClick={() => hasCriticalUnsavedChanges ? void retryPendingSync() : toast(`${syncStatusLabel(syncStatus)} via ${modeLabel(executionMode)}${lastSyncCorrelationId ? ` · ID ${lastSyncCorrelationId}` : ""}`)}
+                onClick={() => hasCriticalUnsavedChanges ? void retryPendingSync() : toast(`${syncStatusLabel(syncStatus)} via ${modeLabel(executionMode)}${lastSyncCorrelationId ? ` ID ${lastSyncCorrelationId}` : ""}`)}
                 className={cn("hidden rounded-full px-3 py-1 text-xs font-semibold md:inline", syncTone)}
                 title={lastSyncCorrelationId ? `Correlation ID: ${lastSyncCorrelationId}` : undefined}
               >
-                {syncStatusLabel(syncStatus)} · {modeLabel(executionMode)}{outboxCount ? ` · ${outboxCount} pendiente(s)` : ""}
+                {syncStatusLabel(syncStatus)} / {modeLabel(executionMode)}{outboxCount ? ` / ${outboxCount} pendiente(s)` : ""}
               </button>
             )}
-            <button onClick={() => toast(notificationCount ? [...profile.qualityWarnings, persistenceStatus].filter(Boolean).slice(0, 3).join(" ") : "No hay notificaciones pendientes.")} className="relative" aria-label="Ver notificaciones">
-              <Bell className="size-5 text-[#536088]" />
-              {notificationCount > 0 && <span className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-red-500 text-[10px] font-bold text-white">{Math.min(9, notificationCount)}</span>}
-            </button>
+            <Tooltip label={notificationCount ? "Ver advertencias y estado" : "Sin notificaciones pendientes"}>
+              <button onClick={() => toast(notificationCount ? [...profile.qualityWarnings, persistenceStatus].filter(Boolean).slice(0, 3).join(" ") : "No hay notificaciones pendientes.")} className="relative" aria-label="Ver notificaciones">
+                <Bell className="size-5 text-[#536088]" />
+                {notificationCount > 0 && <span className="absolute -right-2 -top-2 grid size-5 place-items-center rounded-full bg-red-500 text-[10px] font-bold text-white">{Math.min(9, notificationCount)}</span>}
+              </button>
+            </Tooltip>
             <Link href="/app/configuracion" className="flex items-center gap-3">
               <div className="grid size-10 place-items-center rounded-full bg-gradient-to-br from-slate-200 to-slate-400 text-sm font-bold">CM</div>
               <div className="hidden md:block">

@@ -51,9 +51,9 @@ Current MVP limits:
 
 Visible controls must match implemented behavior:
 
-- Real: upload CSV/XLS/XLSX, demo dataset, bounded dataset preview, deterministic dashboard generation, DashboardSpec JSON export, dataset CSV export, interactive presentation generation, presentation mode.
+- Real: upload CSV/XLS/XLSX, demo dataset, bounded dataset preview, deterministic dashboard generation, DashboardSpec JSON export, dataset CSV export, static dashboard PDF/PNG export, slide PNG export, presentation PPTX export, interactive presentation generation, presentation mode.
 - Beta/partial: Supabase/local sandbox persistence, interactive share links, provider-backed Copilot when configured.
-- Future/disabled: password-protected sharing, static PDF export, PNG export, PPTX export, and interactive manifest export.
+- Future/disabled: password-protected sharing and interactive manifest export.
 
 Disabled future controls stay visible only when they explain what is missing. DashPilot does not show success toasts for unavailable exports or client-only security placeholders.
 
@@ -230,6 +230,7 @@ tests/fixtures/ventas_real_test.csv
 ## Current Production Gaps
 
 - Supabase types are represented by a permissive placeholder until generated from a real project.
-- Static PDF/PNG/PPTX export and interactive manifest are disabled until real rendering/import pipelines exist.
+- Static PDF/PNG/PPTX exports generate real files from specs, revision metadata, filters and queryable results. PPTX charts are represented as editable summary text/raster-ready placeholders rather than editable native chart objects.
+- Interactive manifest export remains disabled until import/open support exists.
 - Password-protected share is hidden/disabled until server-side password validation exists.
-- Public share by token is implemented through RPC, but download/export enforcement should be hardened server-side before production.
+- Public share by token is implemented through RPC, and client export code enforces `allowDownload`; database-level export/download tests should still harden production enforcement.

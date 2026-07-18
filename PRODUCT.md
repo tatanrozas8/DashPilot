@@ -33,9 +33,9 @@ No debe sentirse como una landing decorativa, una plantilla generica de BI, ni u
 
 ## Capability Policy
 
-- Capacidades reales del MVP: upload, preview virtualizado, generacion deterministica de DashboardSpec, exportacion CSV/JSON, presentaciones interactivas.
+- Capacidades reales del MVP: upload, preview virtualizado, generacion deterministica de DashboardSpec, exportacion CSV/JSON, PDF/PNG de dashboard, PNG de slide, PPTX de presentacion, presentaciones interactivas.
 - Capacidades beta/parciales: persistencia Supabase/local sandbox, enlaces compartidos, Copilot con proveedor configurado.
-- Capacidades futuras/deshabilitadas: PDF, PNG, PPTX, manifest interactivo y sharing con contrasena server-side.
+- Capacidades futuras/deshabilitadas: manifest interactivo y sharing con contrasena server-side.
 
 ## Accessibility & Inclusion
 

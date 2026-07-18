@@ -179,10 +179,12 @@ Build output verified these routes:
     - Supabase public share reads through `public.get_public_shared_dashboard(share_token text)` in `supabase/migrations/0002_real_dataset_pipeline.sql`.
 
 12. Export:
-    - Dashboard workspace currently supports browser-side CSV export and DashboardSpec JSON export.
-    - PDF/PNG/PPTX controls in the dashboard export menu are disabled with explanatory titles.
-    - `components/share-export-page.tsx` still shows PDF/PNG/PPTX option cards that only toast success messages.
-    - `lib/export/create-manifest.ts` creates a simple interactive export manifest and demo share link.
+    - Dashboard workspace supports browser-side CSV, DashboardSpec JSON, PDF and PNG downloads.
+    - Presentation builder/share export supports PPTX downloads from `PresentationSpec` and slide PNG snapshots.
+    - `lib/export/contracts.ts` defines Zod-validated export requests, targets, formats, scopes, statuses, results and errors.
+    - `lib/export/renderers.ts` generates real PDF, PNG and PPTX bytes from specs, revision metadata, filters and queryable results instead of treating the current DOM as the only source of truth.
+    - Public share export calls reject snapshots when `allowDownload=false` or the `export_snapshot` scope is absent.
+    - `lib/export/create-manifest.ts` still creates a simple interactive export manifest and demo share link; interactive manifest import/open remains disabled.
 
 ## Auth and Access Control
 

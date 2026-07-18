@@ -89,6 +89,20 @@ describe("query engine", () => {
     expect(Number(result.rows[0]?.Ventas ?? 0)).toBeGreaterThanOrEqual(Number(result.rows[1]?.Ventas ?? 0));
   });
 
+  it("can keep full table rows after search and sort when projection is disabled", () => {
+    const result = queryTableRows(demoRows, {
+      search: "Norte",
+      columns: ["Region", "Ventas"],
+      projectColumns: false,
+      sort: { field: "Ventas", direction: "desc" }
+    });
+
+    expect(result.filteredRows).toBeGreaterThan(0);
+    expect(Object.keys(result.rows[0] ?? {})).toContain("Producto");
+    expect(Object.keys(result.rows[0] ?? {})).toContain("Vendedor");
+    expect(Number(result.rows[0]?.Ventas ?? 0)).toBeGreaterThanOrEqual(Number(result.rows[1]?.Ventas ?? 0));
+  });
+
   it("searches within a specific table column", () => {
     const result = queryTableRows(demoRows, { columnSearch: { field: "Vendedor", query: "Maria" }, columns: ["Vendedor", "Region"] });
 

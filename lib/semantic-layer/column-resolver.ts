@@ -305,35 +305,6 @@ function resultFromMatches(prompt: string, intent: ColumnIntent, requestedConcep
   };
 }
 
-function semanticFields(context: ColumnResolverContext, intent: ColumnIntent) {
-  const model = context.semanticModel;
-  if (!model) return [];
-  if (intent === "geography") return model.geographies;
-  if (intent === "seller") return model.sellers;
-  if (intent === "client") return model.clients;
-  if (intent === "product") return model.products;
-  if (intent === "category") return model.categories;
-  if (intent === "revenue") return model.revenueMetrics;
-  if (intent === "margin") return model.marginMetrics;
-  if (intent === "date") return model.dates;
-  if (intent === "metric") return model.metrics;
-  return model.dimensions;
-}
-
-function profileFallbackFields(context: ColumnResolverContext, intent: ColumnIntent) {
-  if (intent === "geography") return context.datasetProfile.detectedGeoColumns;
-  if (intent === "date") return context.datasetProfile.detectedDateColumns;
-  if (["revenue", "margin", "metric"].includes(intent)) return context.datasetProfile.detectedMetricColumns;
-  return context.datasetProfile.detectedDimensionColumns;
-}
-
-function typeScore(column: DatasetColumnProfile, intent: ColumnIntent) {
-  if (intent === "date") return column.inferredType === "date" || column.semanticType === "time" ? 0.28 : 0;
-  if (intent === "geography") return column.inferredType === "geography" || column.semanticType === "geo" ? 0.26 : 0;
-  if (["revenue", "margin", "metric"].includes(intent)) return ["number", "currency", "percentage"].includes(column.inferredType) || ["metric", "measure"].includes(column.semanticType) ? 0.2 : 0;
-  return ["dimension", "category", "identifier", "geo"].includes(column.semanticType) ? 0.16 : 0;
-}
-
 function requestedIntent(prompt: string): ColumnIntent | undefined {
   const text = normalize(prompt);
   const ordered: ColumnIntent[] = ["geography", "seller", "client", "product", "category", "margin", "revenue", "date", "metric", "dimension"];

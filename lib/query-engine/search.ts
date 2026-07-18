@@ -7,6 +7,7 @@ import { slugify } from "@/lib/utils";
 export interface TableQueryState {
   search?: string;
   columns?: string[];
+  projectColumns?: boolean;
   filters?: DashboardFilter[];
   sort?: {
     field: string;
@@ -52,8 +53,9 @@ export function queryTableRows(rows: DataRow[], state: TableQueryState) {
   const columnSearch = state.columnSearch?.field && state.columnSearch.query.trim() ? state.columnSearch : undefined;
   const filtered = columnSearch ? searchRows(globallyFiltered, columnSearch.query, [columnSearch.field]) : globallyFiltered;
   const sorted = sortRows(filtered, state.sort);
+  const shouldProjectColumns = state.projectColumns ?? true;
   return {
-    rows: selectColumns(sorted, state.columns ?? []),
+    rows: shouldProjectColumns ? selectColumns(sorted, state.columns ?? []) : sorted,
     totalRows: rows.length,
     filteredRows: sorted.length
   };

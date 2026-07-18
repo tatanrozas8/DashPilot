@@ -597,7 +597,7 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
             >
               {isSelected && !slideWidgetIds && (
                 <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-full border border-[#cfd5ff] bg-white px-3 py-1 text-xs font-bold text-[#3d35ff] shadow-sm">
-                  Editando este grafico
+                  Seleccionado
                   <button
                     type="button"
                     aria-label="Deseleccionar objetivo"
@@ -789,10 +789,17 @@ export function CopilotPanel() {
   const undoCount = useDashPilotStore((state) => state.copilotUndoStack.length);
   const redoCount = useDashPilotStore((state) => state.copilotRedoStack.length);
   const pendingConfirmation = useDashPilotStore((state) => state.pendingCopilotConfirmation);
+  const pendingPlan = useDashPilotStore((state) => state.pendingCopilotPlan);
+  const copilotStatus = useDashPilotStore((state) => state.copilotStatus);
+  const copilotPlan = useDashPilotStore((state) => state.copilotPlan);
+  const copilotDiff = useDashPilotStore((state) => state.copilotDiff);
+  const copilotEvidence = useDashPilotStore((state) => state.copilotEvidence);
   const undoCopilotChange = useDashPilotStore((state) => state.undoCopilotChange);
   const redoCopilotChange = useDashPilotStore((state) => state.redoCopilotChange);
   const confirmPendingCopilotAction = useDashPilotStore((state) => state.confirmPendingCopilotAction);
   const cancelPendingCopilotAction = useDashPilotStore((state) => state.cancelPendingCopilotAction);
+  const applyPendingCopilotPlan = useDashPilotStore((state) => state.applyPendingCopilotPlan);
+  const cancelPendingCopilotPlan = useDashPilotStore((state) => state.cancelPendingCopilotPlan);
   const toggleCopilotPanel = useDashPilotStore((state) => state.toggleCopilotPanel);
   const selectedTargetType = useDashPilotStore((state) => state.viewState.selectedTargetType ?? "none");
   const selectedTargetTitle = useDashPilotStore((state) => state.viewState.selectedTargetTitle);
@@ -873,16 +880,17 @@ export function CopilotPanel() {
           </div>
         </div>
       )}
-      <div className="shrink-0 border-b border-[#edf1fa] px-5 py-3">
+      <div className="max-h-[52vh] shrink-0 overflow-y-auto border-b border-[#edf1fa] px-5 py-3">
         <div className="mb-3 rounded-xl border border-[#e2e7f6] bg-[#fbfcff] p-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Contexto operativo</p>
-              <p className="mt-1 truncate text-sm font-bold text-[#1c2748]">{targetLabel}</p>
+              <p className="mt-1 truncate text-sm font-bold text-[#1c2748]">Actuando sobre: {targetLabel}</p>
               <p className="mt-1 text-xs leading-5 text-[#697597]">
                 {selectedTargetType !== "none" ? "Las instrucciones se aplican a la seleccion actual." : "Pide un nuevo grafico o selecciona un widget para editarlo."}
               </p>
               <p className="mt-1 text-xs font-semibold text-[#536088]">Modo: {modeLabel(executionMode)}</p>
+              <p className="mt-1 text-xs font-semibold text-[#536088]">Estado: {copilotStatus}</p>
             </div>
             <span className={cn("shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold", selectedTargetType !== "none" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600")}>
               {selectedTargetType !== "none" ? "Listo" : "General"}
@@ -943,6 +951,46 @@ export function CopilotPanel() {
                 <p className="text-xs font-semibold leading-5 text-[#697597]">El Copiloto agregara un nuevo grafico al dashboard.</p>
               </div>
             </div>
+          </div>
+        )}
+        {(copilotPlan || copilotDiff.length > 0 || copilotEvidence.length > 0) && (
+          <div className="mt-3 rounded-xl border border-[#dfe5f0] bg-white p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Plan y diff</p>
+                <p className="mt-1 text-sm font-bold text-[#1c2748]">{copilotPlan ? `Intencion: ${copilotPlan.intent}` : "Sin plan activo"}</p>
+              </div>
+              <span className="rounded-lg bg-[#eef0ff] px-2 py-1 text-[11px] font-bold text-[#3d35ff]">{copilotDiff.length} cambios</span>
+            </div>
+            {copilotPlan?.warnings.length ? (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
+                {copilotPlan.warnings.slice(0, 2).join(" ")}
+              </div>
+            ) : null}
+            {copilotDiff.length > 0 && (
+              <ul className="mt-3 max-h-28 space-y-2 overflow-y-auto text-xs font-semibold leading-5 text-[#536088]">
+                {copilotDiff.slice(0, 4).map((entry) => (
+                  <li key={`${entry.path}-${entry.kind}`} className="rounded-lg bg-[#fbfcff] px-2 py-1">
+                    {entry.kind}: {entry.path}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {copilotEvidence.length > 0 && (
+              <div className="mt-3 rounded-lg bg-[#f8fafc] px-3 py-2 text-xs font-semibold leading-5 text-[#536088]">
+                {copilotEvidence.slice(0, 3).join(" · ")}
+              </div>
+            )}
+            {pendingPlan && (
+              <div className="mt-3 flex gap-2">
+                <button onClick={applyPendingCopilotPlan} disabled={isCopilotThinking} className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-[#3d35ff] px-3 text-xs font-bold text-white disabled:opacity-50">
+                  <Check className="size-4" /> Aplicar
+                </button>
+                <button onClick={cancelPendingCopilotPlan} disabled={isCopilotThinking} className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-[#dfe5f0] bg-white px-3 text-xs font-bold text-[#536088] disabled:opacity-50">
+                  <X className="size-4" /> Cancelar
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

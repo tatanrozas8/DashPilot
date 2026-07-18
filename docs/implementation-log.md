@@ -1148,3 +1148,60 @@ Debt remaining:
 - `/api/query` still reconstructs the transitional `columnar-json` artifact server-side from `dataset_rows`; integrating DuckDB/Parquet remains the existing P2 scale item.
 - CSV export in local/demo mode reads from the queryable local repository for compatibility; a server-side export endpoint should replace that for Supabase datasets before enterprise rollout.
 - Existing duplicate-key warnings in dashboard chart labels should be fixed in a separate non-P1 task.
+
+## 2026-07-18 - copilot-agent-goal-2026-07-18
+
+Commit: `Build governed Copilot command bus`
+
+Prompt ID: `copilot-agent-goal-2026-07-18`
+
+Objective:
+
+- Convert the dashboard AI Copilot into a professional dashboard-editing agent with explicit target selection, typed tools, authorized context, planning, policy gating, dry-run/diff preview, confirmation, atomic execution, audit evidence, undo/redo, and ambiguity/privacy guardrails.
+
+Files changed:
+
+- `components/dashboard/dashboard-renderer.tsx`
+- `lib/ai/copilot-service.ts`
+- `lib/copilot-command-bus/*`
+- `lib/store/app-store.ts`
+- `tests/copilot-*.test.ts`
+- `tests/copilot-ux.test.tsx`
+- `tests/e2e/copilot-agent.spec.ts`
+- `tests/render.test.tsx`
+- `docs/checkpoints/copilot-agent-goal-2026-07-18.md`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added a closed `copilot-command-bus` layer with typed Zod tool schemas, registry metadata, policy gates, semantic diffs, dry-run execution, transaction execution, audit evidence, and undo/redo helpers.
+- Copilot planning now resolves authorized dashboard/dataset/widget context from IDs and dashboard revision instead of trusting client-provided selection text.
+- Copilot messages now produce a reviewable plan and diff first; dashboard mutation happens only after the user applies the pending plan.
+- Risky tools require an explicit apply step, ambiguous prompts return clarification options, and stale/missing/revoked contexts are rejected.
+- Provider context generation now redacts PII-like sample values, bounds samples, marks cell text as untrusted data, and instructs the model not to follow dataset-cell instructions.
+
+Validation:
+
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `npm run test`: passed, 45 files and 260 tests.
+- `npm run build`: passed, 24 app routes generated.
+- `npx playwright test tests/e2e/copilot-agent.spec.ts --reporter=line --timeout=45000`: passed, 1 Chromium test.
+- `npm.cmd run test:e2e`: passed, 5 Chromium tests.
+
+Known warnings:
+
+- `npm run test:e2e` via PowerShell was blocked by local `npm.ps1` execution policy; `npm.cmd run test:e2e` ran the same script successfully.
+- Playwright still logs existing React duplicate-key warnings for `Tecnologia` and `Hogar`.
+- Next still logs the existing smooth-scroll route-transition warning.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No environment variables added.
+- No dependency added, so clean install was not required.
+
+Debt remaining:
+
+- Transaction undo/redo is durable through configured dashboard version syncing; local browser-only sessions keep the transaction stack in memory.
+- Existing duplicate-key warnings in dashboard chart labels should be fixed separately.

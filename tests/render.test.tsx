@@ -26,15 +26,6 @@ describe("DashboardRenderer", () => {
 
   it("keeps the copilot input visible and sends prompts", async () => {
     useDashPilotStore.getState().loadDemo();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
-      reply: "Simplifique la vista ejecutiva, priorice KPIs y destaque el resumen para una lectura directiva.",
-      actions: [],
-      updatedDashboardSpec: useDashPilotStore.getState().dashboard,
-      updatedViewState: useDashPilotStore.getState().viewState,
-      updatedPresentationSpec: useDashPilotStore.getState().presentation,
-      source: "deterministic",
-      executionMode: "deterministic"
-    })));
 
     render(<CopilotPanel />);
 
@@ -50,7 +41,8 @@ describe("DashboardRenderer", () => {
 
     await waitFor(() => expect(input).toHaveValue(""));
     expect(screen.getByText("Hazlo mas ejecutivo")).toBeInTheDocument();
-    expect(await screen.findByText(/Simplifique la vista ejecutiva/)).toBeInTheDocument();
+    expect(await screen.findByText(/Plan listo|Necesito una aclaracion/)).toBeInTheDocument();
+    expect(screen.queryByText(/Accion aplicada/)).not.toBeInTheDocument();
   });
 
   it("resolves bar chart renderer orientation from visualConfig and legacy horizontal flag", () => {

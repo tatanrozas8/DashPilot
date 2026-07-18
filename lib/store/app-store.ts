@@ -8,7 +8,6 @@ import type { DashboardDesignSettings, DashboardSpec, DashboardTargetType, Dashb
 import type { PresentationSpec, PresentationTheme } from "@/types/presentation";
 import type { CopilotActionEnvelope } from "@/lib/ai/actions";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
-import { requestCopilotResponse } from "@/lib/ai/copilot-client";
 import { assistantMessage } from "@/lib/ai/copilot-service";
 import { applyDashboardAction } from "@/lib/dashboard-spec/apply-dashboard-action";
 import {
@@ -33,6 +32,7 @@ import { DomainError, logDomainError, toDomainError } from "@/lib/observability/
 import type { ExecutionMode, SyncStatus } from "@/lib/observability/modes";
 import { DASH_PILOT_PERSIST_TTL_MS, DASH_PILOT_PERSIST_VERSION, purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
 import { clearQueryableDatasets, getQueryableRowsSample, getQueryableRowsForExport, registerQueryableDataset } from "@/lib/query-service/client";
+import { createCopilotPlan, createExecutionState, executeTransaction, redoTransaction, resolveCopilotContext, undoTransaction, type CopilotPlan, type SemanticDiffEntry, type TransactionalExecutionState } from "@/lib/copilot-command-bus";
 
 export interface PresentationOptions {
   theme: PresentationTheme;
@@ -62,6 +62,14 @@ interface PendingCopilotConfirmation {
   id: string;
   envelope: CopilotActionEnvelope;
   prompt: string;
+  createdAt: string;
+}
+
+interface PendingCopilotPlan {
+  id: string;
+  prompt: string;
+  plan: CopilotPlan;
+  contextRevisionId: string;
   createdAt: string;
 }
 
@@ -128,6 +136,12 @@ interface DashPilotState {
   copilotUndoStack: DashboardSnapshot[];
   copilotRedoStack: DashboardSnapshot[];
   pendingCopilotConfirmation?: PendingCopilotConfirmation;
+  pendingCopilotPlan?: PendingCopilotPlan;
+  copilotStatus: "idle" | "interpreting" | "clarification" | "planned" | "validating" | "awaiting_confirmation" | "executing" | "verified" | "failed" | "reverted";
+  copilotPlan?: CopilotPlan;
+  copilotDiff: SemanticDiffEntry[];
+  copilotEvidence: string[];
+  copilotTransactionState?: TransactionalExecutionState;
   isDemoMode: boolean;
   uploadedFileName: string;
   presentationOptions: PresentationOptions;
@@ -168,6 +182,8 @@ interface DashPilotState {
   setCopilotIntent: (intent: NonNullable<DashboardViewState["copilotIntent"]>) => void;
   updateColumnDictionary: (field: string, changes: ColumnDictionaryChanges) => void;
   sendPrompt: (prompt: string) => Promise<void>;
+  applyPendingCopilotPlan: () => void;
+  cancelPendingCopilotPlan: () => void;
   undoCopilotChange: () => void;
   redoCopilotChange: () => void;
   confirmPendingCopilotAction: () => void;
@@ -375,6 +391,12 @@ function createInitialState() {
     copilotUndoStack: [],
     copilotRedoStack: [],
     pendingCopilotConfirmation: undefined,
+    pendingCopilotPlan: undefined,
+    copilotStatus: "idle" as const,
+    copilotPlan: undefined,
+    copilotDiff: [],
+    copilotEvidence: [],
+    copilotTransactionState: undefined,
     isDemoMode: false,
     uploadedFileName: "",
     presentationOptions: {
@@ -894,12 +916,16 @@ export const useDashPilotStore = create<DashPilotState>()(
       sendPrompt: async (prompt) => {
         const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content: prompt, createdAt: new Date().toISOString() };
         const before = get();
-        const beforeSnapshot = snapshotFromState(before, `Copiloto: ${prompt}`);
         set({
           messages: [...before.messages, userMessage],
           chatMessages: [...before.messages, userMessage],
           isCopilotThinking: true,
-          pendingCopilotConfirmation: undefined
+          pendingCopilotConfirmation: undefined,
+          pendingCopilotPlan: undefined,
+          copilotStatus: "interpreting",
+          copilotPlan: undefined,
+          copilotDiff: [],
+          copilotEvidence: []
         });
         try {
           const sampleRows = getQueryableRowsSample(before.activeDatasetVersionId || before.profile.datasetVersionId || before.activeDatasetId, 25);
@@ -911,115 +937,69 @@ export const useDashPilotStore = create<DashPilotState>()(
             presentationSpec: before.presentation,
             messages: before.messages
           });
-          const result = await requestCopilotResponse({
-            prompt,
-            datasetProfile: before.profile,
-            semanticModel: copilotContext.semanticModel,
+          const revisionId = before.copilotTransactionState?.currentRevisionId ?? before.dashboard.updatedAt ?? before.dashboard.id;
+          const resolved = resolveCopilotContext({
+            projectId: before.activeProjectId || before.currentProject.id || "local-project",
+            dashboardId: before.activeDashboardId || before.dashboard.id,
+            revisionId,
+            targetId: before.viewState.selectedTargetId,
+            scope: before.viewState.selectedTargetId ? "widget" : "dashboard",
+            userMessage: prompt,
+            selectedTargetSpec: before.viewState.selectedTargetSpec
+          }, {
+            actor: { id: "local-user", role: "editor", displayName: "Usuario" },
+            projectId: before.activeProjectId || before.currentProject.id || "local-project",
+            dashboardId: before.activeDashboardId || before.dashboard.id,
+            currentRevisionId: revisionId,
             dashboardSpec: before.dashboard,
             viewState: before.viewState,
+            datasetProfile: before.profile,
+            semanticModel: copilotContext.semanticModel,
             presentationSpec: before.presentation,
-            messages: before.messages,
-            copilotContext,
-            rows: sampleRows
+            messages: before.messages
           });
-          if (result.actions?.some((action) => action.type === "undo_last_action")) {
-            const previous = before.copilotUndoStack.at(-1);
-            const botMessage = assistantMessage(previous ? `Deshice: ${previous.reason}.` : "No hay cambios anteriores del Copiloto para deshacer.");
-            if (!previous) {
-              set({
-                messages: [...get().messages, botMessage],
-                chatMessages: [...get().messages, botMessage],
-                isCopilotThinking: false
-              });
-              return;
-            }
-            const current = snapshotFromState(before, "Rehacer cambio del Copiloto");
+          if (!resolved.success) {
+            const botMessage = assistantMessage(`No aplique cambios: ${resolved.error}`);
             set({
-              dashboard: previous.dashboard,
-              dashboardSpec: previous.dashboard,
-              viewState: previous.viewState,
-              filters: previous.viewState,
-              presentation: previous.presentation,
-              presentationSpec: previous.presentation,
-              activeDashboardId: previous.dashboard.id,
-              activePresentationId: previous.presentation.id,
-              copilotUndoStack: before.copilotUndoStack.slice(0, -1),
-              copilotRedoStack: withLimitedHistory([...before.copilotRedoStack, current]),
               messages: [...get().messages, botMessage],
               chatMessages: [...get().messages, botMessage],
-              isCopilotThinking: false
+              isCopilotThinking: false,
+              copilotStatus: "failed",
+              copilotEvidence: [resolved.error]
             });
             return;
           }
-          const nextDashboard = result.updatedDashboardSpec ?? get().dashboard;
-          const nextViewState = result.updatedViewState ?? get().viewState;
-          let nextPresentation = result.updatedPresentationSpec ?? get().presentation;
-          if (!result.updatedPresentationSpec && result.actions?.some((action) => action.type === "generate_presentation" || action.type === "create_presentation")) {
-            nextPresentation = generatePresentationSpec(nextDashboard, get().presentationOptions.theme);
+          const plan = createCopilotPlan(resolved.context, prompt);
+          const diff = plan.expectedDiff;
+          const warningText = plan.warnings.length ? ` Advertencias: ${plan.warnings.join(" ")}` : "";
+          if (plan.needsClarification) {
+            const botMessage = assistantMessage(`${plan.clarification?.question ?? "Necesito una aclaracion antes de aplicar cambios."} Opciones: ${plan.clarification?.options.join(", ") ?? "cambiar visualizacion, cambiar metrica, agregar filtro, crear nuevo grafico, mejorar layout"}.${warningText}`);
+            set({
+              messages: [...get().messages, botMessage],
+              chatMessages: [...get().messages, botMessage],
+              isCopilotThinking: false,
+              copilotStatus: "clarification",
+              copilotPlan: plan,
+              copilotDiff: [],
+              copilotEvidence: ["No se ejecuto ningun comando porque la instruccion era ambigua."]
+            });
+            return;
           }
-          const warningText = result.warnings?.length ? ` Advertencias: ${result.warnings.join(" ")}` : "";
-          const botMessage = assistantMessage(`${result.reply}${warningText}`, result.action);
-          const pending = result.pendingConfirmation
-            ? {
-                id: crypto.randomUUID(),
-                envelope: result.pendingConfirmation,
-                prompt,
-                createdAt: new Date().toISOString()
-              }
-            : undefined;
-          const dashboardChanged = nextDashboard !== get().dashboard;
-          const viewStateChanged = JSON.stringify(nextViewState) !== JSON.stringify(get().viewState);
-          const presentationChanged = nextPresentation !== get().presentation;
+          const botMessage = assistantMessage(`Plan listo. Actuando sobre: ${plan.target.title ?? plan.target.id ?? "dashboard"}. Revisa el diff y aplica cuando estes conforme.${warningText}`);
           set({
-            dashboard: nextDashboard,
-            dashboardSpec: nextDashboard,
-            viewState: nextViewState,
-            filters: nextViewState,
-            presentation: nextPresentation,
-            presentationSpec: nextPresentation,
-            activePresentationId: nextPresentation.id,
             messages: [...get().messages, botMessage],
             chatMessages: [...get().messages, botMessage],
-            versions: dashboardChanged ? [...get().versions, nextDashboard] : get().versions,
-            copilotUndoStack: dashboardChanged || viewStateChanged || presentationChanged ? withLimitedHistory([...get().copilotUndoStack, beforeSnapshot]) : get().copilotUndoStack,
-            copilotRedoStack: dashboardChanged || viewStateChanged || presentationChanged ? [] : get().copilotRedoStack,
-            pendingCopilotConfirmation: pending,
-            presentationOptions: presentationChanged ? { ...get().presentationOptions, generated: true } : get().presentationOptions,
-            isCopilotThinking: false
+            isCopilotThinking: false,
+            pendingCopilotPlan: { id: crypto.randomUUID(), prompt, plan, contextRevisionId: resolved.context.revisionId, createdAt: new Date().toISOString() },
+            copilotStatus: plan.requiresConfirmation ? "awaiting_confirmation" : "planned",
+            copilotPlan: plan,
+            copilotDiff: diff,
+            copilotEvidence: [
+              `Intencion: ${plan.intent}`,
+              `Herramientas: ${plan.actions.map((action) => action.envelope.tool).join(", ")}`,
+              `Diff esperado: ${diff.length} cambio(s)`
+            ]
           });
-          const effectRepository = createDashboardEffectRepository();
-          const syncTasks = effectRepository.createCopilotSyncTasks({
-            projectId: before.activeProjectId,
-            dashboardId: before.activeDashboardId,
-            userMessage,
-            assistantMessage: botMessage,
-            dashboardVersion: dashboardChanged ? nextDashboard : undefined,
-            dashboardVersionReason: "accion de copilot"
-          });
-          if (syncTasks.length) set({ syncStatus: "pending", persistenceStatus: "Sincronizando cambios del Copiloto..." });
-          for (const task of syncTasks) {
-            void task.run()
-              .then(() => set({ syncStatus: "saved", persistenceStatus: "Cambios del Copiloto sincronizados.", outboxCount: outboxCount(), lastSyncError: undefined }))
-              .catch((error) => {
-                const domainError = toDomainError(error, {
-                  code: "supabase_unavailable",
-                  fallbackMessage: `No se pudo sincronizar ${task.label}.`,
-                  executionMode: "degraded",
-                  syncStatus: "retrying"
-                });
-                logDomainError(domainError, `store.${task.label}`);
-                task.outbox();
-                set({
-                  executionMode: "degraded",
-                  syncStatus: "retrying",
-                  persistenceMode: "degraded",
-                  persistenceStatus: `${domainError.userMessage} Reintentaremos automaticamente. ID: ${domainError.correlationId}`,
-                  lastSyncCorrelationId: domainError.correlationId,
-                  lastSyncError: domainError.userMessage,
-                  outboxCount: outboxCount()
-                });
-              });
-          }
         } catch (error) {
           const domainError = error instanceof DomainError
             ? error
@@ -1039,11 +1019,147 @@ export const useDashPilotStore = create<DashPilotState>()(
             syncStatus: domainError.syncStatus ?? "failed",
             lastSyncCorrelationId: domainError.correlationId,
             lastSyncError: domainError.userMessage,
-            persistenceStatus: `${domainError.userMessage} ID: ${domainError.correlationId}`
+            persistenceStatus: `${domainError.userMessage} ID: ${domainError.correlationId}`,
+            copilotStatus: "failed",
+            copilotEvidence: [domainError.userMessage]
           });
         }
       },
+      applyPendingCopilotPlan: () => {
+        const pending = get().pendingCopilotPlan;
+        if (!pending) return;
+        set({ copilotStatus: "executing", isCopilotThinking: true });
+        const before = get();
+        const revisionId = pending.contextRevisionId;
+        const resolved = resolveCopilotContext({
+          projectId: before.activeProjectId || before.currentProject.id || "local-project",
+          dashboardId: before.activeDashboardId || before.dashboard.id,
+          revisionId,
+          targetId: before.viewState.selectedTargetId,
+          scope: before.viewState.selectedTargetId ? "widget" : "dashboard",
+          userMessage: pending.prompt
+        }, {
+          actor: { id: "local-user", role: "editor", displayName: "Usuario" },
+          projectId: before.activeProjectId || before.currentProject.id || "local-project",
+          dashboardId: before.activeDashboardId || before.dashboard.id,
+          currentRevisionId: revisionId,
+          dashboardSpec: before.dashboard,
+          viewState: before.viewState,
+          datasetProfile: before.profile,
+          semanticModel: buildCopilotContext({ rows: [], datasetProfile: before.profile, dashboardSpec: before.dashboard, viewState: before.viewState, presentationSpec: before.presentation, messages: before.messages }).semanticModel,
+          presentationSpec: before.presentation,
+          messages: before.messages
+        });
+        if (!resolved.success) {
+          const botMessage = assistantMessage(`No aplique cambios: ${resolved.error}`);
+          set({ messages: [...get().messages, botMessage], chatMessages: [...get().messages, botMessage], copilotStatus: "failed", isCopilotThinking: false });
+          return;
+        }
+        const executionState = before.copilotTransactionState ?? createExecutionState(resolved.context);
+        const executed = executeTransaction({
+          envelopes: pending.plan.actions.map((action) => action.envelope),
+          context: resolved.context,
+          state: executionState,
+          confirmed: pending.plan.requiresConfirmation
+        });
+        if (!executed.success) {
+          const botMessage = assistantMessage(`No aplique cambios: ${[...executed.errors, ...executed.warnings].join(" ")}`);
+          set({
+            messages: [...get().messages, botMessage],
+            chatMessages: [...get().messages, botMessage],
+            copilotStatus: executed.warnings.length ? "awaiting_confirmation" : "failed",
+            copilotEvidence: [...executed.errors, ...executed.warnings],
+            isCopilotThinking: false
+          });
+          return;
+        }
+        const botMessage = assistantMessage(`Accion aplicada. Revision ${executed.revision.id}. Evidencia: ${executed.auditEvents.map((event) => `${event.tool} (${event.diff.length} cambios)`).join(", ")}.`, executed.auditEvents[0] ? executed.context.dashboardSpec.widgets.length > before.dashboard.widgets.length ? { type: "add_widget", widget: executed.context.dashboardSpec.widgets.at(-1)! } : undefined : undefined);
+        const beforeSnapshot = snapshotFromState(before, `Copiloto: ${pending.prompt}`);
+        set({
+          dashboard: executed.context.dashboardSpec,
+          dashboardSpec: executed.context.dashboardSpec,
+          viewState: executed.context.viewState,
+          filters: executed.context.viewState,
+          versions: [...get().versions, executed.context.dashboardSpec],
+          copilotUndoStack: withLimitedHistory([...get().copilotUndoStack, beforeSnapshot]),
+          copilotRedoStack: [],
+          copilotTransactionState: executed.state,
+          pendingCopilotPlan: undefined,
+          pendingCopilotConfirmation: undefined,
+          copilotStatus: "verified",
+          copilotDiff: executed.auditEvents.flatMap((event) => event.diff),
+          copilotEvidence: executed.auditEvents.map((event) => `${event.tool} aplicado en ${event.resultingRevisionId}`),
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage],
+          isCopilotThinking: false
+        });
+        const effectRepository = createDashboardEffectRepository();
+        const assistant = botMessage;
+        const userMessage = [...get().messages].reverse().find((message: ChatMessage) => message.role === "user" && message.content === pending.prompt);
+        const syncTasks = effectRepository.createCopilotSyncTasks({
+          projectId: before.activeProjectId,
+          dashboardId: before.activeDashboardId,
+          userMessage: userMessage ?? { id: crypto.randomUUID(), role: "user", content: pending.prompt, createdAt: new Date().toISOString() },
+          assistantMessage: assistant,
+          dashboardVersion: executed.context.dashboardSpec,
+          dashboardVersionReason: "accion de copilot command bus"
+        });
+        if (syncTasks.length) set({ syncStatus: "pending", persistenceStatus: "Sincronizando revision auditada del Copiloto..." });
+        for (const task of syncTasks) {
+          void task.run()
+            .then(() => set({ syncStatus: "saved", persistenceStatus: "Revision del Copiloto sincronizada.", outboxCount: outboxCount(), lastSyncError: undefined }))
+            .catch((error) => {
+              const domainError = toDomainError(error, {
+                code: "supabase_unavailable",
+                fallbackMessage: `No se pudo sincronizar ${task.label}.`,
+                executionMode: "degraded",
+                syncStatus: "retrying"
+              });
+              logDomainError(domainError, `store.${task.label}`);
+              task.outbox();
+              set({
+                executionMode: "degraded",
+                syncStatus: "retrying",
+                persistenceMode: "degraded",
+                persistenceStatus: `${domainError.userMessage} Reintentaremos automaticamente. ID: ${domainError.correlationId}`,
+                lastSyncCorrelationId: domainError.correlationId,
+                lastSyncError: domainError.userMessage,
+                outboxCount: outboxCount()
+              });
+            });
+        }
+      },
+      cancelPendingCopilotPlan: () => {
+        if (!get().pendingCopilotPlan) return;
+        const botMessage = assistantMessage("Accion cancelada. No aplique el plan pendiente.");
+        set({
+          pendingCopilotPlan: undefined,
+          copilotStatus: "idle",
+          copilotEvidence: ["El dry-run fue cancelado sin mutar el dashboard."],
+          messages: [...get().messages, botMessage],
+          chatMessages: [...get().messages, botMessage]
+        });
+      },
       undoCopilotChange: () => {
+        const transaction = get().copilotTransactionState;
+        if (transaction?.revisions.length && transaction.revisions.length > 1) {
+          const undone = undoTransaction(transaction);
+          if (undone.success) {
+            const botMessage = assistantMessage(`Deshice usando revision restaurable: ${undone.revision.reason}.`);
+            set({
+              dashboard: undone.revision.dashboardSpec,
+              dashboardSpec: undone.revision.dashboardSpec,
+              viewState: undone.revision.viewState,
+              filters: undone.revision.viewState,
+              copilotTransactionState: undone.state,
+              copilotStatus: "reverted",
+              copilotEvidence: [`Revision restaurada: ${undone.revision.id}`],
+              messages: [...get().messages, botMessage],
+              chatMessages: [...get().messages, botMessage]
+            });
+            return;
+          }
+        }
         const undoStack = get().copilotUndoStack;
         const previous = undoStack.at(-1);
         if (!previous) return;
@@ -1065,6 +1181,25 @@ export const useDashPilotStore = create<DashPilotState>()(
         });
       },
       redoCopilotChange: () => {
+        const transaction = get().copilotTransactionState;
+        if (transaction?.redoRevisions.length) {
+          const redone = redoTransaction(transaction);
+          if (redone.success) {
+            const botMessage = assistantMessage(`Rehice usando revision restaurable: ${redone.revision.reason}.`);
+            set({
+              dashboard: redone.revision.dashboardSpec,
+              dashboardSpec: redone.revision.dashboardSpec,
+              viewState: redone.revision.viewState,
+              filters: redone.revision.viewState,
+              copilotTransactionState: redone.state,
+              copilotStatus: "verified",
+              copilotEvidence: [`Revision rehecha: ${redone.revision.id}`],
+              messages: [...get().messages, botMessage],
+              chatMessages: [...get().messages, botMessage]
+            });
+            return;
+          }
+        }
         const redoStack = get().copilotRedoStack;
         const next = redoStack.at(-1);
         if (!next) return;

@@ -7,7 +7,8 @@ import type { SemanticLayer } from "@/lib/semantic-layer";
 import { executeCopilotActions } from "@/lib/ai/action-execution-engine";
 import { buildActionPlan } from "@/lib/ai/action-plan";
 import { buildCopilotAgentLoop } from "@/lib/ai/copilot-agent";
-import { buildCopilotContext, toProviderContext, type CopilotContext } from "@/lib/ai/context-builder";
+import { buildCopilotContext, type CopilotContext } from "@/lib/ai/context-builder";
+import { buildGovernedCopilotProviderPrompt } from "@/lib/copilot-command-bus/ai-gateway";
 import { actionEnvelope, type CopilotActionEnvelope } from "@/lib/ai/actions";
 import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
@@ -936,30 +937,15 @@ export function parseCopilotProviderOutput(raw: unknown, context: CopilotRequest
 }
 
 export function buildCopilotPrompt(context: CopilotRequestContext) {
-  const providerContext = context.copilotContext
-    ? toProviderContext(context.copilotContext)
-    : toProviderContext(buildCopilotContext({
-        rows: [],
-        datasetProfile: context.datasetProfile,
-        dashboardSpec: context.dashboardSpec,
-        viewState: context.viewState,
-        presentationSpec: context.presentationSpec,
-        messages: context.messages
-      }));
-  return [
-    "Eres el Copiloto IA de DashPilot. Devuelve solo acciones estructuradas validas en JSON.",
-    "Nunca inventes columnas ni widgets. Solo usa IDs y campos entregados.",
-    "No puedes modificar React ni UI directamente. Solo DashboardSpec, DashboardViewState o PresentationSpec via acciones.",
-    "Para cambios visuales de widget usa update_widget_visual_config y no cambies query, metrica, groupBy, filtros ni columnas.",
-    "Si el usuario dice este grafico y selectedTarget.type es none, pide aclaracion con ask_clarification.",
-    "Si el usuario corrige o niega una accion anterior, no lo interpretes como filtro ni columna.",
-    "Para cambios visuales de dashboard usa update_dashboard_design con density, accentColor, cardStyle o chartPalette.",
-    "No ejecutes codigo. No crees formulas peligrosas. Las acciones destructivas deben requerir confirmacion.",
-    JSON.stringify({
-      userPrompt: context.prompt,
-      context: providerContext
-    })
-  ].join("\n");
+  const providerContext = context.copilotContext ?? buildCopilotContext({
+    rows: [],
+    datasetProfile: context.datasetProfile,
+    dashboardSpec: context.dashboardSpec,
+    viewState: context.viewState,
+    presentationSpec: context.presentationSpec,
+    messages: context.messages
+  });
+  return buildGovernedCopilotProviderPrompt(providerContext, context.prompt);
 }
 
 export function assistantMessage(content: string, structuredAction?: DashboardAction): ChatMessage {

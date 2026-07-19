@@ -26,4 +26,21 @@ describe("copilot UX store flow", () => {
     expect(useDashPilotStore.getState().pendingCopilotPlan).toBeUndefined();
     expect(useDashPilotStore.getState().copilotEvidence.length).toBeGreaterThan(0);
   });
+
+  it("previews a BI dashboard blueprint before applying it", async () => {
+    act(() => {
+      useDashPilotStore.getState().loadDemo();
+      useDashPilotStore.getState().clearSelectedTarget();
+    });
+
+    await act(async () => {
+      await useDashPilotStore.getState().sendPrompt("Disenar dashboard ejecutivo completo para gerencia");
+    });
+
+    const state = useDashPilotStore.getState();
+    expect(state.copilotStatus).toMatch(/planned|awaiting_confirmation/);
+    expect(state.pendingCopilotPlan?.plan.blueprint?.title).toBeTruthy();
+    expect(state.pendingCopilotPlan?.plan.selfCheck?.passed).toBe(true);
+    expect(state.dashboard.widgets.some((widget) => widget.config.generatedBy === "copilot-bi")).toBe(false);
+  });
 });

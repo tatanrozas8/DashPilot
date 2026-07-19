@@ -810,8 +810,19 @@ export function CopilotPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [prompt, setPrompt] = useState("");
   const [recommendationsOpen, setRecommendationsOpen] = useState(false);
-  const quickPrompts = useMemo(() => {
+  const datasetSummary = useMemo(() => {
     const semantic = inferSemanticLayer(profile);
+    const catalog = buildDatasetCatalog(profile);
+    return {
+      semantic,
+      metrics: catalog.metrics.slice(0, 4),
+      dimensions: catalog.breakdowns.slice(0, 5),
+      filters: catalog.filters.slice(0, 5),
+      confidence: Math.round(Math.max(semantic.domain.confidence, profile.qualityScore / 100) * 100)
+    };
+  }, [profile]);
+  const quickPrompts = useMemo(() => {
+    const semantic = datasetSummary.semantic;
     const prompts: string[] = [];
     const geo = semantic.primaryGeography;
     const seller = semantic.primarySeller;
@@ -827,8 +838,12 @@ export function CopilotPanel() {
     if (date) prompts.push(`Comparar ${metricName} contra el periodo anterior`);
     if (productOrCategory) prompts.push(`Mostrar top productos por ${metricName} usando ${productOrCategory.displayName}`);
     prompts.push("Hacer el dashboard mas ejecutivo y ordenar widgets por prioridad");
-    return prompts.slice(0, 5);
-  }, [profile]);
+    return [
+      "Disenar dashboard ejecutivo completo para gerencia",
+      "Encontrar insights con evidencia",
+      ...prompts
+    ].slice(0, 7);
+  }, [datasetSummary.semantic]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
@@ -897,6 +912,26 @@ export function CopilotPanel() {
             </span>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2">
+            <button type="button" onClick={() => submitPrompt("Disenar dashboard ejecutivo completo para gerencia")} disabled={isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Dashboard
+            </button>
+            <button type="button" onClick={() => submitPrompt("Encontrar insights con evidencia")} disabled={isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Insights
+            </button>
+            <button type="button" onClick={() => submitPrompt("Crear vista ejecutiva")} disabled={isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Ejecutiva
+            </button>
+            <button type="button" onClick={() => submitPrompt("Crear tabla resumen top 10")} disabled={isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Tabla
+            </button>
+            <button type="button" onClick={() => submitPrompt("Mejorar titulos profesionales del dashboard")} disabled={isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Titulos
+            </button>
+            <button type="button" onClick={() => submitPrompt("Preparar presentacion con hallazgos principales")} disabled={isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
+              Slides
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
             <button type="button" onClick={() => submitPrompt("Explica este grafico y su leyenda.")} disabled={selectedTargetType === "none" || isCopilotThinking} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-45">
               Explicar
             </button>
@@ -906,6 +941,25 @@ export function CopilotPanel() {
             <button type="button" onClick={clearSelectedTarget} className="rounded-lg border border-[#dfe5f0] bg-white px-2 py-2 text-[11px] font-bold text-[#536088] hover:bg-[#f6f7ff]">
               Limpiar
             </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Metricas detectadas</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {datasetSummary.metrics.length ? datasetSummary.metrics.map((metric) => (
+                  <span key={metric.normalizedName} className="rounded-full bg-[#eef0ff] px-2 py-1 text-[11px] font-bold text-[#3d35ff]">{metric.displayName}</span>
+                )) : <span className="text-xs font-semibold text-[#697597]">Sin metricas confiables</span>}
+              </div>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Dimensiones y filtros</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {[...datasetSummary.dimensions, ...datasetSummary.filters.slice(0, 2)].slice(0, 6).map((dimension) => (
+                  <span key={dimension.normalizedName} className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700">{dimension.displayName}</span>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs font-semibold text-[#536088]">Confianza datos/modelo: {datasetSummary.confidence}%</p>
           </div>
         </div>
         <label className="block text-xs font-bold text-[#697597]">
@@ -967,6 +1021,18 @@ export function CopilotPanel() {
                 {copilotPlan.warnings.slice(0, 2).join(" ")}
               </div>
             ) : null}
+            {copilotPlan?.blueprint && (
+              <div className="mt-3 rounded-lg border border-[#d9dcff] bg-[#f7f6ff] px-3 py-2">
+                <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Blueprint</p>
+                <p className="mt-1 text-sm font-bold text-[#1c2748]">{copilotPlan.blueprint.title}</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-[#536088]">{copilotPlan.blueprint.subtitle}</p>
+                <ul className="mt-2 space-y-1 text-xs font-semibold leading-5 text-[#536088]">
+                  {copilotPlan.blueprint.pages.slice(0, 2).map((page) => (
+                    <li key={page.title}>{page.title}: {page.widgets.length} widgets</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {copilotDiff.length > 0 && (
               <ul className="mt-3 max-h-28 space-y-2 overflow-y-auto text-xs font-semibold leading-5 text-[#536088]">
                 {copilotDiff.slice(0, 4).map((entry) => (
@@ -980,6 +1046,16 @@ export function CopilotPanel() {
               <div className="mt-3 rounded-lg bg-[#f8fafc] px-3 py-2 text-xs font-semibold leading-5 text-[#536088]">
                 {copilotEvidence.slice(0, 3).join(" · ")}
               </div>
+            )}
+            {copilotPlan?.evidence?.length ? (
+              <div className="mt-2 rounded-lg bg-[#f8fafc] px-3 py-2 text-xs font-semibold leading-5 text-[#536088]">
+                {copilotPlan.evidence.slice(0, 3).join(" | ")}
+              </div>
+            ) : null}
+            {copilotPlan?.selfCheck && (
+              <p className={cn("mt-2 text-xs font-bold", copilotPlan.selfCheck.passed ? "text-emerald-700" : "text-amber-800")}>
+                Self-check: {copilotPlan.selfCheck.passed ? "aprobado" : "requiere revision"} ({copilotPlan.selfCheck.items.filter((item) => item.passed).length}/{copilotPlan.selfCheck.items.length})
+              </p>
             )}
             {pendingPlan && (
               <div className="mt-3 flex gap-2">

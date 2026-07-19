@@ -40,6 +40,12 @@ test("copilot plans, previews, applies, undoes and clarifies dashboard edits", a
   await expect(page.getByText(/Accion aplicada/).last()).toBeVisible();
   await expect(page.getByText(/Canal/i).first()).toBeVisible();
 
+  await askCopilot(page, "Disenar dashboard ejecutivo completo para gerencia.");
+  await expect(page.getByText("Blueprint", { exact: true })).toBeVisible();
+  await expect(page.locator("p").filter({ hasText: /^Self-check: aprobado/ })).toBeVisible();
+  await page.getByRole("button", { name: "Aplicar" }).last().click();
+  await expect(page.getByText(/Resumen ejecutivo con evidencia/i).first()).toBeVisible();
+
   await askCopilot(page, "Hazlo mejor.");
   await expect(page.getByText(/Cambiar visualizacion/)).toBeVisible();
   await expect(page.getByText(/No se pudo|error critico|Unhandled Runtime Error/i)).toHaveCount(0);

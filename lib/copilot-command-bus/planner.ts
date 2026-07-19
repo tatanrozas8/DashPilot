@@ -3,6 +3,7 @@ import { buildCopilotMemory, retrieveRelevantPreviousInstruction } from "@/lib/a
 import { planAnalyticalChart } from "@/lib/dashboard-spec/chart-planner";
 import { createMockCopilotResponse } from "@/lib/ai/copilot-service";
 import { dryRunCommands } from "@/lib/copilot-command-bus/bus";
+import { planCopilotBi } from "@/lib/copilot-bi";
 import type { CommandEnvelope, CopilotIntent, CopilotPlan, CopilotToolName, ResolvedCopilotContext, ToolArgumentMap } from "@/lib/copilot-command-bus/types";
 import type { DashboardAction } from "@/types/dashboard";
 
@@ -13,7 +14,7 @@ function newId(prefix: string) {
 
 function riskFor(tool: CopilotToolName) {
   if (["dashboard.removeWidget", "dashboard.clearFilters", "dashboard.removeFilter", "presentation.removeSlide"].includes(tool)) return "high" as const;
-  if (["dashboard.updateWidgetVisualConfig", "dashboard.renameWidget", "dashboard.renameDashboard", "dashboard.selectColumns", "dashboard.reorderWidget", "control.undo", "control.redo", "control.requestClarification"].includes(tool)) return "low" as const;
+  if (["dashboard.updateWidgetVisualConfig", "dashboard.renameWidget", "dashboard.renameDashboard", "dashboard.updateDashboardSubtitle", "dashboard.updateDashboardDesign", "dashboard.selectColumns", "dashboard.reorderWidget", "control.undo", "control.redo", "control.requestClarification"].includes(tool)) return "low" as const;
   return "medium" as const;
 }
 
@@ -30,6 +31,8 @@ function actionToTool(action: DashboardAction): { tool: CopilotToolName; argumen
   if (action.type === "reorder_widgets") return { tool: "dashboard.reorderWidget", arguments: { widgetIds: action.widgetIds } };
   if (action.type === "update_widget_title") return { tool: "dashboard.renameWidget", arguments: { widgetId: action.widgetId, title: action.title } };
   if (action.type === "update_dashboard_title") return { tool: "dashboard.renameDashboard", arguments: { title: action.title } };
+  if (action.type === "update_dashboard_subtitle") return { tool: "dashboard.updateDashboardSubtitle", arguments: { subtitle: action.subtitle } };
+  if (action.type === "update_dashboard_design") return { tool: "dashboard.updateDashboardDesign", arguments: { design: action.design } };
   if (action.type === "undo_last_action") return { tool: "control.undo", arguments: {} };
   if (action.type === "ask_clarification") return { tool: "control.requestClarification", arguments: { question: action.question } };
   return null;
@@ -98,16 +101,26 @@ export function createCopilotPlan(context: ResolvedCopilotContext, prompt: strin
   const previousInstruction = retrieveRelevantPreviousInstruction({ currentMessage: prompt, memory });
   const contextual = buildActionPlan({ prompt, dashboardSpec: context.dashboardSpec, viewState: context.viewState, previousInstruction });
   if (contextual.needsClarification) return clarificationPlan(context, contextual.clarification);
-
   const localActions = contextual.action ? [contextual.action] : [];
-  const analytical = localActions.length ? undefined : planAnalyticalChart({
+
+  const biPlan = localActions.length ? undefined : planCopilotBi({
+    prompt: contextual.usesPreviousInstruction && previousInstruction ? previousInstruction : prompt,
+    datasetProfile: context.datasetProfile,
+    semanticModel: context.semanticModel,
+    rows: []
+  });
+  if (biPlan?.handled && biPlan.needsClarification) {
+    return clarificationPlan(context, biPlan.clarification?.question);
+  }
+
+  const analytical = localActions.length || biPlan?.handled ? undefined : planAnalyticalChart({
     prompt: contextual.usesPreviousInstruction && previousInstruction ? previousInstruction : prompt,
     datasetProfile: context.datasetProfile,
     semanticModel: context.semanticModel,
     dashboardSpec: context.dashboardSpec,
     viewState: context.viewState
   });
-  const fallback = localActions.length || analytical?.handled ? undefined : createMockCopilotResponse({
+  const fallback = localActions.length || biPlan?.handled || analytical?.handled ? undefined : createMockCopilotResponse({
     prompt: contextual.usesPreviousInstruction && previousInstruction ? previousInstruction : prompt,
     datasetProfile: context.datasetProfile,
     semanticModel: context.semanticModel,
@@ -117,7 +130,7 @@ export function createCopilotPlan(context: ResolvedCopilotContext, prompt: strin
     messages: context.messages,
     rows: []
   });
-  const actions = localActions.length ? localActions : analytical?.handled ? analytical.actions : fallback?.actions ?? [];
+  const actions = localActions.length ? localActions : biPlan?.handled ? biPlan.actions : analytical?.handled ? analytical.actions : fallback?.actions ?? [];
   if (!actions.length) return clarificationPlan(context, "No encontre una accion segura. Elige que tipo de mejora quieres aplicar.");
 
   const envelopes = actions
@@ -137,10 +150,19 @@ export function createCopilotPlan(context: ResolvedCopilotContext, prompt: strin
     dependencies: [],
     riskLevel: highestRisk,
     requiresConfirmation: envelopes.some((envelope) => envelope.requiresConfirmation),
-    confidence: contextual.confidence,
-    semanticResolution: analytical?.handled ? [{ confidence: analytical.confidence, reason: "Columnas resueltas desde catalogo semantico y perfil del dataset." }] : [],
+    confidence: biPlan?.handled ? biPlan.confidence : contextual.confidence,
+    semanticResolution: biPlan?.handled ? [{ confidence: biPlan.confidence, reason: "Dataset intelligence, blueprint y self-check BI aprobados." }] : analytical?.handled ? [{ confidence: analytical.confidence, reason: "Columnas resueltas desde catalogo semantico y perfil del dataset." }] : [],
     expectedDiff: dryRun.flatMap((run) => run.diff),
-    warnings: [...context.warnings, ...(analytical?.handled ? analytical.warnings ?? [] : [])],
+    warnings: [...context.warnings, ...(biPlan?.handled ? biPlan.warnings : []), ...(analytical?.handled ? analytical.warnings ?? [] : [])],
+    blueprint: biPlan?.blueprint ? {
+      title: biPlan.blueprint.title,
+      subtitle: biPlan.blueprint.subtitle,
+      pages: biPlan.blueprint.pages,
+      filters: biPlan.blueprint.filters,
+      narrative: biPlan.blueprint.narrative
+    } : undefined,
+    evidence: biPlan?.handled ? biPlan.evidence : undefined,
+    selfCheck: biPlan?.handled ? biPlan.selfCheck : undefined,
     needsClarification: false,
     usesPreviousInstruction: contextual.usesPreviousInstruction
   };

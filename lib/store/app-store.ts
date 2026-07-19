@@ -977,7 +977,7 @@ export const useDashPilotStore = create<DashPilotState>()(
           const diff = plan.expectedDiff;
           const warningText = plan.warnings.length ? ` Advertencias: ${plan.warnings.join(" ")}` : "";
           if (plan.needsClarification) {
-            const botMessage = assistantMessage(`${plan.clarification?.question ?? "Necesito una aclaracion antes de aplicar cambios."} Opciones: ${plan.clarification?.options.join(", ") ?? "cambiar visualizacion, cambiar metrica, agregar filtro, crear nuevo grafico, mejorar layout"}.${warningText}`);
+            const botMessage = assistantMessage(`Necesito una aclaracion: ${plan.clarification?.question ?? "Necesito una aclaracion antes de aplicar cambios."} Opciones: ${plan.clarification?.options.join(", ") ?? "cambiar visualizacion, cambiar metrica, agregar filtro, crear nuevo grafico, mejorar layout"}.${warningText}`);
             set({
               messages: [...get().messages, botMessage],
               chatMessages: [...get().messages, botMessage],
@@ -989,7 +989,8 @@ export const useDashPilotStore = create<DashPilotState>()(
             });
             return;
           }
-          const botMessage = assistantMessage(`Plan listo. Actuando sobre: ${plan.target.title ?? plan.target.id ?? "dashboard"}. Revisa el diff y aplica cuando estes conforme.${warningText}`);
+          const blueprintText = plan.blueprint ? ` Blueprint: ${plan.blueprint.title} con ${plan.blueprint.pages.flatMap((page) => page.widgets).length} widgets planificados.` : "";
+          const botMessage = assistantMessage(`Plan listo. Actuando sobre: ${plan.target.title ?? plan.target.id ?? "dashboard"}. Revisa el diff y aplica cuando estes conforme.${blueprintText}${warningText}`);
           set({
             messages: [...get().messages, botMessage],
             chatMessages: [...get().messages, botMessage],
@@ -1001,7 +1002,8 @@ export const useDashPilotStore = create<DashPilotState>()(
             copilotEvidence: [
               `Intencion: ${plan.intent}`,
               `Herramientas: ${plan.actions.map((action) => action.envelope.tool).join(", ")}`,
-              `Diff esperado: ${diff.length} cambio(s)`
+              `Diff esperado: ${diff.length} cambio(s)`,
+              ...(plan.evidence ?? [])
             ]
           });
         } catch (error) {

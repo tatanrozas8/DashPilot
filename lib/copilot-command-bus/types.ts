@@ -40,6 +40,8 @@ export type CopilotToolName =
   | "dashboard.reorderWidget"
   | "dashboard.renameWidget"
   | "dashboard.renameDashboard"
+  | "dashboard.updateDashboardSubtitle"
+  | "dashboard.updateDashboardDesign"
   | "presentation.createSlide"
   | "presentation.updateSlide"
   | "presentation.removeSlide"
@@ -171,6 +173,20 @@ export interface CopilotPlan {
   semanticResolution: CopilotPlanAction["semanticResolution"][];
   expectedDiff: SemanticDiffEntry[];
   warnings: string[];
+  blueprint?: {
+    title: string;
+    subtitle: string;
+    pages: Array<{ title: string; purpose: string; widgets: Array<{ id: string; type: string; title: string; reason: string }> }>;
+    filters: string[];
+    narrative: string[];
+  };
+  evidence?: string[];
+  selfCheck?: {
+    passed: boolean;
+    items: Array<{ label: string; passed: boolean; message: string }>;
+    warnings: string[];
+    errors: string[];
+  };
   needsClarification: boolean;
   clarification?: {
     question: string;
@@ -236,6 +252,8 @@ export interface ToolArgumentMap {
   "dashboard.reorderWidget": { widgetIds: string[] };
   "dashboard.renameWidget": { widgetId: string; title: string };
   "dashboard.renameDashboard": { title: string };
+  "dashboard.updateDashboardSubtitle": { subtitle: string };
+  "dashboard.updateDashboardDesign": { design: NonNullable<DashboardSpec["design"]> };
   "presentation.createSlide": { slide: unknown };
   "presentation.updateSlide": { slideId: string; changes: Record<string, unknown> };
   "presentation.removeSlide": { slideId: string };

@@ -15,6 +15,8 @@ const mutableTools = new Set<string>([
   "dashboard.reorderWidget",
   "dashboard.renameWidget",
   "dashboard.renameDashboard",
+  "dashboard.updateDashboardSubtitle",
+  "dashboard.updateDashboardDesign",
   "presentation.createSlide",
   "presentation.updateSlide",
   "presentation.removeSlide"

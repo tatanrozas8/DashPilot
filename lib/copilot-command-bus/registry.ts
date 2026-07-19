@@ -147,6 +147,29 @@ export const commandToolRegistry = {
     toAction: (arguments_) => ({ type: "update_dashboard_title", title: arguments_.title }),
     inverse: (before) => ({ type: "update_dashboard_title", title: before.title })
   },
+  "dashboard.updateDashboardSubtitle": {
+    tool: "dashboard.updateDashboardSubtitle",
+    riskLevel: "low",
+    requiresConfirmation: false,
+    schema: z.object({ subtitle: z.string().min(1).max(220) }).strict(),
+    toAction: (arguments_) => ({ type: "update_dashboard_subtitle", subtitle: arguments_.subtitle }),
+    inverse: (before) => ({ type: "update_dashboard_subtitle", subtitle: before.subtitle ?? "" })
+  },
+  "dashboard.updateDashboardDesign": {
+    tool: "dashboard.updateDashboardDesign",
+    riskLevel: "low",
+    requiresConfirmation: false,
+    schema: z.object({
+      design: z.object({
+        density: z.enum(["compact", "comfortable"]).optional(),
+        accentColor: z.enum(["indigo", "emerald", "sky", "slate"]).optional(),
+        cardStyle: z.enum(["soft", "bordered"]).optional(),
+        chartPalette: z.enum(["default", "business", "contrast"]).optional()
+      }).partial()
+    }).strict(),
+    toAction: (arguments_) => ({ type: "update_dashboard_design", design: arguments_.design }),
+    inverse: (before) => ({ type: "update_dashboard_design", design: before.design ?? {} })
+  },
   "presentation.createSlide": {
     tool: "presentation.createSlide",
     riskLevel: "medium",

@@ -1134,6 +1134,9 @@ Validation:
 
 Known warnings:
 
+- Playwright needs elevated execution in this sandbox to launch Chromium; non-elevated runs fail with `spawn EPERM`.
+- Playwright/Next still logs `NO_COLOR` ignored because `FORCE_COLOR` is set.
+- Browser E2E still logs duplicate React key warnings for `Fecha`/`fecha` in existing dashboard rendering flows.
 - Git still warns that `C:\Users\CristiÃ¡n\.config\git\ignore` cannot be read.
 - Playwright logs existing React duplicate-key warnings for `Tecnologia` and `Hogar`; this was not introduced by the P1 remediation and remains documented debt.
 
@@ -1346,3 +1349,68 @@ Debt remaining:
 - PPTX charts are not native editable PowerPoint charts; they are represented as editable text summaries and raster-ready placeholders.
 - The PDF/PNG renderer is deterministic and data-backed, but not a pixel-perfect DOM capture.
 - Database/RPC-level export policy tests remain production hardening.
+
+## 2026-07-19 - copilot-bi-expert-goal-2026-07-19
+
+Commit: pending
+
+Prompt ID: `copilot-bi-expert-goal-2026-07-19`
+
+Objective:
+
+- Strengthen the governed Copilot into a BI expert that understands dataset metadata, resolves business intent, asks clarification when needed, designs dashboard blueprints, recommends visuals, plans governed queries, creates KPIs/charts/tables/narrative/insights with evidence, and preserves dry-run/diff/confirm/undo.
+
+Files changed:
+
+- `lib/copilot-bi/*`
+- `lib/copilot-command-bus/types.ts`
+- `lib/copilot-command-bus/registry.ts`
+- `lib/copilot-command-bus/planner.ts`
+- `lib/copilot-command-bus/policy-gate.ts`
+- `components/dashboard/dashboard-renderer.tsx`
+- `lib/store/app-store.ts`
+- `tests/copilot-bi-expert.test.ts`
+- `tests/copilot-ux.test.tsx`
+- `tests/e2e/copilot-agent.spec.ts`
+- `docs/checkpoints/copilot-bi-expert-goal-2026-07-19.md`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Added `lib/copilot-bi` as a modular BI planning layer on top of the existing `DatasetProfile`, dataset catalog, semantic layer and QueryService contracts.
+- Full-dashboard requests now produce a `DashboardBlueprint` with title, subtitle, conceptual pages, widgets, filters, narrative, governed query plans, evidence IDs, insights and self-check results.
+- The command-bus planner routes BI actions through closed tool envelopes, preserving dry-run/diff, policy gate, confirmation and transactional undo/redo.
+- Added low-risk command-bus tools for dashboard subtitle and design metadata so blueprint plans do not bypass governance.
+- Provider context continues to omit raw rows by default; BI planning uses metadata, safe column samples, query specs and evidence summaries.
+- Copilot UX now exposes dataset-aware quick actions, metric/dimension chips, blueprint preview, evidence and self-check status.
+
+Validation:
+
+- Targeted validation passed: `npm.cmd run test -- tests/copilot-bi-expert.test.ts tests/copilot-ux.test.tsx tests/copilot-command-bus.test.ts`, 3 files and 12 tests.
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run test`: passed, 49 files and 279 tests. Existing jsdom navigation warning observed.
+- `npm.cmd run build`: passed, production build generated 24/24 static pages.
+- `npm.cmd run test:e2e`: non-elevated sandbox run failed with Chromium `spawn EPERM`; escalated run passed, 6 Chromium tests in 54.4s.
+- Full validation is recorded in `docs/checkpoints/copilot-bi-expert-goal-2026-07-19.md`.
+
+Known warnings:
+
+- Git still warns that `C:\Users\Cristián\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No dependency added.
+- No environment variable added.
+
+Security/privacy notes:
+
+- No `.env`, Supabase keys, service-role key, `AI_API_KEY`, `node_modules`, `.next`, `test-results`, `playwright-report` or coverage artifacts are intentionally included.
+- Raw rows are not sent to the governed provider context by default; tests assert chunk samples are stripped.
+
+Debt remaining:
+
+- Direct scalar analytical Q&A still needs a first-class chat answer renderer backed by QueryService execution.
+- Conceptual pages in the blueprint are not yet persisted as v2 `DashboardPage` documents in this DashboardSpec flow.
+- Browser E2E covers the main executive blueprint path; additional scenario-by-scenario E2E coverage can be added without changing architecture.

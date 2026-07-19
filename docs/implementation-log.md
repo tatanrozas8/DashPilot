@@ -1414,3 +1414,76 @@ Debt remaining:
 - Direct scalar analytical Q&A still needs a first-class chat answer renderer backed by QueryService execution.
 - Conceptual pages in the blueprint are not yet persisted as v2 `DashboardPage` documents in this DashboardSpec flow.
 - Browser E2E covers the main executive blueprint path; additional scenario-by-scenario E2E coverage can be added without changing architecture.
+
+## 2026-07-19 - copilot-bi-polish-goal-2026-07-19
+
+Commit: pending
+
+Prompt ID: `copilot-bi-polish-goal-2026-07-19`
+
+Objective:
+
+- Close the main P2 debt from G6: direct scalar analytical Q&A, persisted multipage BI blueprints, scenario-by-scenario E2E coverage and duplicate React key warnings.
+
+Files changed:
+
+- `lib/copilot-bi/analytical-answer.ts`
+- `lib/copilot-bi/index.ts`
+- `lib/copilot-bi/dashboard-blueprint-builder.ts`
+- `lib/copilot-command-bus/types.ts`
+- `lib/copilot-command-bus/registry.ts`
+- `lib/copilot-command-bus/planner.ts`
+- `lib/copilot-command-bus/diff.ts`
+- `lib/dashboard-spec/apply-dashboard-action.ts`
+- `lib/store/app-store.ts`
+- `lib/validation/copilot-actions.ts`
+- `lib/validation/schemas.ts`
+- `types/ai.ts`
+- `types/dashboard.ts`
+- `components/dashboard/dashboard-renderer.tsx`
+- `tests/copilot-bi-expert.test.ts`
+- `tests/copilot-ux.test.tsx`
+- `tests/render.test.tsx`
+- `tests/e2e/copilot-agent.spec.ts`
+- `docs/checkpoints/copilot-bi-polish-goal-2026-07-19.md`
+- `docs/implementation-log.md`
+
+Architecture notes:
+
+- Direct analytical questions now bypass mutation planning and execute a governed aggregate query through QueryService, returning a short answer, highlighted value, metric, period, inferred-period marker, filters and evidenceId in chat.
+- BI dashboard blueprints now persist page metadata as optional `DashboardSpec.pages` using existing `DashboardPage` contracts rather than a parallel model.
+- The command bus exposes `dashboard.setPages`, validates page references, records semantic diffs at `dashboard.pages`, and preserves undo/redo through the existing transactional revision path.
+- The renderer keeps single-page dashboards compatible and groups widgets into page sections only when persisted page metadata exists.
+- Duplicate-key-prone Copilot UI lists now use composed keys that include normalized/display identity plus index where collisions are possible.
+
+Validation:
+
+- `npm.cmd run typecheck`: passed.
+- `npx.cmd vitest run tests/copilot-bi-expert.test.ts`: passed, 1 file and 8 tests.
+- `npx.cmd vitest run tests/copilot-ux.test.tsx tests/render.test.tsx`: passed, 2 files and 10 tests.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run test`: passed, 49 files and 287 tests. Existing jsdom navigation warning observed.
+- `npm.cmd run build`: passed, production build generated 24/24 static pages.
+- `npm.cmd run test:e2e`: first non-elevated run failed with Chromium `spawn EPERM`; elevated rerun passed, 10 Chromium tests.
+- Full validation is recorded in `docs/checkpoints/copilot-bi-polish-goal-2026-07-19.md`.
+
+Known warnings:
+
+- Local/demo browser storage still intentionally excludes full specs and rows; page persistence is in active DashboardSpec/revision state, not unsafe browser localStorage.
+- Git still warns that `C:\Users\CristiÃ¡n\.config\git\ignore` cannot be read.
+
+Migrations/env vars:
+
+- No SQL migration added.
+- No dependency added.
+- No environment variable added.
+
+Security/privacy notes:
+
+- No `.env`, Supabase keys, service-role key, `AI_API_KEY`, `node_modules`, `.next`, `test-results`, `playwright-report`, coverage folder or generated test artifact is intentionally included.
+- Direct Q&A uses QueryService execution metadata and does not add raw rows to provider prompts.
+
+Debt remaining:
+
+- Native database persistence for v2 `DashboardDocument`/`DashboardRevision` remains broader dashboard-foundation debt.
+- Browser reload cannot restore full local/demo dashboard specs without changing the documented browser-storage policy.

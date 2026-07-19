@@ -165,6 +165,9 @@ Build output verified these routes:
    - Without `AI_API_KEY`, it returns `createMockCopilotResponse`.
    - With `AI_API_KEY`, it calls `https://api.openai.com/v1/responses` and parses the structured response through `parseCopilotProviderOutput`.
    - Copilot action planning/execution/validation lives under `lib/ai/*` and `lib/validation/copilot-actions.ts`.
+   - BI expert planning lives under `lib/copilot-bi`; direct analytical Q&A plans governed aggregate queries and the store executes them through QueryService before rendering a numeric answer with evidence in chat.
+   - BI full-dashboard blueprints persist optional `DashboardSpec.pages` using the existing `DashboardPage` contract and the governed `dashboard.setPages` command-bus tool.
+   - The command bus keeps BI mutations on the existing dry-run/diff/audit/undo path; no parallel Copilot execution path is introduced.
 
 10. Presentation:
     - `lib/presentation-spec/generate-presentation-spec.ts` creates a `PresentationSpec` from the current dashboard widgets.

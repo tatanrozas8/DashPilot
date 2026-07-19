@@ -31,8 +31,9 @@ import { createDashboardEffectRepository } from "@/lib/services/dashboard-side-e
 import { DomainError, logDomainError, toDomainError } from "@/lib/observability/domain-error";
 import type { ExecutionMode, SyncStatus } from "@/lib/observability/modes";
 import { DASH_PILOT_PERSIST_TTL_MS, DASH_PILOT_PERSIST_VERSION, purgeSensitiveBrowserStorage } from "@/lib/security/browser-storage";
-import { clearQueryableDatasets, getQueryableRowsSample, getQueryableRowsForExport, registerQueryableDataset } from "@/lib/query-service/client";
+import { clearQueryableDatasets, executeAggregateQuery, getQueryableRowsSample, getQueryableRowsForExport, registerQueryableDataset } from "@/lib/query-service/client";
 import { createCopilotPlan, createExecutionState, executeTransaction, redoTransaction, resolveCopilotContext, undoTransaction, type CopilotPlan, type SemanticDiffEntry, type TransactionalExecutionState } from "@/lib/copilot-command-bus";
+import { formatAnalyticalAnswer, planAnalyticalAnswer } from "@/lib/copilot-bi";
 
 export interface PresentationOptions {
   theme: PresentationTheme;
@@ -970,6 +971,68 @@ export const useDashPilotStore = create<DashPilotState>()(
               isCopilotThinking: false,
               copilotStatus: "failed",
               copilotEvidence: [resolved.error]
+            });
+            return;
+          }
+          const datasetId = before.activeDatasetId || before.profile.id;
+          const datasetVersionId = before.activeDatasetVersionId || before.profile.datasetVersionId || datasetId;
+          const analyticalPlan = before.viewState.selectedTargetId
+            ? { handled: false as const, needsClarification: false as const }
+            : planAnalyticalAnswer({
+                prompt,
+                datasetProfile: before.profile,
+                semanticModel: copilotContext.semanticModel,
+                rows: getQueryableRowsForExport(datasetVersionId),
+                datasetVersionId
+              });
+          if (analyticalPlan.handled && analyticalPlan.needsClarification) {
+            const botMessage = assistantMessage(`Necesito una aclaracion: ${analyticalPlan.clarification.question ?? "Necesito una metrica o dimension concreta para responder con evidencia."} Opciones: ${analyticalPlan.clarification.options.join(", ")}.`);
+            set({
+              messages: [...get().messages, botMessage],
+              chatMessages: [...get().messages, botMessage],
+              isCopilotThinking: false,
+              copilotStatus: "clarification",
+              copilotPlan: undefined,
+              copilotDiff: [],
+              copilotEvidence: ["No se ejecuto consulta porque la pregunta analitica era ambigua."]
+            });
+            return;
+          }
+          if (analyticalPlan.handled) {
+            const current = await executeAggregateQuery({
+              datasetId,
+              dashboardId: before.activeDashboardId || before.dashboard.id,
+              context: before.persistenceMode === "supabase" ? "authenticated" : "local",
+              query: analyticalPlan.query
+            });
+            const previous = analyticalPlan.previousQuery
+              ? await executeAggregateQuery({
+                  datasetId,
+                  dashboardId: before.activeDashboardId || before.dashboard.id,
+                  context: before.persistenceMode === "supabase" ? "authenticated" : "local",
+                  query: analyticalPlan.previousQuery
+                })
+              : undefined;
+            const answer = formatAnalyticalAnswer(analyticalPlan, current, previous);
+            const botMessage: ChatMessage = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: answer.answer,
+              analyticalAnswer: answer,
+              createdAt: new Date().toISOString()
+            };
+            set({
+              messages: [...get().messages, botMessage],
+              chatMessages: [...get().messages, botMessage],
+              isCopilotThinking: false,
+              copilotStatus: "verified",
+              copilotPlan: undefined,
+              copilotDiff: [],
+              copilotEvidence: [
+                `Respuesta analitica: ${answer.evidenceId}`,
+                `Metrica: ${answer.metric}`,
+                `Periodo: ${answer.period}${answer.periodInferred ? " (inferido)" : ""}`
+              ]
             });
             return;
           }

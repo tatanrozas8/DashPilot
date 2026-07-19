@@ -14,7 +14,7 @@ function newId(prefix: string) {
 
 function riskFor(tool: CopilotToolName) {
   if (["dashboard.removeWidget", "dashboard.clearFilters", "dashboard.removeFilter", "presentation.removeSlide"].includes(tool)) return "high" as const;
-  if (["dashboard.updateWidgetVisualConfig", "dashboard.renameWidget", "dashboard.renameDashboard", "dashboard.updateDashboardSubtitle", "dashboard.updateDashboardDesign", "dashboard.selectColumns", "dashboard.reorderWidget", "control.undo", "control.redo", "control.requestClarification"].includes(tool)) return "low" as const;
+  if (["dashboard.updateWidgetVisualConfig", "dashboard.renameWidget", "dashboard.renameDashboard", "dashboard.updateDashboardSubtitle", "dashboard.updateDashboardDesign", "dashboard.setPages", "dashboard.selectColumns", "dashboard.reorderWidget", "control.undo", "control.redo", "control.requestClarification"].includes(tool)) return "low" as const;
   return "medium" as const;
 }
 
@@ -33,6 +33,7 @@ function actionToTool(action: DashboardAction): { tool: CopilotToolName; argumen
   if (action.type === "update_dashboard_title") return { tool: "dashboard.renameDashboard", arguments: { title: action.title } };
   if (action.type === "update_dashboard_subtitle") return { tool: "dashboard.updateDashboardSubtitle", arguments: { subtitle: action.subtitle } };
   if (action.type === "update_dashboard_design") return { tool: "dashboard.updateDashboardDesign", arguments: { design: action.design } };
+  if (action.type === "set_dashboard_pages" && action.pages?.length) return { tool: "dashboard.setPages", arguments: { pages: action.pages } };
   if (action.type === "undo_last_action") return { tool: "control.undo", arguments: {} };
   if (action.type === "ask_clarification") return { tool: "control.requestClarification", arguments: { question: action.question } };
   return null;
@@ -103,7 +104,7 @@ export function createCopilotPlan(context: ResolvedCopilotContext, prompt: strin
   if (contextual.needsClarification) return clarificationPlan(context, contextual.clarification);
   const localActions = contextual.action ? [contextual.action] : [];
 
-  const biPlan = localActions.length ? undefined : planCopilotBi({
+  const biPlan = localActions.length || context.scope === "widget" ? undefined : planCopilotBi({
     prompt: contextual.usesPreviousInstruction && previousInstruction ? previousInstruction : prompt,
     datasetProfile: context.datasetProfile,
     semanticModel: context.semanticModel,

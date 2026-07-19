@@ -1,4 +1,4 @@
-import type { DashboardAction, DashboardWidget } from "@/types/dashboard";
+import type { DashboardAction, DashboardPage, DashboardWidget } from "@/types/dashboard";
 import type { BusinessIntentResolution, DashboardBlueprint, DatasetIntelligence, VisualizationRecommendation } from "@/lib/copilot-bi/types";
 import { planAnalyticalQueries, tableQueryPlan } from "@/lib/copilot-bi/analytical-query-planner";
 import { generateComputedInsights } from "@/lib/copilot-bi/insight-engine";
@@ -51,6 +51,44 @@ function filterNames(intelligence: DatasetIntelligence) {
   return intelligence.filters.slice(0, 5).map((filter) => filter.label);
 }
 
+function pageWidget(widget: DashboardWidget) {
+  return { id: widget.id, type: widget.type, title: widget.title, reason: widget.description ?? "Visual recomendado por el motor BI." };
+}
+
+function buildPages(input: { audience: BusinessIntentResolution["audience"]; widgets: DashboardWidget[] }): DashboardBlueprint["pages"] {
+  const executiveWidgets = input.widgets.filter((widget) => widget.type === "kpi_card" || widget.type === "insight_text");
+  const operationalWidgets = input.widgets.filter((widget) => !["kpi_card", "table", "insight_text"].includes(widget.type));
+  const detailWidgets = input.widgets.filter((widget) => widget.type === "table");
+  return [
+    {
+      title: input.audience === "executive" ? "Vista ejecutiva" : "Vista principal",
+      purpose: "KPIs, tendencia y resumen con evidencia.",
+      widgets: executiveWidgets.map(pageWidget)
+    },
+    {
+      title: "Vista operacional",
+      purpose: "Comparaciones, tendencias y segmentos accionables.",
+      widgets: operationalWidgets.map(pageWidget)
+    },
+    {
+      title: "Detalle",
+      purpose: "Tabla resumen y drilldown controlado por QueryService.",
+      widgets: detailWidgets.map(pageWidget)
+    }
+  ];
+}
+
+function dashboardPagesFromBlueprint(pages: DashboardBlueprint["pages"]): DashboardPage[] {
+  return pages.map((page, index) => ({
+    id: index === 0 ? "page_executive" : index === 1 ? "page_operational" : "page_detail",
+    title: page.title,
+    order: index,
+    layout: { mode: "grid_12", columns: 12 },
+    filters: [],
+    widgetIds: page.widgets.map((widget) => widget.id)
+  }));
+}
+
 export function buildDashboardBlueprint(input: {
   intent: BusinessIntentResolution;
   intelligence: DatasetIntelligence;
@@ -92,23 +130,15 @@ export function buildDashboardBlueprint(input: {
     { type: "update_dashboard_design", design: { density: "compact", accentColor: "slate", cardStyle: "bordered", chartPalette: "business" } },
     ...laidOut.map((widget) => ({ type: "add_widget" as const, widget }))
   ];
+  const pages = buildPages({ audience: intent.audience, widgets: laidOut });
+  const dashboardPages = dashboardPagesFromBlueprint(pages);
+  actions.push({ type: "set_dashboard_pages", pages: dashboardPages });
 
   return {
     title,
     subtitle,
     audience: intent.audience,
-    pages: [
-      {
-        title: intent.audience === "executive" ? "Vista ejecutiva" : "Vista principal",
-        purpose: "KPIs, tendencia, comparaciones y resumen con evidencia.",
-        widgets: laidOut.map((widget) => ({ id: widget.id, type: widget.type, title: widget.title, reason: widget.description ?? "Visual recomendado por el motor BI." }))
-      },
-      {
-        title: "Detalle",
-        purpose: "Tabla resumen y drilldown controlado por QueryService.",
-        widgets: table ? [{ id: table.id, type: table.type, title: table.title, reason: table.description ?? "Tabla de detalle." }] : []
-      }
-    ],
+    pages,
     filters: filterNames(intelligence),
     narrative,
     warnings: intelligence.qualityWarnings.slice(0, 4),

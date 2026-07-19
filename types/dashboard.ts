@@ -45,6 +45,7 @@ export interface DashboardSpec {
   semanticModelId?: string;
   design?: DashboardDesignSettings;
   globalFilters: DashboardFilterConfig[];
+  pages?: DashboardPage[];
   widgets: DashboardWidget[];
   executiveSummary?: string;
   createdAt: string;
@@ -313,6 +314,7 @@ export type DashboardAction =
   | { type: "update_dashboard_title"; title: string }
   | { type: "update_dashboard_subtitle"; subtitle: string }
   | { type: "update_dashboard_design"; design: DashboardDesignSettings }
+  | { type: "set_dashboard_pages"; pages?: DashboardPage[] }
   | { type: "update_widget_title"; widgetId: string; title: string }
   | { type: "update_widget"; widgetId: string; changes: Partial<DashboardWidget> }
   | { type: "update_widget_visual_config"; widgetId: string; visualConfig: DashboardWidgetVisualConfig }

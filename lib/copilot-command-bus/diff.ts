@@ -34,6 +34,9 @@ export function semanticDashboardDiff(before: DashboardSpec, beforeView: Dashboa
     diff.push({ path: "viewState.dataExplorer", before: beforeView.dataExplorer, after: afterView.dataExplorer, kind: "updated" });
   }
   if (before.title !== after.title) diff.push({ path: "dashboard.title", before: before.title, after: after.title, kind: "updated" });
+  if (!sameJson(before.pages ?? [], after.pages ?? [])) {
+    diff.push({ path: "dashboard.pages", before: before.pages ?? [], after: after.pages ?? [], kind: before.pages?.length ? "updated" : "created" });
+  }
 
   return diff;
 }

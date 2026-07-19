@@ -146,6 +146,23 @@ export function applyDashboardAction(spec: DashboardSpec, viewState: DashboardVi
     };
   }
 
+  if (action.type === "set_dashboard_pages") {
+    if (!action.pages?.length) {
+      const specWithoutPages = { ...spec };
+      delete specWithoutPages.pages;
+      return {
+        spec: { ...specWithoutPages, updatedAt: new Date().toISOString() },
+        viewState,
+        message: "Restaure el dashboard a una vista plana sin paginas persistidas."
+      };
+    }
+    return {
+      spec: { ...spec, pages: action.pages, updatedAt: new Date().toISOString() },
+      viewState,
+      message: `Persiste ${action.pages.length} pagina(s) del dashboard como DashboardPage.`
+    };
+  }
+
   if (action.type === "update_widget_title") {
     return {
       spec: updateDashboardWidget(spec, action.widgetId, { title: action.title }),

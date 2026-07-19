@@ -31,7 +31,7 @@ import { modeLabel } from "@/lib/observability/modes";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import type { DataRow } from "@/types/dataset";
-import type { DashboardDesignSettings, DashboardViewState, DashboardWidget, QueryMetricResult, QueryResultCellValue, QueryResultRow } from "@/types/dashboard";
+import type { DashboardDesignSettings, DashboardPage, DashboardViewState, DashboardWidget, QueryMetricResult, QueryResultCellValue, QueryResultRow } from "@/types/dashboard";
 
 function formatValue(value: number, format: unknown) {
   if (format === "currency") return formatCurrency(value);
@@ -528,6 +528,10 @@ function InsightWidget({ widget }: { widget: DashboardWidget }) {
   );
 }
 
+function orderedPages(pages: DashboardPage[] = []) {
+  return [...pages].sort((left, right) => left.order - right.order || left.title.localeCompare(right.title, "es"));
+}
+
 export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[] }) {
   const dashboard = useDashPilotStore((state) => state.dashboard);
   const isDashboardEditing = useDashPilotStore((state) => state.isDashboardEditing);
@@ -543,90 +547,123 @@ export function DashboardRenderer({ slideWidgetIds }: { slideWidgetIds?: string[
   const widgets = slideWidgetIds
     ? renderedDashboard.widgets.filter((widget) => slideWidgetIds.includes(widget.id))
     : renderedDashboard.widgets.filter((widget) => widget.config.hidden !== true);
+  const pages = slideWidgetIds ? [] : orderedPages(renderedDashboard.pages);
+  const widgetsById = new Map(widgets.map((widget) => [widget.id, widget]));
+
+  function renderWidgetContainer(widget: DashboardWidget) {
+    const width = widget.position.w >= 12 ? "col-span-12" : widget.position.w >= 8 ? "col-span-12 lg:col-span-8" : widget.position.w >= 6 ? "col-span-12 lg:col-span-6" : "col-span-12 sm:col-span-6 xl:col-span-3";
+    const isSelected = selectedTargetId === widget.id;
+    return (
+      <div
+        key={widget.id}
+        role={slideWidgetIds ? undefined : "button"}
+        tabIndex={slideWidgetIds ? undefined : 0}
+        aria-label={slideWidgetIds ? undefined : `Seleccionar ${widget.title} para editar con Copiloto`}
+        onClick={() => {
+          if (!slideWidgetIds) selectDashboardTarget(widget.type === "kpi_card" ? "kpi" : widget.type === "table" ? "table" : "widget", widget.id);
+        }}
+        onKeyDown={(event) => {
+          if (slideWidgetIds) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            selectDashboardTarget(widget.type === "kpi_card" ? "kpi" : widget.type === "table" ? "table" : "widget", widget.id);
+          }
+        }}
+        draggable={isDashboardEditing && !slideWidgetIds}
+        onDragStart={(event) => {
+          if (!isDashboardEditing || slideWidgetIds) return;
+          setDraggedWidgetId(widget.id);
+          event.dataTransfer.setData("text/plain", widget.id);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(event) => {
+          if (!isDashboardEditing || slideWidgetIds) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => {
+          if (!isDashboardEditing || slideWidgetIds) return;
+          event.preventDefault();
+          const source = event.dataTransfer.getData("text/plain") || draggedWidgetId;
+          if (source && source !== widget.id) moveDashboardDraftWidget(source, widget.id);
+          setDraggedWidgetId(null);
+        }}
+        onDragEnd={() => setDraggedWidgetId(null)}
+        className={cn(
+          "relative transition",
+          width,
+          isDashboardEditing && !slideWidgetIds && "cursor-grab active:cursor-grabbing",
+          draggedWidgetId === widget.id && "opacity-50",
+          highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]",
+          isSelected && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-4 ring-offset-[#f8faff]"
+        )}
+      >
+        {isSelected && !slideWidgetIds && (
+          <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-full border border-[#cfd5ff] bg-white px-3 py-1 text-xs font-bold text-[#3d35ff] shadow-sm">
+            Seleccionado
+            <button
+              type="button"
+              aria-label="Deseleccionar objetivo"
+              onClick={(event) => {
+                event.stopPropagation();
+                clearSelectedTarget();
+              }}
+              className="grid size-5 place-items-center rounded-full hover:bg-[#f0f1ff]"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        )}
+        {isDashboardEditing && !slideWidgetIds && (
+          <span className="absolute left-3 top-3 z-20 grid size-8 place-items-center rounded-md border border-[#dfe5f0] bg-white/95 text-[#697597] shadow-sm" title="Arrastra para reordenar">
+            <GripVertical className="size-4" />
+          </span>
+        )}
+        {widget.type === "kpi_card" && <KpiWidget widget={widget} />}
+        {widget.type === "line_chart" && <LineWidget widget={widget} />}
+        {widget.type === "bar_chart" && <BarWidget widget={widget} />}
+        {widget.type === "donut_chart" && <DonutWidget widget={widget} />}
+        {widget.type === "scatter_plot" && <ScatterWidget widget={widget} />}
+        {widget.type === "table" && <TableWidget widget={widget} />}
+        {widget.type === "insight_text" && <InsightWidget widget={widget} />}
+      </div>
+    );
+  }
+
+  const assignedWidgetIds = new Set(pages.flatMap((page) => page.widgetIds));
+  const unassignedWidgets = pages.length ? widgets.filter((widget) => !assignedWidgetIds.has(widget.id)) : widgets;
 
   return (
     <DashboardDesignContext.Provider value={design}>
-      <div className={cn("grid grid-cols-12", design.density === "compact" ? "gap-3" : "gap-4")}>
-        {widgets.map((widget) => {
-          const width = widget.position.w >= 12 ? "col-span-12" : widget.position.w >= 8 ? "col-span-12 lg:col-span-8" : widget.position.w >= 6 ? "col-span-12 lg:col-span-6" : "col-span-12 sm:col-span-6 xl:col-span-3";
-          const isSelected = selectedTargetId === widget.id;
-          return (
-            <div
-              key={widget.id}
-              role={slideWidgetIds ? undefined : "button"}
-              tabIndex={slideWidgetIds ? undefined : 0}
-              aria-label={slideWidgetIds ? undefined : `Seleccionar ${widget.title} para editar con Copiloto`}
-              onClick={() => {
-                if (!slideWidgetIds) selectDashboardTarget(widget.type === "kpi_card" ? "kpi" : widget.type === "table" ? "table" : "widget", widget.id);
-              }}
-              onKeyDown={(event) => {
-                if (slideWidgetIds) return;
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  selectDashboardTarget(widget.type === "kpi_card" ? "kpi" : widget.type === "table" ? "table" : "widget", widget.id);
-                }
-              }}
-              draggable={isDashboardEditing && !slideWidgetIds}
-              onDragStart={(event) => {
-                if (!isDashboardEditing || slideWidgetIds) return;
-                setDraggedWidgetId(widget.id);
-                event.dataTransfer.setData("text/plain", widget.id);
-                event.dataTransfer.effectAllowed = "move";
-              }}
-              onDragOver={(event) => {
-                if (!isDashboardEditing || slideWidgetIds) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(event) => {
-                if (!isDashboardEditing || slideWidgetIds) return;
-                event.preventDefault();
-                const source = event.dataTransfer.getData("text/plain") || draggedWidgetId;
-                if (source && source !== widget.id) moveDashboardDraftWidget(source, widget.id);
-                setDraggedWidgetId(null);
-              }}
-              onDragEnd={() => setDraggedWidgetId(null)}
-              className={cn(
-                "relative transition",
-                width,
-                isDashboardEditing && !slideWidgetIds && "cursor-grab active:cursor-grabbing",
-                draggedWidgetId === widget.id && "opacity-50",
-                highlightedWidgetId === widget.id && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-2 ring-offset-[#f8faff]",
-                isSelected && "rounded-xl ring-2 ring-[#3d35ff] ring-offset-4 ring-offset-[#f8faff]"
-              )}
-            >
-              {isSelected && !slideWidgetIds && (
-                <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-full border border-[#cfd5ff] bg-white px-3 py-1 text-xs font-bold text-[#3d35ff] shadow-sm">
-                  Seleccionado
-                  <button
-                    type="button"
-                    aria-label="Deseleccionar objetivo"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      clearSelectedTarget();
-                    }}
-                    className="grid size-5 place-items-center rounded-full hover:bg-[#f0f1ff]"
-                  >
-                    <X className="size-3" />
-                  </button>
+      {pages.length ? (
+        <div className="space-y-8">
+          {pages.map((page) => {
+            const pageWidgets = page.widgetIds.map((widgetId) => widgetsById.get(widgetId)).filter((widget): widget is DashboardWidget => Boolean(widget));
+            return (
+              <section key={page.id} aria-label={page.title}>
+                <div className="mb-3 flex items-center justify-between gap-3 border-b border-[#edf1fa] pb-2">
+                  <h2 className="text-sm font-bold uppercase tracking-[0.08em] text-[#34405f]">{page.title}</h2>
+                  <span className="text-xs font-semibold text-[#697597]">{pageWidgets.length} widgets</span>
                 </div>
-              )}
-              {isDashboardEditing && !slideWidgetIds && (
-                <span className="absolute left-3 top-3 z-20 grid size-8 place-items-center rounded-md border border-[#dfe5f0] bg-white/95 text-[#697597] shadow-sm" title="Arrastra para reordenar">
-                  <GripVertical className="size-4" />
-                </span>
-              )}
-              {widget.type === "kpi_card" && <KpiWidget widget={widget} />}
-              {widget.type === "line_chart" && <LineWidget widget={widget} />}
-              {widget.type === "bar_chart" && <BarWidget widget={widget} />}
-              {widget.type === "donut_chart" && <DonutWidget widget={widget} />}
-              {widget.type === "scatter_plot" && <ScatterWidget widget={widget} />}
-              {widget.type === "table" && <TableWidget widget={widget} />}
-              {widget.type === "insight_text" && <InsightWidget widget={widget} />}
-            </div>
-          );
-        })}
-      </div>
+                <div className={cn("grid grid-cols-12", design.density === "compact" ? "gap-3" : "gap-4")}>
+                  {pageWidgets.map(renderWidgetContainer)}
+                </div>
+              </section>
+            );
+          })}
+          {unassignedWidgets.length > 0 && (
+            <section aria-label="Widgets sin pagina">
+              <div className={cn("grid grid-cols-12", design.density === "compact" ? "gap-3" : "gap-4")}>
+                {unassignedWidgets.map(renderWidgetContainer)}
+              </div>
+            </section>
+          )}
+        </div>
+      ) : (
+        <div className={cn("grid grid-cols-12", design.density === "compact" ? "gap-3" : "gap-4")}>
+          {widgets.map(renderWidgetContainer)}
+        </div>
+      )}
     </DashboardDesignContext.Provider>
   );
 }
@@ -665,8 +702,8 @@ export function DashboardFilters() {
       </div>
       <button onClick={resetFilters} className="mt-5 text-sm font-semibold text-[#3d35ff]">Restablecer</button>
       <div className="mt-6 space-y-6">
-        {dashboard.globalFilters.map((filter) => (
-          <div key={filter.id}>
+        {dashboard.globalFilters.map((filter, index) => (
+          <div key={`${filter.id}-${filter.field}-${index}`}>
             <label className="mb-2 block text-sm font-semibold text-[#34405f]">{filter.label}</label>
             {filter.type === "date_range" ? (
               <div className="space-y-2">
@@ -739,7 +776,7 @@ export function DashboardFilters() {
           <label className="block text-xs font-bold text-[#34405f]">
             Columna
             <select className="mt-1 h-10 w-full rounded-md border border-[#dfe5f0] bg-white px-3 text-sm" value={selectedFilterColumn.normalizedName} onChange={(event) => setFilterField(event.target.value)}>
-              {catalog.filters.map((column) => <option key={column.normalizedName} value={column.normalizedName}>{column.displayName}</option>)}
+              {catalog.filters.map((column, index) => <option key={`${column.normalizedName}-${column.originalName}-${index}`} value={column.normalizedName}>{column.displayName}</option>)}
             </select>
           </label>
           {selectedFilterColumn.usableAsDate ? (
@@ -946,16 +983,16 @@ export function CopilotPanel() {
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Metricas detectadas</p>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {datasetSummary.metrics.length ? datasetSummary.metrics.map((metric) => (
-                  <span key={metric.normalizedName} className="rounded-full bg-[#eef0ff] px-2 py-1 text-[11px] font-bold text-[#3d35ff]">{metric.displayName}</span>
+                {datasetSummary.metrics.length ? datasetSummary.metrics.map((metric, index) => (
+                  <span key={`metric-${metric.normalizedName}-${metric.originalName}-${index}`} className="rounded-full bg-[#eef0ff] px-2 py-1 text-[11px] font-bold text-[#3d35ff]">{metric.displayName}</span>
                 )) : <span className="text-xs font-semibold text-[#697597]">Sin metricas confiables</span>}
               </div>
             </div>
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Dimensiones y filtros</p>
               <div className="mt-1 flex flex-wrap gap-1.5">
-                {[...datasetSummary.dimensions, ...datasetSummary.filters.slice(0, 2)].slice(0, 6).map((dimension) => (
-                  <span key={dimension.normalizedName} className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700">{dimension.displayName}</span>
+                {[...datasetSummary.dimensions, ...datasetSummary.filters.slice(0, 2)].slice(0, 6).map((dimension, index) => (
+                  <span key={`dimension-${dimension.normalizedName}-${dimension.originalName}-${index}`} className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700">{dimension.displayName}</span>
                 ))}
               </div>
             </div>
@@ -1027,16 +1064,16 @@ export function CopilotPanel() {
                 <p className="mt-1 text-sm font-bold text-[#1c2748]">{copilotPlan.blueprint.title}</p>
                 <p className="mt-1 text-xs font-semibold leading-5 text-[#536088]">{copilotPlan.blueprint.subtitle}</p>
                 <ul className="mt-2 space-y-1 text-xs font-semibold leading-5 text-[#536088]">
-                  {copilotPlan.blueprint.pages.slice(0, 2).map((page) => (
-                    <li key={page.title}>{page.title}: {page.widgets.length} widgets</li>
+                  {copilotPlan.blueprint.pages.slice(0, 3).map((page, index) => (
+                    <li key={`${page.title}-${index}`}>{page.title}: {page.widgets.length} widgets</li>
                   ))}
                 </ul>
               </div>
             )}
             {copilotDiff.length > 0 && (
               <ul className="mt-3 max-h-28 space-y-2 overflow-y-auto text-xs font-semibold leading-5 text-[#536088]">
-                {copilotDiff.slice(0, 4).map((entry) => (
-                  <li key={`${entry.path}-${entry.kind}`} className="rounded-lg bg-[#fbfcff] px-2 py-1">
+                {copilotDiff.slice(0, 4).map((entry, index) => (
+                  <li key={`${entry.path}-${entry.kind}-${index}`} className="rounded-lg bg-[#fbfcff] px-2 py-1">
                     {entry.kind}: {entry.path}
                   </li>
                 ))}
@@ -1079,7 +1116,22 @@ export function CopilotPanel() {
         {visibleMessages.map((message) => (
           <div key={message.id} className={cn("rounded-xl border p-4 text-sm leading-6", message.role === "user" ? "ml-8 border-[#d9dcff] bg-[#f0efff]" : "mr-4 border-[#e5e9f5] bg-white")}>
             <p className="mb-1 text-xs font-bold text-[#697597]">{message.role === "user" ? "Tu" : "Copiloto"}</p>
-            {message.content}
+            {message.analyticalAnswer ? (
+              <div className="space-y-3">
+                <p>{message.analyticalAnswer.answer}</p>
+                <div className="rounded-lg border border-[#d9dcff] bg-[#f7f6ff] px-3 py-2">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#697597]">Resultado</p>
+                  <p className="mt-1 text-2xl font-bold text-[#1c2748]">{message.analyticalAnswer.valueLabel}</p>
+                </div>
+                <div className="grid gap-2 text-xs font-semibold leading-5 text-[#536088]">
+                  <p>Metrica: {message.analyticalAnswer.metric}</p>
+                  <p>Periodo: {message.analyticalAnswer.period}{message.analyticalAnswer.periodInferred ? " (inferido)" : ""}</p>
+                  {message.analyticalAnswer.filters.length ? <p>Filtros: {message.analyticalAnswer.filters.join(", ")}</p> : null}
+                  <p>Evidencia: {message.analyticalAnswer.evidenceId}</p>
+                  <p>{message.analyticalAnswer.context}</p>
+                </div>
+              </div>
+            ) : message.content}
             {message.role === "assistant" && message.structuredAction && (
               <p className="mt-3 inline-flex rounded-full border border-[#dfe5fb] bg-[#f6f7ff] px-3 py-1 text-xs font-bold text-[#3d35ff]">
                 Accion aplicada: {copilotActionLabel(message.structuredAction.type)}

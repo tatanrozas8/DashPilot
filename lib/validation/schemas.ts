@@ -245,6 +245,7 @@ export const dashboardSpecSchema = z.object({
       value: z.union([z.string(), z.number(), z.boolean()])
     })).optional()
   })),
+  pages: z.array(dashboardPageSchema).optional(),
   widgets: z.array(z.object({
     id: z.string(),
     type: z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]),

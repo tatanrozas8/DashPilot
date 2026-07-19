@@ -17,6 +17,7 @@ export { buildSummaryTableWidget } from "@/lib/copilot-bi/table-builder";
 export { layoutWidgets } from "@/lib/copilot-bi/layout-planner";
 export { validateBiPlan } from "@/lib/copilot-bi/self-check-validator";
 export { buildDashboardBlueprint } from "@/lib/copilot-bi/dashboard-blueprint-builder";
+export { planAnalyticalAnswer, formatAnalyticalAnswer } from "@/lib/copilot-bi/analytical-answer";
 
 const actionableIntents = new Set([
   "create_full_dashboard",

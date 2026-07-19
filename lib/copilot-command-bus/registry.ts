@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { DashboardAction, DashboardSpec, DashboardWidget } from "@/types/dashboard";
-import { dashboardFilterSchema, dashboardQuerySchema, dashboardWidgetVisualConfigSchema } from "@/lib/validation/schemas";
+import { dashboardFilterSchema, dashboardPageSchema, dashboardQuerySchema, dashboardWidgetVisualConfigSchema } from "@/lib/validation/schemas";
 import type { CommandEnvelope, CommandToolDefinition, CopilotToolName, ToolArgumentMap } from "@/lib/copilot-command-bus/types";
 
 const emptySchema = z.object({}).strict();
@@ -169,6 +169,14 @@ export const commandToolRegistry = {
     }).strict(),
     toAction: (arguments_) => ({ type: "update_dashboard_design", design: arguments_.design }),
     inverse: (before) => ({ type: "update_dashboard_design", design: before.design ?? {} })
+  },
+  "dashboard.setPages": {
+    tool: "dashboard.setPages",
+    riskLevel: "low",
+    requiresConfirmation: false,
+    schema: z.object({ pages: z.array(dashboardPageSchema).min(1) }).strict(),
+    toAction: (arguments_) => ({ type: "set_dashboard_pages", pages: arguments_.pages }),
+    inverse: (before) => ({ type: "set_dashboard_pages", pages: before.pages })
   },
   "presentation.createSlide": {
     tool: "presentation.createSlide",

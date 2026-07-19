@@ -42,6 +42,7 @@ export type CopilotToolName =
   | "dashboard.renameDashboard"
   | "dashboard.updateDashboardSubtitle"
   | "dashboard.updateDashboardDesign"
+  | "dashboard.setPages"
   | "presentation.createSlide"
   | "presentation.updateSlide"
   | "presentation.removeSlide"
@@ -254,6 +255,7 @@ export interface ToolArgumentMap {
   "dashboard.renameDashboard": { title: string };
   "dashboard.updateDashboardSubtitle": { subtitle: string };
   "dashboard.updateDashboardDesign": { design: NonNullable<DashboardSpec["design"]> };
+  "dashboard.setPages": { pages: NonNullable<DashboardSpec["pages"]> };
   "presentation.createSlide": { slide: unknown };
   "presentation.updateSlide": { slideId: string; changes: Record<string, unknown> };
   "presentation.removeSlide": { slideId: string };

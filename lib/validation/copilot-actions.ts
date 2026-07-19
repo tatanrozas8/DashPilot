@@ -3,7 +3,7 @@ import type { DatasetProfile } from "@/types/dataset";
 import type { DashboardAction, DashboardSpec, DashboardViewState } from "@/types/dashboard";
 import type { SemanticLayer } from "@/lib/semantic-layer";
 import { compatibleWidgetTypes } from "@/lib/dashboard-spec/edit-dashboard-spec";
-import { dashboardFilterSchema, dashboardQuerySchema, dashboardWidgetVisualConfigSchema } from "@/lib/validation/schemas";
+import { dashboardFilterSchema, dashboardPageSchema, dashboardQuerySchema, dashboardWidgetVisualConfigSchema } from "@/lib/validation/schemas";
 
 const widgetTypeSchema = z.enum(["kpi_card", "line_chart", "bar_chart", "area_chart", "donut_chart", "scatter_plot", "map", "table", "insight_text"]);
 const aggregationSchema = z.enum(["sum", "avg", "count", "count_distinct", "min", "max"]);
@@ -71,6 +71,7 @@ export const copilotActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("update_dashboard_title"), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_dashboard_subtitle"), subtitle: z.string().max(240) }),
   z.object({ type: z.literal("update_dashboard_design"), design: dashboardDesignSchema }),
+  z.object({ type: z.literal("set_dashboard_pages"), pages: z.array(dashboardPageSchema).optional() }),
   z.object({ type: z.literal("update_widget_title"), widgetId: z.string(), title: z.string().min(1).max(120) }),
   z.object({ type: z.literal("update_widget"), widgetId: z.string(), changes: widgetChangesSchema }),
   z.object({ type: z.literal("update_widget_visual_config"), widgetId: z.string(), visualConfig: dashboardWidgetVisualConfigSchema }),
@@ -204,6 +205,16 @@ export function validateCopilotAction(rawAction: unknown, context: CopilotValida
 
   if (action.type === "replace_widget" && widgets.has(action.widget.id) && action.widget.id !== action.widgetId) {
     return { success: false, error: "La accion intenta reemplazar con un id duplicado." };
+  }
+
+  if (action.type === "set_dashboard_pages" && action.pages?.length) {
+    const pageIds = new Set<string>();
+    for (const page of action.pages) {
+      if (pageIds.has(page.id)) return { success: false, error: `La accion intenta crear una pagina duplicada: ${page.id}.` };
+      pageIds.add(page.id);
+      const missingWidget = page.widgetIds.find((widgetId) => !widgets.has(widgetId));
+      if (missingWidget) return { success: false, error: `La pagina ${page.title} referencia un widget inexistente: ${missingWidget}.` };
+    }
   }
 
   if (action.type === "select_target" && action.targetId && !widgets.has(action.targetId) && action.targetType !== "dashboard") {

@@ -1487,3 +1487,73 @@ Debt remaining:
 
 - Native database persistence for v2 `DashboardDocument`/`DashboardRevision` remains broader dashboard-foundation debt.
 - Browser reload cannot restore full local/demo dashboard specs without changing the documented browser-storage policy.
+
+## 2026-07-19 - enterprise-foundation-hardening-goal-2026-07-19
+
+Commit: pending
+
+Prompt ID: `enterprise-foundation-hardening-goal-2026-07-19`
+
+Objective:
+
+- Close G7 enterprise foundation debt for native dashboard persistence v2, API hardening, security headers, basic rate limiting, audit events, export controls, Supabase critical types and operational docs.
+
+Files changed:
+
+- `app/api/copilot/route.ts`
+- `app/api/query/route.ts`
+- `components/dashboard/dashboard-workspace.tsx`
+- `lib/export/storage-controls.ts`
+- `lib/observability/audit.ts`
+- `lib/observability/domain-error.ts`
+- `lib/security/api.ts`
+- `lib/security/environment.ts`
+- `lib/security/headers.ts`
+- `lib/security/rate-limit.ts`
+- `lib/supabase/audit.ts`
+- `lib/supabase/dashboard-documents.ts`
+- `lib/supabase/dashboards.ts`
+- `lib/supabase/share-links.ts`
+- `lib/data-access/index.ts`
+- `lib/dashboard-spec/model-v2.ts`
+- `types/supabase.ts`
+- `next.config.ts`
+- `supabase/migrations/0007_enterprise_foundation_hardening.sql`
+- `tests/enterprise-foundation-hardening.test.ts`
+- `docs/security-overview.md`
+- `docs/operations-runbook.md`
+- `docs/data-governance.md`
+- `docs/current-architecture.md`
+- `docs/known-gaps.md`
+- `docs/checkpoints/enterprise-foundation-hardening-goal-2026-07-19.md`
+
+Architecture notes:
+
+- Dashboard saves now create legacy-compatible `dashboard_specs` plus native v2 `dashboard_documents`, `dashboard_revisions`, `dashboard_pages` and `dashboard_widgets`.
+- Authenticated dashboard reload tries v2 tables first and reconstructs the existing UI-compatible `DashboardSpec`, including persisted pages.
+- Supabase critical tables and RPCs now have explicit TypeScript contracts. JSONB columns remain `unknown` by design and are validated at application boundaries.
+- `/api/copilot` and `/api/query` use bounded JSON parsing, structured errors and correlation IDs. `/api/query` requires the real Supabase user.
+- Production local/demo persistence fallback is blocked unless Supabase is configured and the user is authenticated.
+- Security headers, in-memory rate limiting, redacted audit events and export storage-control contracts are now present.
+
+Validation:
+
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run lint`: passed.
+- `npm.cmd run test`: passed, 50 files and 294 tests. Existing jsdom navigation warning observed.
+- `npm.cmd run build`: passed, production build generated 24/24 static pages.
+- `npx.cmd vitest run tests/enterprise-foundation-hardening.test.ts`: passed, 1 file and 7 tests.
+- `npm.cmd run test:e2e`: first non-elevated run failed with Chromium `spawn EPERM`; elevated rerun passed, 10/10 Chromium tests.
+- `npm.cmd audit`: completed and reported 3 known vulnerabilities, 2 moderate via `postcss`/Next and 1 high via `xlsx`; no safe automatic fix applied.
+
+Known warnings:
+
+- Real Supabase DB/RLS/RPC execution has not been run in this environment; the repository includes a static SQL/RPC harness and runbook steps.
+- Rate limiting is in-memory and not distributed.
+- Export storage remains direct-download with adapter-ready contracts.
+- Dependency advisories for `xlsx` and transitive `postcss` remain documented.
+
+Security/privacy notes:
+
+- No `.env`, Supabase keys, service-role key or `AI_API_KEY` are intentionally included.
+- Audit metadata redacts secrets, tokens, passwords, authorization values, row fields and prompt fields.

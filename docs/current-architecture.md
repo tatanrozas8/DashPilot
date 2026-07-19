@@ -140,7 +140,8 @@ Build output verified these routes:
 5. Supabase persistence:
    - `lib/supabase/datasets.ts` creates projects, datasets, sheets, columns, rows, profile JSON, and optional original file upload to the private `dashboard-files` bucket.
    - Dataset rows are capped at `DATASET_ROW_LIMIT = 50_000` and inserted in batches of `500`.
-   - `lib/supabase/dashboards.ts` writes `dashboard_specs` and `dashboard_versions`.
+   - `lib/supabase/dashboards.ts` writes legacy-compatible `dashboard_specs` and `dashboard_versions`.
+   - `lib/supabase/dashboard-documents.ts` persists native v2 `DashboardDocument`, `DashboardRevision`, `DashboardPage` and `DashboardWidget` tables and reloads them before falling back to legacy JSON.
    - `lib/supabase/presentations.ts` writes `presentations` and `presentation_versions`.
    - `lib/supabase/share-links.ts` writes `share_links` and loads public shares through the RPC.
 
@@ -179,7 +180,7 @@ Build output verified these routes:
     - Local mode stores share links in localStorage.
     - Supabase mode inserts `share_links`.
     - `components/public-share-page.tsx` loads `/share/[token]`.
-    - Supabase public share reads through `public.get_public_shared_dashboard(share_token text)` in `supabase/migrations/0002_real_dataset_pipeline.sql`.
+    - Supabase public share reads through `public.get_public_shared_dashboard(...)` hardened across migrations `0004` and `0005`.
 
 12. Export:
     - Dashboard workspace supports browser-side CSV, DashboardSpec JSON, PDF and PNG downloads.
@@ -188,12 +189,20 @@ Build output verified these routes:
     - `lib/export/renderers.ts` generates real PDF, PNG and PPTX bytes from specs, revision metadata, filters and queryable results instead of treating the current DOM as the only source of truth.
     - Public share export calls reject snapshots when `allowDownload=false` or the `export_snapshot` scope is absent.
     - `lib/export/create-manifest.ts` still creates a simple interactive export manifest and demo share link; interactive manifest import/open remains disabled.
+    - `lib/export/storage-controls.ts` models direct-download export records and documents durable server-side storage/signed URLs as P2.
+
+13. Security and observability:
+    - `next.config.ts` applies CSP, frame isolation, nosniff, referrer policy, permissions policy and HSTS.
+    - `lib/security/api.ts` provides bounded JSON parsing, structured API errors and correlation IDs.
+    - `lib/security/rate-limit.ts` provides basic in-memory rate limiting for sensitive routes.
+    - `lib/security/environment.ts` blocks local/demo persistence bypass in production without Supabase auth.
+    - `lib/observability/audit.ts` and `lib/supabase/audit.ts` record redacted audit events in memory and DB.
 
 ## Auth and Access Control
 
 - `proxy.ts` protects `/app/*` only when Supabase public env vars exist.
 - `/share/*` and `/login` are public.
-- If no Supabase env vars exist, app routes are not blocked.
+- If no Supabase env vars exist, app routes are not blocked in development/local mode, but production persistence bypass is rejected by `lib/security/environment.ts`.
 - `components/login-page.tsx` uses Supabase email/password through `lib/supabase/auth.ts`.
 - `dashpilot_local_mode` cookie can bypass protected route redirects while unauthenticated.
 - RLS policies are defined in SQL migrations for ownership-based access and public share RPC access.
@@ -204,9 +213,14 @@ Migrations:
 
 - `supabase/migrations/0001_dashpilot_core.sql`: core tables, first RLS policies, initial public share policy.
 - `supabase/migrations/0002_real_dataset_pipeline.sql`: dataset sheets/rows/import jobs/audit logs, more RLS, storage bucket policies, public share RPC.
+- `supabase/migrations/0003_dataset_versions_lifecycle.sql`: immutable dataset versions and activation RPC.
+- `supabase/migrations/0004_public_share_security.sql`: hashed share tokens, scopes, snapshots, public access logs and hardened public RPC.
+- `supabase/migrations/0005_public_share_filters.sql`: allowlisted public filter snapshots.
+- `supabase/migrations/0006_resumable_import_jobs.sql`: resumable import job lifecycle.
+- `supabase/migrations/0007_enterprise_foundation_hardening.sql`: dashboard documents/revisions/pages/widgets v2, export jobs, audit events and revision restore RPC.
 - `supabase/migrations/run_all_manual.sql`: combined manual runner.
 
-Tables represented in migrations and placeholder types:
+Critical tables represented in migrations and typed contracts:
 
 - `profiles`
 - `projects`
@@ -216,12 +230,21 @@ Tables represented in migrations and placeholder types:
 - `dataset_rows`
 - `dashboard_specs`
 - `dashboard_versions`
+- `dashboard_documents`
+- `dashboard_revisions`
+- `dashboard_pages`
+- `dashboard_widgets`
 - `presentations`
 - `presentation_versions`
 - `chat_messages`
 - `share_links`
+- `share_widget_results`
+- `share_filter_snapshots`
+- `public_share_access_logs`
 - `import_jobs`
 - `audit_logs`
+- `audit_events`
+- `export_jobs`
 
 Storage:
 

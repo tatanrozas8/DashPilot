@@ -8,6 +8,9 @@ export type DomainErrorCode =
   | "supabase_unavailable"
   | "persistence_failed"
   | "validation_failed"
+  | "permission_denied"
+  | "rate_limited"
+  | "method_not_allowed"
   | "conflict"
   | "unknown";
 

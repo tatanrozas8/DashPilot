@@ -9,6 +9,10 @@ import type { Database } from "@/types/supabase";
 import { dataRowSchema, queryServiceRequestSchema, type ExecutedQuerySummary, type QueryServiceRequest } from "@/lib/query-service/contract";
 import { GovernedAnalyticalQueryService, InMemoryAnalyticalArtifactRepository } from "@/lib/query-service/service";
 import { datasetProfileSchema } from "@/lib/validation/schemas";
+import { apiErrorResponse, createApiRequestContext, enforceApiRateLimit, parseApiBody, readJsonBody } from "@/lib/security/api";
+import { apiRateLimitRules } from "@/lib/security/rate-limit";
+import { DomainError } from "@/lib/observability/domain-error";
+import { recordAuditEvent } from "@/lib/observability/audit";
 
 interface DatasetVersionProfileRow {
   dataset_id: string;
@@ -115,53 +119,108 @@ async function loadSupabaseArtifact(supabase: SupabaseClient<Database>, request:
 }
 
 export async function POST(request: Request) {
+  const apiContext = createApiRequestContext(request, "api/query");
+  const rateLimit = enforceApiRateLimit(request, "query", apiRateLimitRules.query, apiContext);
+  if (rateLimit) {
+    recordAuditEvent({
+      action: "rate_limit.hit",
+      actorId: "anonymous",
+      actorType: "system",
+      resourceType: "api_route",
+      resourceId: "api/query",
+      result: "denied",
+      reason: "rate_limit",
+      correlationId: apiContext.correlationId
+    });
+    return rateLimit;
+  }
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Solicitud de consulta invalida." }, { status: 400 });
+    body = await readJsonBody(request, apiContext);
+  } catch (error) {
+    return apiErrorResponse(error, apiContext, 400);
   }
-  const parsed = queryServiceRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "La consulta no coincide con el contrato gobernado." }, { status: 400 });
+  let parsed: QueryServiceRequest;
+  try {
+    parsed = parseApiBody(queryServiceRequestSchema, body, apiContext);
+  } catch (error) {
+    return apiErrorResponse(error, apiContext, 400);
   }
-  if (parsed.data.context !== "authenticated") {
-    return NextResponse.json({ error: "La ruta server-side solo acepta contexto autenticado." }, { status: 400 });
+  if (parsed.context !== "authenticated") {
+    return apiErrorResponse(new DomainError({
+      code: "validation_failed",
+      message: "Query route only accepts authenticated context.",
+      userMessage: "La ruta server-side solo acepta contexto autenticado.",
+      correlationId: apiContext.correlationId,
+      recoverable: false,
+      executionMode: "provider",
+      syncStatus: "failed"
+    }), apiContext, 400);
   }
   const factory = createSupabaseServerClient();
-  if (!factory) return NextResponse.json({ error: "Supabase no esta configurado." }, { status: 503 });
+  if (!factory) return apiErrorResponse(new DomainError({
+    code: "supabase_unavailable",
+    message: "Supabase is not configured for server-side queries.",
+    userMessage: "Supabase no esta configurado.",
+    correlationId: apiContext.correlationId,
+    recoverable: true,
+    executionMode: "provider",
+    syncStatus: "failed"
+  }), apiContext, 503);
 
   try {
     const supabase = await factory();
-    const artifact = await loadSupabaseArtifact(supabase, parsed.data);
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) {
+      recordAuditEvent({
+        action: "permission.denied",
+        actorId: "anonymous",
+        actorType: "system",
+        resourceType: "dataset_version",
+        resourceId: parsed.query.datasetVersionId,
+        result: "denied",
+        reason: "auth_missing",
+        correlationId: apiContext.correlationId
+      });
+      return apiErrorResponse(new DomainError({
+        code: "permission_denied",
+        message: authError?.message ?? "Missing authenticated Supabase user.",
+        userMessage: "Debes iniciar sesion para ejecutar consultas server-side.",
+        correlationId: apiContext.correlationId,
+        recoverable: false,
+        executionMode: "provider",
+        syncStatus: "failed"
+      }), apiContext, 401);
+    }
+    const artifact = await loadSupabaseArtifact(supabase, parsed);
     const repository = new InMemoryAnalyticalArtifactRepository();
     repository.save(artifact);
     const service = new GovernedAnalyticalQueryService(repository);
-    if (parsed.data.kind === "aggregate") {
-      const result = await service.execute(parsed.data.query, { tenantId: "supabase", userId: "authenticated-user" });
+    if (parsed.kind === "aggregate") {
+      const result = await service.execute(parsed.query, { tenantId: "supabase", userId: authData.user.id });
       return NextResponse.json({
         kind: "aggregate",
         result: {
           ...result,
           columns: Object.keys(result.rows[0] ?? {}),
           errors: [],
-          executedQuerySummary: querySummary(parsed.data),
+          executedQuerySummary: querySummary(parsed),
           source: result.metadata.cache === "miss" ? "supabase" : "cache"
         }
-      });
+      }, { headers: { "x-correlation-id": apiContext.correlationId } });
     }
-    const result = await service.executeTable(parsed.data.query, { tenantId: "supabase", userId: "authenticated-user" });
+    const result = await service.executeTable(parsed.query, { tenantId: "supabase", userId: authData.user.id });
     return NextResponse.json({
       kind: "table",
       result: {
         ...result,
-        columns: parsed.data.query.columns,
+        columns: parsed.query.columns,
         errors: [],
-        executedQuerySummary: querySummary(parsed.data),
+        executedQuerySummary: querySummary(parsed),
         source: "supabase"
       }
-    });
+    }, { headers: { "x-correlation-id": apiContext.correlationId } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "No se pudo ejecutar la consulta." }, { status: 500 });
+    return apiErrorResponse(error, apiContext, 500);
   }
 }

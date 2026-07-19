@@ -42,6 +42,7 @@ import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { nameFromFile } from "@/lib/utils/name-from-file";
 import { buildPublicDashboardSnapshot, publicShareScopes } from "@/lib/share/public-snapshot";
+import { assertLocalBypassAllowed } from "@/lib/security/environment";
 
 export function localModeWarning() {
   return "Supabase no esta configurado. Sandbox local en memoria; los datos sensibles no se guardan en storage del navegador.";
@@ -114,6 +115,7 @@ export async function persistParsedDataset({ file, parsed, idempotencyKey }: Par
   const identity = await buildDatasetImportIdentity({ parsed, selectedSheet: sheet, rows, profile, idempotencyKey });
   const configured = isSupabaseConfigured();
   const auth = await getCurrentAuthState();
+  assertLocalBypassAllowed({ supabaseConfigured: configured, authenticatedUserId: auth.user?.id });
 
   if (!configured || !auth.user) {
     const localVersion = transitionDatasetVersion(
@@ -215,6 +217,7 @@ export async function persistParsedDataset({ file, parsed, idempotencyKey }: Par
 
 export async function persistDashboard(payload: PersistedDashboardPayload, projectId?: string): Promise<DashboardPersistResult> {
   const auth = await getCurrentAuthState();
+  assertLocalBypassAllowed({ supabaseConfigured: isSupabaseConfigured(), authenticatedUserId: auth.user?.id });
   const spec = {
     ...payload.spec,
     datasetId: payload.datasetId ?? payload.spec.datasetId,
@@ -238,6 +241,7 @@ export async function persistDashboard(payload: PersistedDashboardPayload, proje
 
 export async function updatePersistedDashboard(dashboardId: string, spec: DashboardSpec, viewState: DashboardViewState, rows?: DataRow[], profile?: DatasetProfile) {
   const auth = await getCurrentAuthState();
+  assertLocalBypassAllowed({ supabaseConfigured: isSupabaseConfigured(), authenticatedUserId: auth.user?.id });
   if (!isSupabaseConfigured() || !auth.user) {
     saveLocalDashboard(spec, viewState, rows, profile);
     return {
@@ -293,6 +297,8 @@ export async function persistShareLink(input: {
   password?: string;
   origin: string;
 }): Promise<SharePersistResult> {
+  const auth = await getCurrentAuthState();
+  assertLocalBypassAllowed({ supabaseConfigured: isSupabaseConfigured(), authenticatedUserId: auth.user?.id });
   const token = createShareLinkToken();
   const scopes = publicShareScopes({ allowFilters: input.allowFilters, allowDownload: input.allowDownload });
   const snapshot = buildPublicDashboardSnapshot({ dashboard: input.dashboard, viewState: input.viewState, rows: input.rows });

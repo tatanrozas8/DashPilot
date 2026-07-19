@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { datasetProfileSchema, dashboardSpecSchema, presentationSpecSchema } from "@/lib/validation/schemas";
 import { buildCopilotPrompt, copilotOutputJsonSchema, createMockCopilotResponse, parseCopilotProviderOutput, type CopilotRequestContext } from "@/lib/ai/copilot-service";
 import { DomainError, createCorrelationId, logDomainError, publicDomainError, toDomainError } from "@/lib/observability/domain-error";
+import { apiErrorResponse, createApiRequestContext, enforceApiRateLimit, readJsonBody } from "@/lib/security/api";
+import { apiRateLimitRules } from "@/lib/security/rate-limit";
+import { recordAuditEvent } from "@/lib/observability/audit";
 
 const PROVIDER_TIMEOUT_MS = 15_000;
 
@@ -41,13 +44,29 @@ function parseContext(raw: unknown): CopilotRequestContext | null {
 }
 
 export async function POST(request: Request) {
+  const apiContext = createApiRequestContext(request, "api/copilot");
+  const rateLimit = enforceApiRateLimit(request, "copilot", apiRateLimitRules.copilot, apiContext);
+  if (rateLimit) {
+    recordAuditEvent({
+      action: "rate_limit.hit",
+      actorId: "anonymous",
+      actorType: "system",
+      resourceType: "api_route",
+      resourceId: "api/copilot",
+      result: "denied",
+      reason: "rate_limit",
+      correlationId: apiContext.correlationId
+    });
+    return rateLimit;
+  }
   let rawBody: unknown;
   try {
-    rawBody = await request.json();
+    rawBody = await readJsonBody(request, apiContext);
   } catch (error) {
     const domainError = toDomainError(error, {
       code: "validation_failed",
       fallbackMessage: "Solicitud invalida.",
+      correlationId: apiContext.correlationId,
       recoverable: false,
       executionMode: "provider",
       syncStatus: "failed"
@@ -60,6 +79,7 @@ export async function POST(request: Request) {
       code: "validation_failed",
       message: "La solicitud del Copiloto no coincide con el contrato esperado.",
       userMessage: "Solicitud invalida.",
+      correlationId: apiContext.correlationId,
       recoverable: false,
       executionMode: "provider",
       syncStatus: "failed"
@@ -70,7 +90,18 @@ export async function POST(request: Request) {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) {
     const correlationId = createCorrelationId("ai_local");
-    return NextResponse.json({ ...createMockCopilotResponse(context), executionMode: "deterministic", correlationId });
+    recordAuditEvent({
+      action: "copilot.action.execute",
+      actorId: "local-user",
+      actorType: "user",
+      resourceType: "dashboard",
+      resourceId: context.dashboardSpec.id,
+      result: "success",
+      reason: "deterministic_fallback",
+      correlationId,
+      metadata: { mode: "deterministic", widgetCount: context.dashboardSpec.widgets.length }
+    });
+    return NextResponse.json({ ...createMockCopilotResponse(context), executionMode: "deterministic", correlationId }, { headers: { "x-correlation-id": correlationId } });
   }
 
   const controller = new AbortController();
@@ -101,6 +132,7 @@ export async function POST(request: Request) {
         code: "ai_provider_unavailable",
         message: `Proveedor IA respondio HTTP ${response.status}.`,
         userMessage: "El proveedor de IA no esta disponible. No se aplicaron cambios.",
+        correlationId: apiContext.correlationId,
         executionMode: "provider",
         syncStatus: "failed"
       });
@@ -116,6 +148,7 @@ export async function POST(request: Request) {
       const domainError = toDomainError(error, {
         code: "ai_provider_invalid_response",
         fallbackMessage: "El proveedor de IA devolvio una respuesta invalida. No se aplicaron cambios.",
+        correlationId: apiContext.correlationId,
         executionMode: "provider",
         syncStatus: "failed"
       });
@@ -128,23 +161,36 @@ export async function POST(request: Request) {
         code: "ai_provider_invalid_response",
         message: "La respuesta del proveedor no paso validacion estructurada.",
         userMessage: "El proveedor de IA devolvio una respuesta invalida. No se aplicaron cambios.",
+        correlationId: apiContext.correlationId,
         executionMode: "provider",
         syncStatus: "failed"
       });
       logDomainError(domainError, "copilot.provider.schema");
       return NextResponse.json({ error: publicDomainError(domainError) }, { status: 502 });
     }
-    return NextResponse.json({ ...result, executionMode: "provider", correlationId: createCorrelationId("ai") });
+    recordAuditEvent({
+      action: "copilot.action.execute",
+      actorId: "provider-user",
+      actorType: "user",
+      resourceType: "dashboard",
+      resourceId: context.dashboardSpec.id,
+      result: "success",
+      reason: "provider",
+      correlationId: apiContext.correlationId,
+      metadata: { mode: "provider", widgetCount: context.dashboardSpec.widgets.length }
+    });
+    return NextResponse.json({ ...result, executionMode: "provider", correlationId: apiContext.correlationId }, { headers: { "x-correlation-id": apiContext.correlationId } });
   } catch (error) {
     const aborted = error instanceof Error && error.name === "AbortError";
     const domainError = toDomainError(error, {
       code: aborted ? "ai_provider_timeout" : "ai_provider_unavailable",
       fallbackMessage: aborted ? "El proveedor de IA excedio el tiempo de espera. No se aplicaron cambios." : "No se pudo contactar al proveedor de IA. No se aplicaron cambios.",
+      correlationId: apiContext.correlationId,
       executionMode: "provider",
       syncStatus: "failed"
     });
     logDomainError(domainError, "copilot.provider.fetch");
-    return NextResponse.json({ error: publicDomainError(domainError) }, { status: aborted ? 504 : 502 });
+    return apiErrorResponse(domainError, apiContext, aborted ? 504 : 502);
   } finally {
     clearTimeout(timeout);
   }

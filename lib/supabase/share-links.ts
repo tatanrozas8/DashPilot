@@ -10,6 +10,10 @@ import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { shareLinkSchema } from "@/lib/validation/schemas";
 import type { DashboardFilter } from "@/types/dashboard";
+import { assertLocalBypassAllowed } from "@/lib/security/environment";
+import { createCorrelationId } from "@/lib/observability/domain-error";
+import { recordAuditEvent } from "@/lib/observability/audit";
+import { insertAuditEvent } from "@/lib/supabase/audit";
 
 export function createShareLinkToken() {
   return createPublicShareToken();
@@ -38,8 +42,20 @@ export async function createShareLink(link: ShareLink, options: { password?: str
   const passwordHash = options.password && passwordSalt ? await hashPublicSharePassword(options.password, passwordSalt) : undefined;
   const supabase = getSupabaseBrowserClient();
   const auth = await getCurrentAuthState();
+  assertLocalBypassAllowed({ supabaseConfigured: auth.configured, authenticatedUserId: auth.user?.id });
   if (!supabase || !auth.user) {
     localShareLinks.set(tokenHash, { link, snapshot: options.snapshot, payload: options.payload, passwordHash, passwordSalt });
+    recordAuditEvent({
+      action: "share.create",
+      actorId: "local-user",
+      actorType: "user",
+      resourceType: "dashboard",
+      resourceId: link.dashboardId,
+      result: "success",
+      reason: "local_share",
+      correlationId: createCorrelationId("share"),
+      metadata: { access: link.access, allowDownload: link.allowDownload, allowFilters: link.allowFilters }
+    });
     return { mode: "local" as const, token: link.token };
   }
 
@@ -92,6 +108,20 @@ export async function createShareLink(link: ShareLink, options: { password?: str
       const rollbackMessage = revokeError ? ` Reversion fallida: ${revokeError.message}` : "";
       throw new Error(`No se pudo guardar el snapshot publico: ${snapshotError.message}.${rollbackMessage}`);
     }
+  }
+  try {
+    await insertAuditEvent(supabase, {
+      userId: auth.user.id,
+      entityType: "dashboard",
+      entityId: link.dashboardId,
+      action: "share.create",
+      result: "success",
+      reason: "share_link_created",
+      correlationId: createCorrelationId("share"),
+      metadata: { access: link.access, allowDownload: link.allowDownload, allowFilters: link.allowFilters, scopes }
+    });
+  } catch (auditError) {
+    console.warn("[DashPilot] share audit unavailable", auditError);
   }
   return { mode: "supabase" as const, token: link.token };
 }
@@ -147,6 +177,16 @@ export async function disableShareLink(token: string) {
   if (!supabase) {
     const current = localShareLinks.get(tokenHash);
     if (current) localShareLinks.set(tokenHash, { ...current, link: { ...current.link, isActive: false } });
+    recordAuditEvent({
+      action: "share.revoke",
+      actorId: "local-user",
+      actorType: "user",
+      resourceType: "share_link",
+      resourceId: tokenHash.slice(0, 16),
+      result: "success",
+      reason: "local_revoke",
+      correlationId: createCorrelationId("share")
+    });
     return;
   }
   const { error } = await supabase.from("share_links").update({ is_active: false, revoked_at: new Date().toISOString() }).eq("token_hash", tokenHash);

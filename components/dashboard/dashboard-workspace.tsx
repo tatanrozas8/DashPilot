@@ -14,6 +14,9 @@ import { loadPersistedDashboard, updatePersistedDashboard } from "@/lib/data-acc
 import { completeExportJob, createExportRequest, createQueuedExportJob, dashboardExportRevisionId, failExportJob, transitionExportJob, type ExportFormat, type ExportJob } from "@/lib/export/contracts";
 import { downloadExportArtifact } from "@/lib/export/download";
 import { generateDashboardExport, generatePresentationExport } from "@/lib/export/renderers";
+import { createDirectDownloadStorageRecord } from "@/lib/export/storage-controls";
+import { createCorrelationId } from "@/lib/observability/domain-error";
+import { recordAuditEvent } from "@/lib/observability/audit";
 import { getQueryableRowsForExport } from "@/lib/query-service/client";
 import { useDashPilotStore } from "@/lib/store/app-store";
 import { cn } from "@/lib/utils";
@@ -112,6 +115,19 @@ export function DashboardWorkspace() {
       setExportJob(job);
       downloadExportArtifact(artifact);
       setExportJob(completeExportJob(job, artifact.result));
+      createDirectDownloadStorageRecord(completeExportJob(job, artifact.result));
+      recordAuditEvent({
+        action: "export.create",
+        actorId: "local-user",
+        actorType: "user",
+        resourceType: "dashboard",
+        resourceId: activeDashboardId || dashboard.id,
+        result: "success",
+        reason: `private_${format}`,
+        correlationId: createCorrelationId("export"),
+        revisionId: request.dashboardRevisionId,
+        metadata: { format, byteLength: artifact.result.byteLength, storageMode: "direct-download" }
+      });
       setExportOpen(false);
       toast(`${artifact.fileName} generado y descargado.`);
     } catch (error) {
@@ -148,6 +164,19 @@ export function DashboardWorkspace() {
       setExportJob(job);
       downloadExportArtifact(artifact);
       setExportJob(completeExportJob(job, artifact.result));
+      createDirectDownloadStorageRecord(completeExportJob(job, artifact.result));
+      recordAuditEvent({
+        action: "export.create",
+        actorId: "local-user",
+        actorType: "user",
+        resourceType: "presentation",
+        resourceId: presentation.id,
+        result: "success",
+        reason: "private_pptx",
+        correlationId: createCorrelationId("export"),
+        revisionId: request.presentationRevisionId,
+        metadata: { format: "pptx", byteLength: artifact.result.byteLength, storageMode: "direct-download" }
+      });
       setExportOpen(false);
       toast(`${artifact.fileName} generado y descargado.`);
     } catch (error) {

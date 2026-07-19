@@ -43,4 +43,49 @@ describe("copilot UX store flow", () => {
     expect(state.pendingCopilotPlan?.plan.selfCheck?.passed).toBe(true);
     expect(state.dashboard.widgets.some((widget) => widget.config.generatedBy === "copilot-bi")).toBe(false);
   });
+
+  it("answers scalar analytical questions directly with evidence", async () => {
+    act(() => {
+      useDashPilotStore.getState().loadDemo();
+      useDashPilotStore.getState().clearSelectedTarget();
+    });
+
+    await act(async () => {
+      await useDashPilotStore.getState().sendPrompt("Cual es el total de ventas?");
+    });
+
+    const state = useDashPilotStore.getState();
+    const assistant = state.messages.at(-1);
+    expect(state.copilotStatus).toBe("verified");
+    expect(state.pendingCopilotPlan).toBeUndefined();
+    expect(assistant?.analyticalAnswer?.valueLabel).toMatch(/\$|[0-9]/);
+    expect(assistant?.analyticalAnswer?.evidenceId).toContain("evidence_");
+    expect(state.copilotEvidence.join(" ")).toContain("Respuesta analitica");
+  });
+
+  it("persists BI blueprint pages through the command bus and undoes them", async () => {
+    act(() => {
+      useDashPilotStore.getState().loadDemo();
+      useDashPilotStore.getState().clearSelectedTarget();
+    });
+
+    await act(async () => {
+      await useDashPilotStore.getState().sendPrompt("Disenar dashboard ejecutivo completo para gerencia");
+    });
+
+    expect(useDashPilotStore.getState().dashboard.pages).toBeUndefined();
+
+    act(() => {
+      useDashPilotStore.getState().applyPendingCopilotPlan();
+    });
+
+    expect(useDashPilotStore.getState().dashboard.pages?.map((page) => page.title)).toEqual(["Vista ejecutiva", "Vista operacional", "Detalle"]);
+    expect(useDashPilotStore.getState().copilotDiff.some((entry) => entry.path === "dashboard.pages")).toBe(true);
+
+    act(() => {
+      useDashPilotStore.getState().undoCopilotChange();
+    });
+
+    expect(useDashPilotStore.getState().dashboard.pages).toBeUndefined();
+  });
 });

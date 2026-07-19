@@ -45,6 +45,83 @@ describe("DashboardRenderer", () => {
     expect(screen.queryByText(/Accion aplicada/)).not.toBeInTheDocument();
   });
 
+  it("renders persisted dashboard pages when the spec has DashboardPage metadata", () => {
+    useDashPilotStore.getState().loadDemo();
+    const dashboard = useDashPilotStore.getState().dashboard;
+    useDashPilotStore.setState({
+      dashboard: {
+        ...dashboard,
+        pages: [
+          { id: "page_executive", title: "Vista ejecutiva", order: 0, layout: { mode: "grid_12", columns: 12 }, filters: [], widgetIds: ["kpi_sales"] },
+          { id: "page_operational", title: "Vista operacional", order: 1, layout: { mode: "grid_12", columns: 12 }, filters: [], widgetIds: ["sales_by_region"] },
+          { id: "page_detail", title: "Detalle", order: 2, layout: { mode: "grid_12", columns: 12 }, filters: [], widgetIds: [] }
+        ]
+      }
+    });
+
+    render(
+      <ToastProvider>
+        <DashboardRenderer />
+      </ToastProvider>
+    );
+
+    expect(screen.getByRole("heading", { name: "Vista ejecutiva" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Vista operacional" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Detalle" })).toBeInTheDocument();
+  });
+
+  it("renders direct analytical answers with highlighted evidence", () => {
+    useDashPilotStore.getState().loadDemo();
+    useDashPilotStore.setState({
+      messages: [{
+        id: "answer_1",
+        role: "assistant",
+        content: "El total de Ventas es $100K.",
+        createdAt: "2026-07-19T00:00:00.000Z",
+        analyticalAnswer: {
+          answer: "El total de Ventas es $100K.",
+          valueLabel: "$100K",
+          metric: "Ventas",
+          period: "Todo el dataset disponible",
+          periodInferred: true,
+          filters: [],
+          evidenceId: "evidence_demo_qa_total",
+          context: "Consulta gobernada por QueryService."
+        }
+      }]
+    });
+
+    render(<CopilotPanel />);
+
+    expect(screen.getByText("$100K")).toBeInTheDocument();
+    expect(screen.getByText(/Evidencia: evidence_demo_qa_total/)).toBeInTheDocument();
+    expect(screen.getByText(/Periodo: Todo el dataset disponible \(inferido\)/)).toBeInTheDocument();
+  });
+
+  it("does not emit duplicate-key warnings for Fecha/fecha chips", () => {
+    useDashPilotStore.getState().loadDemo();
+    const profile = useDashPilotStore.getState().profile;
+    const duplicated = {
+      ...profile,
+      columns: [
+        ...profile.columns,
+        {
+          ...profile.columns[0]!,
+          originalName: "fecha",
+          displayName: "fecha",
+          normalizedName: profile.columns[0]!.normalizedName
+        }
+      ]
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    useDashPilotStore.setState({ profile: duplicated, datasetProfile: duplicated });
+
+    render(<CopilotPanel />);
+
+    expect(errorSpy.mock.calls.some((call) => call.some((part) => String(part).includes("Encountered two children with the same key")))).toBe(false);
+    errorSpy.mockRestore();
+  });
+
   it("resolves bar chart renderer orientation from visualConfig and legacy horizontal flag", () => {
     const base: DashboardWidget = {
       id: "bar",

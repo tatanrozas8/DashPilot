@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildCopilotContext } from "@/lib/ai/context-builder";
 import { toGovernedProviderContext } from "@/lib/copilot-command-bus/ai-gateway";
 import { createCopilotPlan, resolveCopilotContext } from "@/lib/copilot-command-bus";
-import { planCopilotBi, resolveBusinessIntent, buildDatasetIntelligence, resolveClarification, recommendVisualizations, validateBiPlan } from "@/lib/copilot-bi";
+import { formatAnalyticalAnswer, planAnalyticalAnswer, planCopilotBi, resolveBusinessIntent, buildDatasetIntelligence, resolveClarification, recommendVisualizations, validateBiPlan } from "@/lib/copilot-bi";
+import { executeAggregateQuery, registerQueryableDataset } from "@/lib/query-service/client";
 import { generateDashboardSpec } from "@/lib/dashboard-spec/generate-dashboard-spec";
 import { demoRows } from "@/lib/data/demo-dataset";
 import { profileDataset } from "@/lib/profiling/profile-dataset";
@@ -80,6 +81,59 @@ describe("copilot BI expert layer", () => {
     expect(clarification.options.length).toBeGreaterThan(0);
   });
 
+  it("plans and formats direct scalar analytical answers with evidence", async () => {
+    const datasetProfile = profileDataset(demoRows, "ventas_demo.csv");
+    const semanticModel = inferSemanticLayer(datasetProfile, demoRows);
+    const datasetVersionId = datasetProfile.datasetVersionId ?? datasetProfile.id;
+    registerQueryableDataset({ datasetId: datasetProfile.id, profile: datasetProfile, rows: demoRows });
+
+    const plan = planAnalyticalAnswer({
+      prompt: "Cual es el total de ventas?",
+      datasetProfile,
+      semanticModel,
+      rows: demoRows,
+      datasetVersionId
+    });
+
+    expect(plan.handled).toBe(true);
+    expect(plan.needsClarification).toBe(false);
+    if (plan.handled && !plan.needsClarification) {
+      const result = await executeAggregateQuery({ datasetId: datasetProfile.id, context: "local", query: plan.query });
+      const answer = formatAnalyticalAnswer(plan, result);
+
+      expect(answer.answer).toMatch(/total/i);
+      expect(answer.valueLabel).toMatch(/\$|[0-9]/);
+      expect(answer.evidenceId).toContain("evidence_");
+      expect(answer.periodInferred).toBe(true);
+      expect(answer.context).toMatch(/QueryService|Cobertura/i);
+    }
+  });
+
+  it("asks for clarification before answering ambiguous analytical profitability", () => {
+    const datasetProfile = profileDataset(demoRows, "ventas_demo.csv");
+    const isMarginOrCost = (value: string) => /margen|costo|cost/i.test(value);
+    const stripped = {
+      ...datasetProfile,
+      columns: datasetProfile.columns.filter((column) => !isMarginOrCost(`${column.normalizedName} ${column.originalName} ${column.displayName}`)),
+      detectedMetricColumns: datasetProfile.detectedMetricColumns.filter((field) => !isMarginOrCost(field))
+    };
+    const semanticModel = inferSemanticLayer(stripped, []);
+    const plan = planAnalyticalAnswer({
+      prompt: "Cual fue la rentabilidad?",
+      datasetProfile: stripped,
+      semanticModel,
+      rows: demoRows,
+      datasetVersionId: stripped.datasetVersionId ?? stripped.id
+    });
+
+    expect(plan.handled).toBe(true);
+    expect(plan.needsClarification).toBe(true);
+    if (plan.handled && plan.needsClarification) {
+      expect(plan.clarification.question).toMatch(/rentabilidad/i);
+      expect(plan.clarification.options.length).toBeGreaterThan(0);
+    }
+  });
+
   it("builds a full dashboard blueprint with widgets, table, insight, evidence and self-check", () => {
     const datasetProfile = profileDataset(demoRows, "ventas_demo.csv");
     const semanticModel = inferSemanticLayer(datasetProfile, demoRows);
@@ -95,6 +149,7 @@ describe("copilot BI expert layer", () => {
     expect(plan.blueprint?.pages[0].widgets.some((widget) => widget.type === "kpi_card")).toBe(true);
     expect(plan.actions.some((action) => action.type === "add_widget" && action.widget.type === "table")).toBe(true);
     expect(plan.actions.some((action) => action.type === "add_widget" && action.widget.type === "insight_text")).toBe(true);
+    expect(plan.actions.some((action) => action.type === "set_dashboard_pages" && action.pages?.length === 3)).toBe(true);
     expect(plan.evidence.join(" ")).toContain("evidence_");
     expect(plan.selfCheck.passed).toBe(true);
     expect(validateBiPlan({ intelligence: plan.intelligence, actions: plan.actions }).passed).toBe(true);
@@ -107,9 +162,33 @@ describe("copilot BI expert layer", () => {
     expect(plan.needsClarification).toBe(false);
     expect(plan.blueprint?.title).toMatch(/Ejecutivo|Ventas/);
     expect(plan.actions.some((action) => action.envelope.tool === "dashboard.createWidget")).toBe(true);
+    expect(plan.actions.some((action) => action.envelope.tool === "dashboard.setPages")).toBe(true);
     expect(plan.actions.some((action) => action.envelope.tool === "dashboard.updateDashboardSubtitle")).toBe(true);
     expect(plan.expectedDiff.length).toBeGreaterThan(0);
     expect(plan.selfCheck?.passed).toBe(true);
+  });
+
+  it("routes selected widget dimension corrections to chart planning instead of BI blueprint clarification", () => {
+    const ctx = context();
+    const target = ctx.dashboardSpec.widgets.find((widget) => /region/i.test(widget.title));
+    if (!target) throw new Error("Missing region widget in demo dashboard.");
+    const selected: ResolvedCopilotContext = {
+      ...ctx,
+      scope: "widget",
+      selectedTarget: { type: "widget", id: target.id, title: target.title },
+      viewState: {
+        ...ctx.viewState,
+        selectedTargetType: "widget",
+        selectedTargetId: target.id,
+        selectedTargetTitle: target.title,
+        selectedTargetSpec: target
+      }
+    };
+
+    const plan = createCopilotPlan(selected, "Cambialo a ventas por canal.");
+
+    expect(plan.needsClarification).toBe(false);
+    expect(plan.actions.some((action) => action.envelope.tool === "dashboard.updateWidget" || action.envelope.tool === "dashboard.updateWidgetQuery")).toBe(true);
   });
 
   it("does not send raw rows to the governed provider context by default", () => {

@@ -190,6 +190,7 @@ export function dashboardRevisionToDashboardSpec(document: DashboardDocument, re
     datasetVersionId: revision.datasetVersionId,
     semanticModelId: revision.semanticModelId,
     globalFilters: document.dashboard.globalFilters,
+    pages: revision.pages,
     widgets,
     createdAt: document.dashboard.createdAt,
     updatedAt: document.dashboard.updatedAt

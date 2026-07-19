@@ -6,6 +6,7 @@ import { getCurrentAuthState } from "@/lib/supabase/auth";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { dashboardSpecSchema } from "@/lib/validation/schemas";
 import { getDatasetProfile } from "@/lib/supabase/datasets";
+import { dashboardDocumentToPersistedPayload, loadDashboardDocumentV2, persistDashboardDocumentV2 } from "@/lib/supabase/dashboard-documents";
 
 const localDashboards = new Map<string, { spec: DashboardSpec; viewState: DashboardViewState; rows?: DataRow[]; profile?: DatasetProfile }>();
 
@@ -40,6 +41,15 @@ export async function createDashboardSpec(spec: DashboardSpec, viewState: Dashbo
   if (error) throw new Error(`No se pudo guardar el dashboard: ${error.message}`);
 
   await createDashboardVersion(data.id as string, spec, "version inicial");
+  await persistDashboardDocumentV2(supabase, {
+    dashboardId: data.id as string,
+    projectId,
+    userId: auth.user.id,
+    spec,
+    viewState,
+    reason: "version inicial",
+    source: "manual"
+  });
   return { mode: "supabase" as const, dashboardId: data.id as string };
 }
 
@@ -47,6 +57,16 @@ export async function getDashboardById(dashboardId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) {
     return localDashboards.get(dashboardId) ?? null;
+  }
+  try {
+    const documentPayload = await loadDashboardDocumentV2(supabase, dashboardId);
+    if (documentPayload) {
+      const payload = dashboardDocumentToPersistedPayload(documentPayload);
+      const profile = await getDatasetProfile(payload.spec.datasetId, payload.spec.datasetVersionId);
+      return { ...payload, profile: profile ?? undefined };
+    }
+  } catch (error) {
+    console.warn("[DashPilot] dashboard v2 load fallback", error);
   }
   const { data, error } = await supabase.from("dashboard_specs").select("*").eq("id", dashboardId).maybeSingle();
   if (error) throw new Error(`No se pudo cargar el dashboard: ${error.message}`);
@@ -64,16 +84,30 @@ export async function getDashboardById(dashboardId: string) {
 export async function updateDashboardSpec(dashboardId: string, spec: DashboardSpec, viewState: DashboardViewState) {
   dashboardSpecSchema.parse(spec);
   const supabase = getSupabaseBrowserClient();
+  const auth = await getCurrentAuthState();
   if (!supabase) {
     saveLocalDashboard(spec, viewState);
     return { mode: "local" as const, dashboardId: spec.id };
   }
+  if (!auth.user) throw new Error("Debes iniciar sesion para actualizar este dashboard.");
+  const { data: current, error: currentError } = await supabase.from("dashboard_specs").select("project_id").eq("id", dashboardId).maybeSingle();
+  if (currentError) throw new Error(`No se pudo validar ownership del dashboard: ${currentError.message}`);
+  if (!current?.project_id) throw new Error("No existe el dashboard solicitado.");
   const { error } = await supabase
     .from("dashboard_specs")
     .update({ spec_json: spec, view_state_json: viewState, title: spec.title, description: spec.subtitle, dataset_version_id: spec.datasetVersionId })
     .eq("id", dashboardId);
   if (error) throw new Error(`No se pudo actualizar el dashboard: ${error.message}`);
   await createDashboardVersion(dashboardId, spec, "actualizacion manual");
+  await persistDashboardDocumentV2(supabase, {
+    dashboardId,
+    projectId: current.project_id as string,
+    userId: auth.user.id,
+    spec,
+    viewState,
+    reason: "actualizacion manual",
+    source: "manual"
+  });
   return { mode: "supabase" as const, dashboardId };
 }
 
